@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lab 2: Netmiko SSH Config Fetch + P.E.N.E. Prompt Parsing
+Lab 2: Netmiko SSH Config Fetch + RACE Prompt Parsing
 AI Networking Workshop
 
 WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
@@ -8,7 +8,7 @@ POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
 
 What this shows:
 - Fetch running configs and show output via SSH (Netmiko)
-- Apply P.E.N.E. structured prompts to real device output
+- Apply RACE structured prompts to real device output
 - Get clean, machine-readable JSON back from raw CLI text
 """
 
@@ -195,12 +195,12 @@ def call_llm(prompt: str, model: str = "llama3.2:3b", temperature: float = 0.2) 
 
 
 # ============================================================================
-# P.E.N.E. PROMPTS applied to real (or mock) SSH data
+# RACE PROMPTS applied to real (or mock) SSH data
 # ============================================================================
 
 def parse_interfaces_pene(raw_config: str) -> str:
     """
-    P.E.N.E. prompt to extract all interfaces from a running-config block.
+    RACE prompt to extract all interfaces from a running-config block.
 
     Returns JSON array of interface objects.
     """
@@ -252,7 +252,7 @@ Output JSON array:"""
 
 def audit_disabled_interfaces_pene(device: str, raw_status: str) -> str:
     """
-    P.E.N.E. prompt to identify disabled/problematic interfaces and suggest actions.
+    RACE prompt to identify disabled/problematic interfaces and suggest actions.
     """
     prompt = f"""You are a senior network engineer auditing a data-center switch.
 
@@ -308,7 +308,7 @@ Output JSON:"""
 def demo_config_parser():
     mode = "MOCK" if USE_MOCK else "LIVE SSH"
     print(f"\n{'='*70}")
-    print(f"P.E.N.E. CONFIG PARSER  [{mode}]")
+    print(f"RACE CONFIG PARSER  [{mode}]")
     print(f"{'='*70}")
 
     for device in ["spine1", "leaf1", "leaf2"]:
@@ -350,7 +350,7 @@ def demo_interface_audit():
 
 if __name__ == "__main__":
     mode = "MOCK DATA (no real devices needed)" if USE_MOCK else "LIVE SSH — real devices"
-    print("🎯 P.E.N.E. + Netmiko SSH  |  AI Networking Workshop")
+    print("🎯 RACE + Netmiko SSH  |  AI Networking Workshop")
     print("=" * 70)
     print(f"Mode: {mode}")
     print("To use real devices: set USE_MOCK = False and update DEVICE_CONFIG")
@@ -361,7 +361,7 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 70)
     print("Key takeaways:")
-    print("  1. Same P.E.N.E. prompts work on real device output — no changes needed")
+    print("  1. Same RACE prompts work on real device output — no changes needed")
     print("  2. fetch_via_ssh() is a production-ready wrapper around Netmiko")
     print("  3. Structured prompts + real data = reliable JSON automation")
     print("  4. Flip USE_MOCK = False when real devices are available")
