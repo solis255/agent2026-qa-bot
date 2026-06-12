@@ -36,7 +36,7 @@ docs/chapter-assets/
 
 ### Chapter 3: Prompt engineering for network automation
 
-- P.E.N.E. worksheet
+- RACE worksheet
 - Prompt scorecard
 - Before/after prompt examples
 
