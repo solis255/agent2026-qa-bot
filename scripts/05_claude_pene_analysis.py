@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Analyze network data with Claude using the P.E.N.E. framework.
+Analyze network data with Claude using the RACE framework.
 
-P.E.N.E.
-- Persona & Purpose
-- Examples
-- kNowledge & coNstraints
-- Evaluation
+RACE
+  R - Role
+  A - Anchors
+  C - Context
+  E - Expected output
 """
 
 import argparse
@@ -56,7 +56,7 @@ def analyze_network_output(input_file: Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Analyze network output with Claude and P.E.N.E.")
+    parser = argparse.ArgumentParser(description="Analyze network output with Claude and RACE")
     parser.add_argument("input_file", help="Path to a network output file, for example examples/interface_output.json")
     args = parser.parse_args()
 
