@@ -90,7 +90,7 @@ python3 labs/lab4-agentic/agentic_network_bot_ollama.py
 - Why local models (Ollama) work great
 
 **Module 2: Prompt Engineering** (15 min)
-- The P.E.N.E. framework
+- The RACE framework
 - Persona, Examples, kNowledge, Evaluation
 - Production prompt templates
 
@@ -118,7 +118,7 @@ python3 labs/lab4-agentic/agentic_network_bot_ollama.py
 - Compare models (llama3.2 vs llama3.1)
 
 **Lab 2: Prompt Engineering** (25 min)
-- Apply P.E.N.E. framework
+- Apply RACE framework
 - Build config parser prompts
 - Create alert triage prompts
 - Test and iterate
@@ -225,7 +225,7 @@ Perfect for testing autonomous troubleshooting!
 By the end of this workshop, you will be able to:
 
 1. **Explain LLM fundamentals** - How tokenization, attention, and sampling work
-2. **Write production prompts** - Using P.E.N.E. framework for consistent results
+2. **Write production prompts** - Using RACE framework for consistent results
 3. **Build stateful chatbots** - Managing conversation history and context
 4. **Create autonomous agents** - Implementing tool calling with structured prompts
 5. **Deploy to production** - Migration path from mock to real devices
@@ -411,7 +411,7 @@ A workshop-ready starter repo for building your first AI-powered network automat
 
 The goal is simple:
 
-> Start with Python. Talk to real network devices. Use Claude to reason over network data. Use the P.E.N.E. framework to keep the model grounded. Wrap the useful network functions as MCP tools.
+> Start with Python. Talk to real network devices. Use Claude to reason over network data. Use the RACE framework to keep the model grounded. Wrap the useful network functions as MCP tools.
 
 This repo is designed for a PacketCoders-style workshop using Containerlab and Arista cEOS.
 
@@ -423,7 +423,7 @@ By the end of the first workshop, you will have:
 
 1. A small Arista cEOS lab running in Containerlab.
 2. Python scripts that connect to the devices and collect network state.
-3. A Claude API example that analyzes network output using the P.E.N.E. framework.
+3. A Claude API example that analyzes network output using the RACE framework.
 4. A read-only MCP server exposing network inspection tools.
 5. A clear foundation for later videos: troubleshooting, pyATS parsing, NetBox intent checks, and safe change workflows.
 
@@ -568,7 +568,7 @@ Get interface status:
 python scripts/04_get_interfaces.py leaf1
 ```
 
-Analyze sample network output with Claude and P.E.N.E.:
+Analyze sample network output with Claude and RACE:
 
 ```bash
 python scripts/05_claude_pene_analysis.py examples/interface_output.json
@@ -663,7 +663,7 @@ That makes the first workshop safer and easier to teach.
 
 ## Suggested Episode 1 Title
 
-**Build Your First AI Network Automation Tool with Python, Claude, P.E.N.E., and MCP**
+**Build Your First AI Network Automation Tool with Python, Claude, RACE, and MCP**
 
 Subtitle:
 
