@@ -1,7 +1,7 @@
 # Prompt Template Library
 ## AI Networking Workshop
 
-Production-ready prompt templates following the P.E.N.E. framework.
+Production-ready prompt templates following the RACE framework.
 
 ---
 
