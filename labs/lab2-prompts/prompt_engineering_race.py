@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Lab 2: Prompt Engineering with P.E.N.E. Framework
+Lab 2: Prompt Engineering with RACE Framework
 AI Networking Workshop
 
 This lab demonstrates how better prompts produce more consistent,
 accurate, and automation-ready JSON output.
 
-P.E.N.E. Framework:
-- Persona & Purpose
-- Examples
-- kNowledge & coNstraints
-- Evaluation
+Role, Anchors, Context, and
+Expected output (RACE) prompt framework.
 """
 
 import json
@@ -202,7 +199,7 @@ def bad_config_parser_prompt() -> str:
 def good_config_parser_prompt(config_text: str) -> str:
     """
     GOOD EXAMPLE:
-    Uses the P.E.N.E. framework to create a structured prompt.
+    Uses the RACE framework to create a structured prompt.
 
     This version is intentionally strict because smaller local models can
     sometimes drift into writing Python code unless we explicitly forbid it.
@@ -343,14 +340,14 @@ GigabitEthernet0/2 is down, line protocol is down
 # ============================================================================
 
 if __name__ == "__main__":
-    print("🎯 P.E.N.E. Prompt Engineering Workshop")
+    print("🎯 RACE Prompt Engineering Workshop")
     print("=" * 70)
-
+    
     print("\nFramework:")
-    print("  P - Persona & Purpose")
-    print("  E - Examples")
-    print("  N - kNowledge & coNstraints")
-    print("  E - Evaluation")
+    print("  R - Role")
+    print("  A - Anchors")
+    print("  C - Context")
+    print("  E - Expected output")
 
     print("\nGoal:")
     print("  Show why vague prompts fail and structured prompts work better")
@@ -362,7 +359,7 @@ if __name__ == "__main__":
     print("\n\n💡 Key Takeaways")
     print("=" * 70)
     print("1. BAD: 'Parse this config' creates inconsistent results.")
-    print("2. GOOD: P.E.N.E. prompts give the model role, task, examples, and constraints.")
+    print("2. GOOD: RACE prompts give the model role, task, examples, and constraints.")
     print("3. Examples are often more powerful than instructions alone.")
     print("4. Automation needs structured output, not pretty paragraphs or Python code.")
     print("5. Always validate LLM output before using it in a workflow.")
