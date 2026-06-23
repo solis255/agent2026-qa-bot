@@ -65,12 +65,12 @@ Use it as a planning guide for keeping the book chapters, workshop labs, and sup
 
 **Primary repo assets**
 
-- `labs/lab2-prompts/prompt_engineering_pene.py`
+- `labs/lab2-prompts/prompt_engineering_race.py`
 - `labs/lab2-prompts/PROMPT_TEMPLATES.md`
 
 **What the repo already supports**
 
-- P.E.N.E. prompt framework.
+- RACE prompt framework.
 - Before/after prompt examples.
 - Config parsing.
 - Alert triage.
