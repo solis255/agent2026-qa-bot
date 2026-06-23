@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab 5 — MCP Network Tools UI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    header {
+      border-bottom: 1px solid #2d3748;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    header h1 { font-size: 1.4rem; color: #63b3ed; }
+    header p  { font-size: 0.85rem; color: #718096; margin-top: 4px; }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      margin-top: 10px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #fc8181;
+    }
+    .dot.connected { background: #68d391; }
+    #status-text { color: #a0aec0; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    .card {
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .card h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #718096;
+      margin-bottom: 12px;
+    }
+
+    label { font-size: 0.85rem; color: #a0aec0; display: block; margin-bottom: 4px; }
+
+    select, input[type="text"] {
+      width: 100%;
+      background: #2d3748;
+      border: 1px solid #4a5568;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      padding: 7px 10px;
+      margin-bottom: 10px;
+      outline: none;
+    }
+    select:focus, input:focus { border-color: #63b3ed; }
+
+    button {
+      width: 100%;
+      padding: 9px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-bottom: 6px;
+    }
+    button:last-child { margin-bottom: 0; }
+    button:hover { opacity: 0.85; }
+    button:active { opacity: 0.7; }
+
+    .btn-blue   { background: #3182ce; color: #fff; }
+    .btn-green  { background: #276749; color: #9ae6b4; }
+    .btn-purple { background: #553c9a; color: #e9d8fd; }
+    .btn-orange { background: #7b341e; color: #fbd38d; }
+    .btn-gray   { background: #2d3748; color: #a0aec0; }
+
+    /* ── Main panel ── */
+    .main { display: flex; flex-direction: column; gap: 16px; }
+
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .results-header h2 { font-size: 0.9rem; color: #a0aec0; }
+
+    #clear-btn {
+      width: auto;
+      padding: 5px 12px;
+      font-size: 0.75rem;
+      background: #2d3748;
+      color: #718096;
+      border-radius: 4px;
+      margin: 0;
+    }
+
+    #results { display: flex; flex-direction: column; gap: 12px; }
+
+    .result-block {
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .result-block .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: #171923;
+      border-bottom: 1px solid #2d3748;
+      font-size: 0.8rem;
+    }
+
+    .result-block .tool-name { color: #63b3ed; font-weight: 600; }
+    .result-block .tool-args { color: #718096; font-family: monospace; }
+    .result-block .ts        { color: #4a5568; font-size: 0.72rem; }
+
+    .result-block pre {
+      padding: 14px;
+      font-family: "Fira Code", "Cascadia Code", monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .result-block.error pre { color: #fc8181; }
+    .result-block.success pre { color: #9ae6b4; }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #4a5568;
+    }
+    .empty-state p { font-size: 0.85rem; margin-top: 6px; }
+
+    .loading { color: #718096; font-size: 0.8rem; padding: 10px 14px; }
+
+    /* Topology diagram */
+    .topo-svg { width: 100%; padding: 14px; }
+    svg text { font-family: -apple-system, sans-serif; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌐 Lab 5 — MCP Network Tools</h1>
+  <p>Interactive UI for the AI Networking Workshop mock network</p>
+  <div class="status-bar">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">Connecting to bridge on localhost:8765…</span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ── Sidebar ── -->
+  <div class="sidebar">
+
+    <div class="card">
+      <h2>Device Tools</h2>
+      <label>Device</label>
+      <select id="device-select">
+        <option value="spine1">spine1</option>
+        <option value="spine2">spine2</option>
+        <option value="leaf1">leaf1</option>
+        <option value="leaf2">leaf2</option>
+      </select>
+      <button class="btn-blue"   onclick="call('status')">Device Status</button>
+      <button class="btn-green"  onclick="call('bgp')">BGP Summary</button>
+    </div>
+
+    <div class="card">
+      <h2>Interface</h2>
+      <label>Device</label>
+      <select id="iface-device">
+        <option value="spine1">spine1</option>
+        <option value="spine2">spine2</option>
+        <option value="leaf1">leaf1</option>
+        <option value="leaf2">leaf2</option>
+      </select>
+      <label>Interface (optional)</label>
+      <input type="text" id="iface-name" placeholder="e.g. Ethernet1">
+      <button class="btn-purple" onclick="call('interface')">Get Interface</button>
+    </div>
+
+    <div class="card">
+      <h2>Ping</h2>
+      <label>Target (hostname or IP)</label>
+      <input type="text" id="ping-target" placeholder="e.g. 192.168.0.11">
+      <button class="btn-orange" onclick="call('ping')">Ping</button>
+    </div>
+
+    <div class="card">
+      <h2>Show Command</h2>
+      <label>Device</label>
+      <select id="cmd-device">
+        <option value="spine1">spine1</option>
+        <option value="spine2">spine2</option>
+        <option value="leaf1">leaf1</option>
+        <option value="leaf2">leaf2</option>
+      </select>
+      <label>Command</label>
+      <input type="text" id="cmd-text" placeholder="show ip bgp summary">
+      <button class="btn-purple" onclick="call('command')">Run Command</button>
+    </div>
+
+    <div class="card">
+      <h2>Network</h2>
+      <button class="btn-gray" onclick="call('devices')">List Devices</button>
+      <button class="btn-gray" onclick="call('topology')">View Topology</button>
+    </div>
+
+  </div>
+
+  <!-- ── Results ── -->
+  <div class="main">
+    <div class="results-header">
+      <h2>Results</h2>
+      <button id="clear-btn" onclick="clearResults()">Clear</button>
+    </div>
+    <div id="results">
+      <div class="empty-state">
+        <div style="font-size:2rem">🔌</div>
+        <p>Select a tool on the left to get started.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const BASE = "http://localhost:8765";
+
+  // ── Connection check ──────────────────────────────────────
+  async function checkConnection() {
+    try {
+      await fetch(`${BASE}/devices`);
+      document.getElementById("dot").classList.add("connected");
+      document.getElementById("status-text").textContent = "Connected to bridge on localhost:8765";
+    } catch {
+      document.getElementById("status-text").textContent =
+        "Bridge not running — start it with: python3 labs/lab5-mcp/http_bridge.py";
+    }
+  }
+  checkConnection();
+
+  // ── Tool dispatch ─────────────────────────────────────────
+  async function call(tool) {
+    let url, label, args = {};
+
+    switch (tool) {
+      case "devices":
+        url = `${BASE}/devices`;
+        label = "devices()";
+        break;
+
+      case "status": {
+        const d = device("device-select");
+        url = `${BASE}/status?device=${d}`;
+        label = `device_status("${d}")`;
+        args = { device: d };
+        break;
+      }
+
+      case "bgp": {
+        const d = device("device-select");
+        url = `${BASE}/bgp?device=${d}`;
+        label = `bgp_summary("${d}")`;
+        args = { device: d };
+        break;
+      }
+
+      case "interface": {
+        const d = device("iface-device");
+        const iface = document.getElementById("iface-name").value.trim();
+        url = `${BASE}/interface?device=${d}${iface ? "&interface=" + iface : ""}`;
+        label = `interface_status("${d}"${iface ? `, "${iface}"` : ""})`;
+        args = { device: d, interface: iface || "(all)" };
+        break;
+      }
+
+      case "ping": {
+        const t = document.getElementById("ping-target").value.trim();
+        if (!t) { alert("Enter a target hostname or IP."); return; }
+        url = `${BASE}/ping?target=${encodeURIComponent(t)}`;
+        label = `ping("${t}")`;
+        args = { target: t };
+        break;
+      }
+
+      case "command": {
+        const d = device("cmd-device");
+        const cmd = document.getElementById("cmd-text").value.trim() || "show ip bgp summary";
+        url = `${BASE}/command?device=${d}&command=${encodeURIComponent(cmd)}`;
+        label = `show_command("${d}", "${cmd}")`;
+        args = { device: d, command: cmd };
+        break;
+      }
+
+      case "topology":
+        url = `${BASE}/topology`;
+        label = "topology()";
+        break;
+    }
+
+    const block = addBlock(label, args);
+
+    try {
+      const res  = await fetch(url);
+      const data = await res.json();
+      renderResult(block, data, tool === "topology");
+    } catch (err) {
+      renderError(block, "Cannot reach bridge. Is http_bridge.py running?");
+    }
+  }
+
+  // ── DOM helpers ───────────────────────────────────────────
+  function device(id) {
+    return document.getElementById(id).value;
+  }
+
+  function addBlock(label, args) {
+    const results = document.getElementById("results");
+    // Remove empty state
+    const empty = results.querySelector(".empty-state");
+    if (empty) empty.remove();
+
+    const now = new Date().toLocaleTimeString();
+    const block = document.createElement("div");
+    block.className = "result-block";
+    block.innerHTML = `
+      <div class="result-header">
+        <span class="tool-name">${label}</span>
+        <span class="ts">${now}</span>
+      </div>
+      <div class="loading">⏳ Fetching…</div>
+    `;
+    results.prepend(block);
+    return block;
+  }
+
+  function renderResult(block, data, isTopology = false) {
+    block.classList.add(data.error ? "error" : "success");
+
+    if (isTopology && !data.error) {
+      block.querySelector(".loading").outerHTML = `
+        <div class="topo-svg">${buildTopologySVG(data)}</div>
+        <pre>${JSON.stringify(data, null, 2)}</pre>
+      `;
+      // Need to re-query since we replaced innerHTML
+      block.querySelector(".loading") && (block.querySelector(".loading").remove());
+      return;
+    }
+
+    const loading = block.querySelector(".loading");
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(data, null, 2);
+    loading.replaceWith(pre);
+  }
+
+  function renderError(block, msg) {
+    block.classList.add("error");
+    const loading = block.querySelector(".loading");
+    const pre = document.createElement("pre");
+    pre.textContent = `❌ ${msg}`;
+    loading.replaceWith(pre);
+  }
+
+  function clearResults() {
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div style="font-size:2rem">🔌</div>
+        <p>Select a tool on the left to get started.</p>
+      </div>`;
+  }
+
+  // ── Simple topology SVG ───────────────────────────────────
+  function buildTopologySVG(data) {
+    const W = 560, H = 240;
+    const spines = data.devices?.spines || [];
+    const leaves = data.devices?.leaves || [];
+
+    const spineY = 70, leafY = 170;
+    const positions = {};
+
+    spines.forEach((d, i) => {
+      positions[d] = { x: 140 + i * 280, y: spineY };
+    });
+    leaves.forEach((d, i) => {
+      positions[d] = { x: 100 + i * 120 + (spines.length > 1 ? 80 : 0), y: leafY };
+    });
+
+    // Fallback positions if topology shape differs
+    const allDevices = [...spines, ...leaves];
+    allDevices.forEach((d, i) => {
+      if (!positions[d]) positions[d] = { x: 80 + i * 130, y: 120 };
+    });
+
+    let lines = "";
+    (data.links || []).forEach(link => {
+      const a = positions[link.from], b = positions[link.to];
+      if (a && b) {
+        lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
+          stroke="#4a5568" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+      }
+    });
+
+    let nodes = "";
+    spines.forEach(d => {
+      const { x, y } = positions[d];
+      nodes += `
+        <rect x="${x-36}" y="${y-18}" width="72" height="36" rx="6"
+          fill="#2a4365" stroke="#63b3ed" stroke-width="1.5"/>
+        <text x="${x}" y="${y+5}" text-anchor="middle"
+          fill="#bee3f8" font-size="12" font-weight="600">${d}</text>`;
+    });
+    leaves.forEach(d => {
+      const { x, y } = positions[d];
+      nodes += `
+        <rect x="${x-36}" y="${y-18}" width="72" height="36" rx="6"
+          fill="#1c4532" stroke="#68d391" stroke-width="1.5"/>
+        <text x="${x}" y="${y+5}" text-anchor="middle"
+          fill="#9ae6b4" font-size="12" font-weight="600">${d}</text>`;
+    });
+
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="20" fill="#718096" font-size="11">
+        ${data.name || "Topology"} · ${data.underlay_protocol || ""} underlay
+      </text>
+      ${lines}
+      ${nodes}
+    </svg>`;
+  }
+</script>
+
+</body>
+</html>
