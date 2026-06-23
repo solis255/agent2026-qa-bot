@@ -84,15 +84,21 @@ Available Tools:
    - Example: execute_command("leaf1", "show version")
 
 6. get_topology_info()
-   - Get full network topology
+   - Get full network topology (no arguments)
    - Example: get_topology_info()
 
 Available devices: spine1, spine2, leaf1, leaf2
 """
-        
+
         self.system_prompt = f"""You are an expert network engineer troubleshooting a data center network.
 
-{self.tools_description}
+        {self.tools_description}
+
+CRITICAL RULES FOR ARGUMENTS:
+- 'ping_device' MUST have BOTH "source" and "target" arguments (e.g., TOOL: ping_device ARGS: {{"source": "spine1", "target": "192.168.0.21"}}). NEVER pass "device".
+- 'get_device_status' ONLY takes a "device" argument. NEVER include "interface".
+- 'get_interface_status' MUST have BOTH "device" and "interface" arguments.
+- 'execute_command' MUST have BOTH "device" and "command" arguments.
 
 When you need information, output a tool call in this EXACT format:
 TOOL: tool_name
@@ -107,11 +113,11 @@ Be concise and practical. Focus on solving problems."""
     def chat(self, user_message: str, max_iterations: int = 5) -> str:
         """
         Chat with the agent. It will autonomously call tools as needed.
-        
+
         Args:
             user_message: The user's question or request
             max_iterations: Maximum tool calls to prevent infinite loops
-        
+
         Returns:
             The agent's final response
         """
@@ -126,31 +132,41 @@ Be concise and practical. Focus on solving problems."""
         })
         
         iteration = 0
+        seen_calls = set()  # track (tool, args) to prevent duplicate calls
+
         while iteration < max_iterations:
             iteration += 1
-            
+
             # Get LLM response
             response = self._call_llm()
-            
+
             if not response:
                 return "Error: Could not get response from Ollama"
-            
+
             # Check if response contains a tool call
             tool_call = self._parse_tool_call(response)
-            
+
             if tool_call:
-                # Execute the tool
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
-                
+                call_key = (tool_name, json.dumps(tool_args, sort_keys=True))
+
+                # Skip duplicate calls — push the model to conclude instead
+                if call_key in seen_calls:
+                    self.conversation_history.append({
+                        "role": "user",
+                        "content": "You already have that result. Please provide your final answer now."
+                    })
+                    continue
+
+                seen_calls.add(call_key)
                 print(f"🔧 Agent is calling: {tool_name}({json.dumps(tool_args)})")
-                
+
                 try:
                     result = self._execute_tool(tool_name, tool_args)
                     result_str = json.dumps(result, indent=2)
                     print(f"📊 Result:\n{result_str}\n")
-                    
-                    # Add tool result to history
+
                     self.conversation_history.append({
                         "role": "assistant",
                         "content": f"TOOL: {tool_name}\nARGS: {json.dumps(tool_args)}"
@@ -159,7 +175,7 @@ Be concise and practical. Focus on solving problems."""
                         "role": "user",
                         "content": f"Tool result:\n{result_str}"
                     })
-                    
+
                 except Exception as e:
                     error_msg = f"Tool error: {str(e)}"
                     print(f"❌ {error_msg}\n")
@@ -168,16 +184,21 @@ Be concise and practical. Focus on solving problems."""
                         "content": error_msg
                     })
             else:
-                # No tool call, this is the final answer
+                # No tool call — final answer
                 print(f"🤖 Agent: {response}\n")
                 self.conversation_history.append({
                     "role": "assistant",
                     "content": response
                 })
                 return response
-        
-        # Max iterations reached
+
+        # Max iterations reached — force a summary
+        self.conversation_history.append({
+            "role": "user",
+            "content": "Summarize your findings and give your final answer now."
+        })
         final_response = self._call_llm()
+        print(f"🤖 Agent: {final_response}\n")
         self.conversation_history.append({
             "role": "assistant",
             "content": final_response
@@ -260,7 +281,15 @@ Be concise and practical. Focus on solving problems."""
     def _execute_tool(self, tool_name: str, args: Dict) -> Dict:
         """Execute a tool function with given arguments."""
         tool_func = self.tools_map[tool_name]
-        
+
+        # ping_device only accepts 'target' (and optional 'count') — drop 'source'
+        if tool_name == "ping_device":
+            args = {k: v for k, v in args.items() if k in ("target", "count")}
+
+        # get_topology_info takes no arguments
+        if tool_name == "get_topology_info":
+            args = {}
+
         # Call the tool with unpacked arguments
         try:
             result = tool_func(**args)
@@ -294,6 +323,7 @@ def main():
     print("\n🎯 Running test scenarios...\n")
     
     for query in test_queries:
+        bot.reset()
         response = bot.chat(query)
         print(f"{'='*70}\n")
     
