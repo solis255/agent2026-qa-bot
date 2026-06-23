@@ -41,7 +41,9 @@ labs/lab5-mcp/
 ├── README.md          # This guide
 ├── mcp_server.py      # MCP server that exposes network tools
 ├── network_tools.py   # Safe wrapper around the workshop mock tools
-└── client_test.py     # Local sanity test for the business logic
+├── client_test.py     # Local sanity test for the business logic
+├── http_bridge.py     # MCP client + HTTP server for the browser UI
+└── ui.html            # Interactive browser UI
 ```
 
 ## Setup
@@ -69,13 +71,21 @@ You should see device status, BGP state, interface state, topology data, and a b
 
 ## Run the MCP server
 
+**Stdio mode** (for Claude Desktop, MCP CLI, and other MCP-capable clients):
+
 ```bash
 python3 labs/lab5-mcp/mcp_server.py
 ```
 
-This starts a stdio-based MCP server. In a real client configuration, you would point your MCP-capable assistant or IDE at this command.
+**SSE mode** (for the browser UI — see next section):
 
-Example client configuration shape:
+```bash
+python3 labs/lab5-mcp/mcp_server.py --sse
+```
+
+SSE mode listens on `http://localhost:8000`.
+
+Example stdio client configuration for Claude Desktop:
 
 ```json
 {
@@ -87,6 +97,34 @@ Example client configuration shape:
   }
 }
 ```
+
+## Run the interactive browser UI
+
+The UI connects to the MCP server through `http_bridge.py`, which acts as a proper **MCP client** and re-exposes the tools as simple JSON HTTP endpoints for the browser.
+
+```
+ui.html  →(HTTP/JSON)→  http_bridge.py  →(MCP/SSE)→  mcp_server.py
+                           MCP client                   MCP server
+```
+
+You need two terminals:
+
+**Terminal 1 — MCP server in SSE mode:**
+```bash
+python3 labs/lab5-mcp/mcp_server.py --sse
+```
+
+**Terminal 2 — HTTP bridge:**
+```bash
+python3 labs/lab5-mcp/http_bridge.py
+```
+
+**Browser:**
+```bash
+open labs/lab5-mcp/ui.html
+```
+
+Or double-click `ui.html` in Finder. The UI lets you call every MCP tool interactively and see the raw JSON responses.
 
 ## Safety rules in this lab
 
