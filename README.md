@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # AI Networking Workshop: From LLMs to Production Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -659,13 +658,4 @@ bash
 
 That makes the first workshop safer and easier to teach.
 
----
 
-## Suggested Episode 1 Title
-
-**Build Your First AI Network Automation Tool with Python, Claude, RACE, and MCP**
-
-Subtitle:
-
-**Using Containerlab and Arista cEOS to move from scripts to structured AI-powered network workflows.**
->>>>>>> b125807 (Initial commit)
