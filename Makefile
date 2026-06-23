@@ -23,7 +23,7 @@ interfaces:
 	python scripts/04_get_interfaces.py leaf1
 
 claude:
-	python scripts/05_claude_pene_analysis.py examples/interface_output.json
+	python scripts/05_claude_race_analysis.py examples/interface_output.json
 
 mcp:
 	python mcp_server/server.py
