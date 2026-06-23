@@ -67,7 +67,7 @@ python3 examples/test_setup.py
 python3 labs/lab1-ollama/simple_ollama_test.py
 
 # Lab 2: Prompt engineering
-python3 labs/lab2-prompts/prompt_engineering_pene.py
+python3 labs/lab2-prompts/prompt_engineering_race.py
 
 # Lab 3: Network chatbot with memory
 python3 labs/lab3-chatbot/chatbot_v2_with_memory.py
@@ -448,10 +448,10 @@ ai-network-automation-mcp/
 │   ├── 02_inventory_loader.py
 │   ├── 03_connect_to_device.py
 │   ├── 04_get_interfaces.py
-│   └── 05_claude_pene_analysis.py
+│   └── 05_claude_race_analysis.py
 ├── prompts/
 │   ├── bad_prompt.txt
-│   └── pene_network_analysis_prompt.txt
+│   └── race_network_analysis_prompt.txt
 ├── mcp_server/
 │   ├── server.py
 │   ├── network_tools.py
@@ -570,7 +570,7 @@ python scripts/04_get_interfaces.py leaf1
 Analyze sample network output with Claude and RACE:
 
 ```bash
-python scripts/05_claude_pene_analysis.py examples/interface_output.json
+python scripts/05_claude_race_analysis.py examples/interface_output.json
 ```
 
 ---
