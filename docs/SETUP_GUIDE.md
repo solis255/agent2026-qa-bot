@@ -291,7 +291,7 @@ ollama serve
 python3 labs/lab1-ollama/simple_ollama_test.py
 
 # Lab 2
-python3 labs/lab2-prompts/prompt_engineering_pene.py
+python3 labs/lab2-prompts/prompt_engineering_race.py
 
 # Lab 3 (requires API key)
 python3 labs/lab3-chatbot/chatbot_v2_with_memory.py
