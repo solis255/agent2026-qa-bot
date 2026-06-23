@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from rich import print
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PROMPT_FILE = REPO_ROOT / "prompts" / "pene_network_analysis_prompt.txt"
+PROMPT_FILE = REPO_ROOT / "prompts" / "race_network_analysis_prompt.txt"
 
 
 def read_file(path: Path) -> str:
