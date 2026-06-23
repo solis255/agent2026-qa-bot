@@ -289,7 +289,7 @@ GigabitEthernet0/2 is down, line protocol is down
     # Good prompt test
     # ------------------------------------------------------------------------
 
-    print("\n✅ GOOD PROMPT USING P.E.N.E.")
+    print("\n✅ GOOD PROMPT USING RACE")
     print("-" * 70)
 
     good_prompt = good_config_parser_prompt(test_config)
