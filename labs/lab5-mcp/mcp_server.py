@@ -100,4 +100,12 @@ def topology() -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+    # Run with --sse for the UI bridge (HTTP/SSE transport on port 8000)
+    # Run without flags for stdio mode (Claude Desktop, MCP CLI, etc.)
+    transport = "sse" if "--sse" in sys.argv else "stdio"
+    print(f"Starting MCP server in {transport} mode...")
+    if transport == "sse":
+        print("  Listening on http://localhost:8000")
+        print("  Start the bridge next: python3 labs/lab5-mcp/http_bridge.py")
+    mcp.run(transport=transport)
