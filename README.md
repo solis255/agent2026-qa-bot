@@ -90,7 +90,7 @@ python3 labs/lab4-agentic/agentic_network_bot_ollama.py
 
 **Module 2: Prompt Engineering** (15 min)
 - The RACE framework
-- Persona, Examples, kNowledge, Evaluation
+- Role, Anchors, Context, Expected output
 - Production prompt templates
 
 **Module 3: LLM APIs** (15 min)
@@ -655,7 +655,5 @@ delete
 write memory
 bash
 ```
-
-That makes the first workshop safer and easier to teach.
 
 
