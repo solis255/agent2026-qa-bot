@@ -399,13 +399,6 @@ python3 labs/lab1-ollama/simple_ollama_test.py
 
 ---
 
-**Workshop Date:** March 31, 2026  
-**Created by:** Sif Baksh  
-**License:** MIT  
-**Cost:** $0 Forever
-=======
-# AI Network Automation MCP
-
 A workshop-ready starter repo for building your first AI-powered network automation toolchain.
 
 The goal is simple:
