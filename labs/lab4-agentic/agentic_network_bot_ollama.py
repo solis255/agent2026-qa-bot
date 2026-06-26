@@ -38,12 +38,12 @@ class AgenticNetworkBot:
     without requiring paid APIs.
     """
     
-    def __init__(self, model: str = "llama3.2:3b"):
+    def __init__(self, model: str = "deepseek-r1:8b"):
         """
         Initialize the agentic network bot.
         
         Args:
-            model: Ollama model to use (llama3.2:3b recommended)
+            model: Ollama model to use (deepseek-r1:8b recommended)
         """
         self.model = model
         self.conversation_history: List[Dict[str, str]] = []
@@ -307,7 +307,7 @@ def main():
     """Demo the agentic network bot."""
     print("🤖 Agentic Network Bot - Ollama Edition")
     print("="*70)
-    print("No API keys required! Using Ollama (llama3.2:3b)")
+    print("No API keys required! Using Ollama (deepseek-r1:8b)")
     print("="*70)
     
     # Initialize the bot
