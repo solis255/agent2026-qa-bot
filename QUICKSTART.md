@@ -110,7 +110,6 @@ pip3 install -r requirements.txt --upgrade
 
 **Need help?**
 - Run: `python3 examples/test_setup.py`
-- Check: `docs/SETUP_GUIDE.md`
 - Open: GitHub Issue
 
 ## Skip to the Good Stuff
@@ -137,10 +136,7 @@ neighbor 10.1.2.2 is Idle
   Recommend checking physical connectivity and BGP configuration.
 ```
 
----
 
-**Full setup guide:** `docs/SETUP_GUIDE.md`  
-**Workshop outline:** `docs/COMPLETE_WORKSHOP_OUTLINE.md`
 
 **Cost:** $0 Forever  
 **API Keys:** None Required  
