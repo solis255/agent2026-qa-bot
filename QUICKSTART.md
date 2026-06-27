@@ -40,8 +40,8 @@ This downloads ~2GB. Only needed once!
 ### 3. Clone Repository (1 min)
 
 ```bash
-git clone https://github.com/sifbaksh/ai-networking-workshop.git
-cd ai-networking-workshop
+git clone https://github.com/PacktPublishing/Building-AI-Agents-for-Network-Operations
+cd Building-AI-Agents-for-Network-Operations
 
 # Install Python dependencies (just requests!)
 pip3 install -r requirements.txt
