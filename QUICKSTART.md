@@ -132,8 +132,8 @@ This runs an autonomous AI agent that troubleshoots a mock network!
 🔧 Agent is calling: get_bgp_summary({"device": "leaf2"})
 🔧 Agent is calling: get_interface_status({"device": "leaf2", "interface": "Ethernet3"})
 🤖 Agent: leaf2 has two issues:
-  1. BGP session to 192.168.0.11 is in Idle state
-  2. Interface Ethernet3 is down
+  leaf2 has 1/2 BGP peers established
+neighbor 10.1.2.2 is Idle
   Recommend checking physical connectivity and BGP configuration.
 ```
 
