@@ -32,6 +32,7 @@ Download from https://ollama.com/download
 
 ```bash
 ollama pull llama3.2:3b
+ollama pull deepseek-r1:8b
 ```
 
 This downloads ~2GB. Only needed once!
