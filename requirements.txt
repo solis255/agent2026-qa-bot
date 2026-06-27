@@ -17,4 +17,6 @@ netmiko>=4.4.0
 python-dotenv>=1.0.1
 PyYAML>=6.0.2
 rich>=13.9.0
+starlette>=0.37.0
+uvicorn>=0.30.0
 pytest>=8.3.0

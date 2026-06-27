@@ -6,7 +6,7 @@ AI Networking Workshop - 100% Free, No API Keys Required
 This lab demonstrates how to build an AI agent that can autonomously
 query and operate network devices using tool calling.
 
-Uses Ollama (llama3.2:3b) with native tool calling — no paid API needed.
+Uses Ollama (deepseek-r1:8b) with native tool calling — no paid API needed.
 
 The agent can:
 - Check device status
@@ -36,7 +36,7 @@ from mock_network_devices import (
 )
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "llama3.2:3b"
+MODEL = "deepseek-r1:8b"
 
 
 class AgenticNetworkBot:
@@ -331,7 +331,7 @@ def demo_topology_analysis():
 
 def interactive_mode():
     print("\n" + "="*70)
-    print("🤖 Interactive Agentic Network Bot  (Ollama / llama3.2:3b)")
+    print("🤖 Interactive Agentic Network Bot  (Ollama / deepseek-r1:8b)")
     print("="*70)
     print("Available devices: spine1, spine2, leaf1, leaf2")
     print("Type 'quit' to exit, 'reset' to clear history\n")
@@ -406,11 +406,11 @@ def challenge_3():
 # =============================================================================
 
 if __name__ == "__main__":
-    print("\n🎯 Lab 4: Agentic Network Bot  (Ollama / llama3.2:3b)")
+    print("\n🎯 Lab 4: Agentic Network Bot  (Ollama / deepseek-r1:8b)")
     print("="*70)
     print("No API keys required! Uses Ollama running locally.")
     print("Make sure Ollama is running:  ollama serve")
-    print("Make sure model is pulled:    ollama pull llama3.2:3b")
+    print("Make sure model is pulled:    ollama pull deepseek-r1:8b")
     print("="*70)
 
     demo_simple_query()

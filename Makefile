@@ -26,7 +26,7 @@ claude:
 	python scripts/05_claude_race_analysis.py examples/interface_output.json
 
 mcp:
-	python mcp_server/server.py
+	python3 labs/lab5-mcp/mcp_server.py --sse
 
 test:
 	pytest -q

@@ -9,7 +9,7 @@ This lab shows students how to build an **AI network agent** that can answer que
 This script creates an **Agentic Network Bot** using:
 
 * **Ollama** running locally
-* **llama3.2:3b**
+* **deepseek-r1:8b**
 * Python tool calling
 * Mock network devices
 * A spine-leaf network topology
@@ -60,7 +60,7 @@ Before running the script, students need:
 
 * Python 3 installed
 * Ollama installed
-* The `llama3.2:3b` model downloaded
+* The `deepseek-r1:8b` model downloaded
 * The mock device file available in the expected `examples` folder
 * The Python `requests` package installed
 
@@ -83,7 +83,7 @@ Leave this terminal running.
 In a second terminal, run:
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull deepseek-r1:8b
 ```
 
 This downloads the local model used by the lab.
@@ -394,7 +394,7 @@ reset
 At the top of the file, change:
 
 ```python
-MODEL = "llama3.2:3b"
+MODEL = "deepseek-r1:8b"
 ```
 
 Example:
@@ -665,7 +665,7 @@ Then rerun the script.
 If Ollama says the model is missing, run:
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull deepseek-r1:8b
 ```
 
 ---

@@ -76,9 +76,9 @@ Available Tools:
    - Get BGP neighbor status
    - Example: get_bgp_summary("spine1")
 
-4. ping_device(source, target)
-   - Test reachability between devices
-   - Example: ping_device("spine1", "192.168.0.21")
+4. ping_device(target, count=4)
+   - Test reachability to a target IP address or hostname
+   - Example: ping_device("192.168.0.21", count=4)
 
 5. execute_command(device, command)
    - Execute show commands (read-only)
@@ -96,7 +96,7 @@ Available devices: spine1, spine2, leaf1, leaf2
         {self.tools_description}
 
 CRITICAL RULES FOR ARGUMENTS:
-- 'ping_device' MUST have BOTH "source" and "target" arguments (e.g., TOOL: ping_device ARGS: {{"source": "spine1", "target": "192.168.0.21"}}). NEVER pass "device".
+- 'ping_device' MUST use "target" and may use optional "count". Do not pass "source" or "device". Example: TOOL: ping_device ARGS: {{"target": "192.168.0.21", "count": 4}}.
 - 'get_device_status' ONLY takes a "device" argument. NEVER include "interface".
 - 'get_interface_status' MUST have BOTH "device" and "interface" arguments.
 - 'execute_command' MUST have BOTH "device" and "command" arguments.

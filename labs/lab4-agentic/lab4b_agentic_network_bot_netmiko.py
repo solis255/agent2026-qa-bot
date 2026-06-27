@@ -14,7 +14,7 @@ Requirements:
 
 Ollama:
     ollama serve
-    ollama pull llama3.2:3b
+    ollama pull deepseek-r1:8b
 
 Optional environment variables:
     export NETMIKO_USERNAME="admin"
@@ -48,7 +48,7 @@ except ImportError as exc:
 
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
-MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
 DEFAULT_DEVICE_TYPE = os.getenv("NETMIKO_DEVICE_TYPE", "arista_eos")
 DEFAULT_PORT = int(os.getenv("NETMIKO_PORT", "22"))
 
@@ -739,7 +739,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("This version connects to real devices over SSH.")
     print("Make sure Ollama is running:      ollama serve")
-    print("Make sure model is pulled:        ollama pull llama3.2:3b")
+    print("Make sure model is pulled:        ollama pull deepseek-r1:8b")
     print("Install dependencies:             pip install requests netmiko")
     print("Set credentials with env vars or enter them when prompted.")
     print("=" * 70)

@@ -63,6 +63,7 @@ credentials.json
 
 # Workshop specific
 conversation_*.json
+<<<<<<< Updated upstream
 # =======
 *.egg-info/
 .pytest_cache/
@@ -71,11 +72,12 @@ venv/
 
 # Environment
 .env
+=======
+>>>>>>> Stashed changes
 
 # Containerlab generated files
 clab-*/
 *.bak
 
 # OS/editor
-.DS_Store
 .vscode/settings.json
