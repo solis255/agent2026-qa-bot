@@ -198,7 +198,7 @@ def call_llm(prompt: str, model: str = "llama3.2:3b", temperature: float = 0.2) 
 # RACE PROMPTS applied to real (or mock) SSH data
 # ============================================================================
 
-def parse_interfaces_pene(raw_config: str) -> str:
+def parse_interfaces_race(raw_config: str) -> str:
     """
     RACE prompt to extract all interfaces from a running-config block.
 
@@ -250,7 +250,7 @@ Output JSON array:"""
     return call_llm(prompt)
 
 
-def audit_disabled_interfaces_pene(device: str, raw_status: str) -> str:
+def audit_disabled_interfaces_race(device: str, raw_status: str) -> str:
     """
     RACE prompt to identify disabled/problematic interfaces and suggest actions.
     """
@@ -314,7 +314,7 @@ def demo_config_parser():
     for device in ["spine1", "leaf1", "leaf2"]:
         print(f"\n[{device.upper()}] — parsing interface config via SSH")
         raw = fetch_via_ssh(device, "show running-config interfaces")
-        result = parse_interfaces_pene(raw)
+        result = parse_interfaces_race(raw)
 
         try:
             parsed = json.loads(result)
@@ -335,7 +335,7 @@ def demo_interface_audit():
     for device in ["leaf1", "leaf2"]:
         print(f"\n[{device.upper()}]")
         raw = fetch_via_ssh(device, "show interfaces status")
-        result = audit_disabled_interfaces_pene(device, raw)
+        result = audit_disabled_interfaces_race(device, raw)
 
         try:
             audit = json.loads(result)
