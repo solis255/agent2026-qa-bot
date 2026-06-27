@@ -1,6 +1,6 @@
 // ============================================================
 // Bonus Lab: Bun Chat UI with Ollama + Memory
-// P.E.N.E. Framework Edition — build & test prompts live
+// RACE Framework Edition — build & test prompts live
 // ============================================================
 
 const OLLAMA_URL = "http://localhost:11434";
@@ -8,7 +8,7 @@ const MODEL = "llama3.2:3b";
 const PORT = 3003;
 
 // ─────────────────────────────────────────────────────────────
-// Active system prompt — updated live from the P.E.N.E. builder
+// Active system prompt — updated live from the RACE builder
 // ─────────────────────────────────────────────────────────────
 let activeSystemPrompt = `You are a network engineer assistant.
 
@@ -23,11 +23,11 @@ suggest specific commands the engineer could run.`;
 const conversationHistory = [];
 
 // ─────────────────────────────────────────────────────────────
-// P.E.N.E. example library — defined server-side as real JS
+// RACE example library — defined server-side as real JS
 // objects, then injected into the HTML via JSON.stringify so
 // the browser always receives clean, properly-escaped JSON.
 // ─────────────────────────────────────────────────────────────
-const PENE_EXAMPLES = {
+const RACE_EXAMPLES = {
   bgp: {
     label: "🔀 BGP Risk Analyzer",
     p: `You are a senior network engineer reviewing BGP configurations for a production service provider network.
@@ -421,7 +421,7 @@ const handler = {
       }
     }
 
-    // Update system prompt from the P.E.N.E. builder
+    // Update system prompt from the RACE builder
     if (pathname === "/api/config" && req.method === "POST") {
       const body = await req.json();
       if (body.systemPrompt !== undefined) {
@@ -433,7 +433,7 @@ const handler = {
 
     // Reset conversation only
     if (pathname === "/api/examples" && req.method === "GET") {
-      return Response.json(PENE_EXAMPLES);
+      return Response.json(RACE_EXAMPLES);
     }
 
     if (pathname === "/api/reset" && req.method === "POST") {
@@ -472,14 +472,14 @@ console.log("📡 Ollama: " + OLLAMA_URL + "\n");
 
 
 // ─────────────────────────────────────────────────────────────
-// P.E.N.E. Chat UI
+// RACE Chat UI
 // ─────────────────────────────────────────────────────────────
 const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>P.E.N.E. Chat Tester</title>
+<title>RACE Chat Tester</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -555,7 +555,7 @@ const HTML = `<!DOCTYPE html>
     overflow: hidden;
   }
 
-  /* ── Left: P.E.N.E. builder ── */
+  /* ── Left: RACE builder ── */
   .sidebar {
     width: 380px;
     min-width: 300px;
@@ -586,7 +586,7 @@ const HTML = `<!DOCTYPE html>
     opacity: 0.7;
   }
 
-  .pene-sections {
+  .RACE-sections {
     flex: 1;
     overflow-y: auto;
     padding: 10px;
@@ -596,7 +596,7 @@ const HTML = `<!DOCTYPE html>
   }
 
   /* Accordion section */
-  .pene-section { border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .RACE-section { border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
 
   .section-toggle {
     width: 100%;
@@ -631,7 +631,7 @@ const HTML = `<!DOCTYPE html>
   .section-label { flex: 1; }
   .section-label small { display: block; font-size: 0.67rem; font-weight: 400; color: var(--muted); margin-top: 1px; }
   .chevron { font-size: 0.65rem; color: var(--muted); transition: transform 0.2s; }
-  .pene-section.open .chevron { transform: rotate(90deg); }
+  .RACE-section.open .chevron { transform: rotate(90deg); }
 
   .section-body {
     display: none;
@@ -639,7 +639,7 @@ const HTML = `<!DOCTYPE html>
     background: var(--bg);
     border-top: 1px solid var(--border);
   }
-  .pene-section.open .section-body { display: block; }
+  .RACE-section.open .section-body { display: block; }
 
   .section-body textarea {
     width: 100%;
@@ -944,7 +944,7 @@ const HTML = `<!DOCTYPE html>
 <!-- Main layout -->
 <div class="layout">
 
-  <!-- ── Left: P.E.N.E. builder ── -->
+  <!-- ── Left: RACE builder ── -->
   <div class="sidebar">
     <div class="sidebar-header">
       <h2>Prompt Builder</h2>
@@ -965,10 +965,10 @@ const HTML = `<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="pene-sections">
+    <div class="RACE-sections">
 
       <!-- P: Persona & Purpose -->
-      <div class="pene-section open" id="sec-p">
+      <div class="RACE-section open" id="sec-p">
         <button class="section-toggle" onclick="toggleSection('sec-p')">
           <div class="section-letter letter-p">P</div>
           <div class="section-label">
@@ -984,7 +984,7 @@ const HTML = `<!DOCTYPE html>
       </div>
 
       <!-- E: Examples -->
-      <div class="pene-section open" id="sec-e1">
+      <div class="RACE-section open" id="sec-e1">
         <button class="section-toggle" onclick="toggleSection('sec-e1')">
           <div class="section-letter letter-e1">E</div>
           <div class="section-label">
@@ -1000,7 +1000,7 @@ const HTML = `<!DOCTYPE html>
       </div>
 
       <!-- N: kNowledge & coNstraints -->
-      <div class="pene-section open" id="sec-n">
+      <div class="RACE-section open" id="sec-n">
         <button class="section-toggle" onclick="toggleSection('sec-n')">
           <div class="section-letter letter-n">N</div>
           <div class="section-label">
@@ -1016,7 +1016,7 @@ const HTML = `<!DOCTYPE html>
       </div>
 
       <!-- E: Evaluation -->
-      <div class="pene-section open" id="sec-e2">
+      <div class="RACE-section open" id="sec-e2">
         <button class="section-toggle" onclick="toggleSection('sec-e2')">
           <div class="section-letter letter-e2">E</div>
           <div class="section-label">
@@ -1031,7 +1031,7 @@ const HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-    </div><!-- /pene-sections -->
+    </div><!-- /RACE-sections -->
 
     <div class="sidebar-footer">
       <div class="preview-box" id="prompt-preview">← Fill in the sections above and click Apply</div>
@@ -1053,7 +1053,7 @@ const HTML = `<!DOCTYPE html>
 
     <div id="messages">
       <div class="msg system-notice">
-        Build your P.E.N.E. prompt on the left, then click <b>Apply</b> to start testing.
+        Build your RACE prompt on the left, then click <b>Apply</b> to start testing.
       </div>
     </div>
 
@@ -1067,7 +1067,7 @@ const HTML = `<!DOCTYPE html>
 </div><!-- /layout -->
 
 <script>
-  // ── P.E.N.E. examples — fetched from /api/examples on load ─
+  // ── RACE examples — fetched from /api/examples on load ─
   var EXAMPLES = {};
 
   function loadExample(key, btn) {
@@ -1092,7 +1092,7 @@ const HTML = `<!DOCTYPE html>
     updatePreview();
   }
 
-  // ── Build prompt from P.E.N.E. sections ───────────────────
+  // ── Build prompt from RACE sections ───────────────────
   function buildPrompt() {
     var p  = (document.getElementById('pane-p').value  || '').trim();
     var e1 = (document.getElementById('pane-e1').value || '').trim();
@@ -1123,7 +1123,7 @@ const HTML = `<!DOCTYPE html>
   async function applyPrompt() {
     var prompt = buildPrompt();
     if (!prompt.trim()) {
-      alert('Fill in at least one P.E.N.E. section before applying.');
+      alert('Fill in at least one RACE section before applying.');
       return;
     }
 
