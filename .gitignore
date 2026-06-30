@@ -61,7 +61,7 @@ htmlcov/
 *_secret*
 credentials.json
 
-# Workshop specific
+# Book lab specific
 conversation_*.json
 
 *.egg-info/
