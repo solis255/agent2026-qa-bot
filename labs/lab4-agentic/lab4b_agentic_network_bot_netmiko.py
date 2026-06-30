@@ -10,7 +10,7 @@ WARNING:
 - Dangerous commands such as configure, reload, delete, copy, write, erase, etc. are blocked.
 
 Requirements:
-    pip install requests netmiko
+    pip install -r requirements.txt
 
 Ollama:
     ollama serve
@@ -43,7 +43,7 @@ try:
     from netmiko.exceptions import NetMikoAuthenticationException, NetMikoTimeoutException
 except ImportError as exc:
     raise SystemExit(
-        "Netmiko is not installed. Install it with: pip install netmiko"
+        "Netmiko is not installed. Install it with: pip install -r requirements.txt"
     ) from exc
 
 
@@ -740,7 +740,7 @@ if __name__ == "__main__":
     print("This version connects to real devices over SSH.")
     print("Make sure Ollama is running:      ollama serve")
     print("Make sure model is pulled:        ollama pull deepseek-r1:8b")
-    print("Install dependencies:             pip install requests netmiko")
+    print("Install dependencies:             pip install -r requirements.txt")
     print("Set credentials with env vars or enter them when prompted.")
     print("=" * 70)
 

@@ -36,10 +36,10 @@ Before running this script, make sure you have:
 - Ollama running locally
 - The `llama3.2:3b` model pulled down
 
-Install the Python dependency:
+Install the shared workshop dependencies from the repository root:
 
 ```bash
-pip install requests
+pip install -r requirements.txt
 ````
 
 Pull the model:

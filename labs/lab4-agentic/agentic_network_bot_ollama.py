@@ -68,9 +68,10 @@ Available Tools:
    - Get device info (hostname, version, uptime, role)
    - Example: get_device_status("spine1")
 
-2. get_interface_status(device, interface)
-   - Get interface state, IP, MAC
+2. get_interface_status(device, interface=None)
+   - Get one interface or all interfaces for a device
    - Example: get_interface_status("leaf1", "Ethernet1")
+   - Example: get_interface_status("leaf2")
 
 3. get_bgp_summary(device)
    - Get BGP neighbor status
@@ -98,7 +99,7 @@ Available devices: spine1, spine2, leaf1, leaf2
 CRITICAL RULES FOR ARGUMENTS:
 - 'ping_device' MUST use "target" and may use optional "count". Do not pass "source" or "device". Example: TOOL: ping_device ARGS: {{"target": "192.168.0.21", "count": 4}}.
 - 'get_device_status' ONLY takes a "device" argument. NEVER include "interface".
-- 'get_interface_status' MUST have BOTH "device" and "interface" arguments.
+- 'get_interface_status' requires "device"; "interface" is optional. Omit "interface" to get all interfaces for a device.
 - 'execute_command' MUST have BOTH "device" and "command" arguments.
 
 When you need information, output a tool call in this EXACT format:

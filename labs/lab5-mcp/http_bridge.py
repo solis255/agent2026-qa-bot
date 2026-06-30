@@ -11,7 +11,8 @@ Start order:
     Browser:    open labs/lab5-mcp/ui.html
 
 Architecture:
-    ui.html  →(HTTP/JSON)→  http_bridge.py  →(MCP/SSE)→  mcp_server.py
+    ui.html  →(HTTP/JSON)→  http_bridge.py  →(MCP/SSE)→
+    mcp_server.py  →  network_tools.py  →  mock_network_devices.py
 """
 
 from __future__ import annotations

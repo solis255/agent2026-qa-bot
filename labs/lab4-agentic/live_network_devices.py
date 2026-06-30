@@ -123,7 +123,7 @@ def _ssh_command(device_name: str, command: str) -> str:
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        raise RuntimeError("netmiko not installed — pip install netmiko")
+        raise RuntimeError("netmiko not installed — pip install -r requirements.txt")
 
     cfg = DEVICE_CONFIG.get(device_name.lower())
     if not cfg:

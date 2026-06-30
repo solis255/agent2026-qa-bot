@@ -189,7 +189,7 @@ def validate_interface_json(data: Dict[str, Any]) -> list[str]:
 
 def bad_config_parser_prompt() -> str:
     """
-    BAD EXAMPLE:
+    BAD PROMPT:
     Vague prompt. No role. No structure. No examples. No constraints.
     """
 
@@ -198,7 +198,7 @@ def bad_config_parser_prompt() -> str:
 
 def good_config_parser_prompt(config_text: str) -> str:
     """
-    GOOD EXAMPLE:
+    GOOD RACE PROMPT:
     Uses the RACE framework to create a structured prompt.
 
     This version is intentionally strict because smaller local models can
@@ -210,14 +210,12 @@ def good_config_parser_prompt(config_text: str) -> str:
     return f"""
 You are a JSON extraction engine for network automation data.
 
-PERSONA & PURPOSE:
+ROLE:
 You extract facts from network interface CLI output so another automation
 workflow can consume the result.
 
-TASK:
+ANCHORS:
 Read the network interface output and return the extracted values as JSON.
-
-CRITICAL OUTPUT RULES:
 - Return one JSON object only.
 - Do not write Python code.
 - Do not write a parser function.
@@ -231,13 +229,14 @@ CRITICAL OUTPUT RULES:
 JSON SCHEMA:
 {schema_text}
 
-EXAMPLE INPUT:
+CONTEXT:
+Example input:
 GigabitEthernet0/1 is up, line protocol is up
   Hardware is iGbE, address is 0000.0c07.ac01
   Internet address is 10.0.0.1/24
   MTU 1500 bytes
 
-EXAMPLE OUTPUT:
+Expected example output:
 {{
   "interface": "GigabitEthernet0/1",
   "admin_status": "up",
@@ -248,6 +247,7 @@ EXAMPLE OUTPUT:
   "mtu": 1500
 }}
 
+EXPECTED OUTPUT:
 NOW PARSE THIS CONFIG:
 {config_text}
 """.strip()
@@ -305,10 +305,10 @@ GigabitEthernet0/2 is down, line protocol is down
     print(good_result)
 
     # ------------------------------------------------------------------------
-    # Evaluation
+    # Result review
     # ------------------------------------------------------------------------
 
-    print("\n🔎 Evaluation")
+    print("\n🔎 Result Review")
     print("-" * 70)
 
     parsed = extract_json(good_result)
@@ -359,8 +359,8 @@ if __name__ == "__main__":
     print("\n\n💡 Key Takeaways")
     print("=" * 70)
     print("1. BAD: 'Parse this config' creates inconsistent results.")
-    print("2. GOOD: RACE prompts give the model role, task, examples, and constraints.")
-    print("3. Examples are often more powerful than instructions alone.")
+    print("2. GOOD: RACE prompts give the model Role, Anchors, Context, and Expected output.")
+    print("3. Context examples are often more powerful than instructions alone.")
     print("4. Automation needs structured output, not pretty paragraphs or Python code.")
     print("5. Always validate LLM output before using it in a workflow.")
     print("6. Lower temperature plus Ollama structured output gives more predictable results.")

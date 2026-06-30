@@ -2,6 +2,8 @@
 
 Build an autonomous AI agent that operates network devices using **100% free Ollama**.
 
+This lab uses `deepseek-r1:8b` for the agentic workflow. The earlier prompt, parsing, and chatbot labs use `llama3.2:3b` as their baseline model.
+
 ## Overview
 
 This lab combines everything you've learned:
@@ -41,6 +43,9 @@ spine2 (192.168.0.12) ─┘
 ## Running the Lab
 
 ```bash
+# Pull the Lab 4 model if needed
+ollama pull deepseek-r1:8b
+
 # Ollama version (recommended - 100% free!)
 python3 agentic_network_bot_ollama.py
 ```
@@ -96,18 +101,18 @@ bot.chat("Something is wrong - investigate")
 - **Multi-step**: Can call multiple tools to solve problems
 - **Local**: Everything runs on your laptop
 - **Free**: Zero cost forever
-- **Production-ready**: Same code works with real devices
+- **Production pattern**: The same pattern can later be adapted for real devices with proper safety controls, credential handling, logging, and approval gates
 
-## Production Migration
+## Future Real-Device Adaptation
 
-Replace mock functions with real SSH:
+Live network access is optional and advanced. In a controlled lab, you can adapt the mock tool layer to call real SSH or API backends while keeping safety controls outside the agent:
 
 ```python
 # Mock (workshop)
 def get_device_status(device):
     return MOCK_DEVICES.get(device)
 
-# Production
+# Real-device adapter sketch
 import paramiko
 def get_device_status(device):
     ssh = paramiko.SSHClient()
@@ -116,4 +121,4 @@ def get_device_status(device):
     return parsed_data
 ```
 
-Agent code stays the same!
+The agent-facing pattern can stay similar, but real-device use needs validation, credential handling, logging, and approval gates before it is suitable for operational environments.

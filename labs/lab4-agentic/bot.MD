@@ -112,8 +112,10 @@ python -m venv .venv
 
 ## Step 4: Install Dependencies
 
+From the repository root, install the shared workshop dependencies:
+
 ```bash
-pip install requests
+pip install -r requirements.txt
 ```
 
 ---
@@ -672,10 +674,10 @@ ollama pull deepseek-r1:8b
 
 ## Error: No module named requests
 
-Install the dependency:
+Install the shared workshop dependencies from the repository root:
 
 ```bash
-pip install requests
+pip install -r requirements.txt
 ```
 
 ---

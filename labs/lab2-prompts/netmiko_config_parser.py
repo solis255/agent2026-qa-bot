@@ -146,7 +146,7 @@ def fetch_via_ssh(device_name: str, command: str) -> str:
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        print("  netmiko not installed — pip install netmiko")
+        print("  netmiko not installed — pip install -r requirements.txt")
         return _mock_lookup(device_name, command)
 
     cfg = DEVICE_CONFIG.get(device_name.lower())
@@ -204,11 +204,17 @@ def parse_interfaces_race(raw_config: str) -> str:
 
     Returns JSON array of interface objects.
     """
-    prompt = f"""You are a network automation engineer building a device inventory system.
+    prompt = f"""ROLE:
+You are a network automation engineer building a device inventory system.
 
-TASK: Parse the Arista EOS running-config excerpt below and return every interface as a JSON array.
+ANCHORS:
+- Parse the Arista EOS running-config excerpt below.
+- Return every interface as a JSON array.
+- Output ONLY a valid JSON array, no markdown fences, no explanation.
+- If no description is present, use null.
+- shutdown = true if the 'shutdown' keyword appears under that interface.
 
-OUTPUT FORMAT (array of objects):
+EXPECTED OUTPUT:
 [
   {{
     "interface": "string",
@@ -220,7 +226,8 @@ OUTPUT FORMAT (array of objects):
   }}
 ]
 
-EXAMPLE INPUT:
+CONTEXT:
+Example input:
 interface Ethernet1
    description to_core
    no switchport
@@ -231,16 +238,11 @@ interface Ethernet2
    switchport access vlan 10
 !
 
-EXAMPLE OUTPUT:
+Expected example output:
 [
   {{"interface": "Ethernet1", "description": "to_core", "ip_address": "10.0.0.1/31", "mode": "routed", "vlan": null, "shutdown": false}},
   {{"interface": "Ethernet2", "description": "servers", "ip_address": null, "mode": "access", "vlan": 10, "shutdown": false}}
 ]
-
-CONSTRAINTS:
-- Output ONLY a valid JSON array, no markdown fences, no explanation
-- If no description is present, use null
-- shutdown = true if the 'shutdown' keyword appears under that interface
 
 NOW PARSE THIS CONFIG:
 {raw_config}
@@ -254,11 +256,17 @@ def audit_disabled_interfaces_race(device: str, raw_status: str) -> str:
     """
     RACE prompt to identify disabled/problematic interfaces and suggest actions.
     """
-    prompt = f"""You are a senior network engineer auditing a data-center switch.
+    prompt = f"""ROLE:
+You are a senior network engineer auditing a data-center switch.
 
-TASK: Review the interface status table for {device} and produce an audit report as JSON.
+ANCHORS:
+- Review the interface status table for {device}.
+- Produce an audit report as JSON.
+- Output ONLY valid JSON, no markdown, no extra text.
+- "connected" or "up" = healthy; anything else = an issue.
+- overall_health: healthy (0 issues), degraded (1-2), critical (3+).
 
-OUTPUT FORMAT:
+EXPECTED OUTPUT:
 {{
   "device": "string",
   "total_interfaces": integer,
@@ -274,12 +282,13 @@ OUTPUT FORMAT:
   "overall_health": "healthy | degraded | critical"
 }}
 
-EXAMPLE INPUT:
+CONTEXT:
+Example input:
 Port  Name         Status     Vlan
 Et1   uplink       connected  routed
 Et2   servers      disabled   100
 
-EXAMPLE OUTPUT:
+Expected example output:
 {{
   "device": "leaf1",
   "total_interfaces": 2,
@@ -287,11 +296,6 @@ EXAMPLE OUTPUT:
   "issues": [{{"interface": "Et2", "status": "disabled", "description": "servers", "recommended_action": "Verify port-channel or server NIC"}}],
   "overall_health": "degraded"
 }}
-
-CONSTRAINTS:
-- Output ONLY valid JSON, no markdown, no extra text
-- "connected" or "up" = healthy; anything else = an issue
-- overall_health: healthy (0 issues), degraded (1-2), critical (3+)
 
 INTERFACE STATUS TO AUDIT:
 {raw_status}

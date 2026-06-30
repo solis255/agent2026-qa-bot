@@ -118,7 +118,7 @@ def collect_via_ssh(device: dict) -> str:
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        print("  ⚠️  netmiko not installed — pip install netmiko")
+        print("  ⚠️  netmiko not installed — pip install -r requirements.txt")
         return MOCK_OUTPUTS.get(device["label"], "[no mock data]")
 
     cfg = {k: v for k, v in device.items() if k != "label"}

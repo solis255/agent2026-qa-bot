@@ -111,7 +111,7 @@ class LiveDeviceContext:
         try:
             from netmiko import ConnectHandler
         except ImportError:
-            print("  netmiko not installed — pip install netmiko")
+            print("  netmiko not installed — pip install -r requirements.txt")
             return self._mock(device, command)
 
         cfg = DEVICE_CONFIG.get(device)

@@ -2,7 +2,7 @@
 
 This lab extends the workshop from direct tool calling into reusable MCP-based tooling.
 
-In the first four labs, the agent called Python functions directly. That is perfect for learning. But as soon as you want the same network tools to be reused by multiple AI clients, assistants, editors, or internal platforms, you need a cleaner packaging pattern.
+Through Lab 4, the agent called Python functions directly. That is perfect for learning. But as soon as you want the same network tools to be reused by multiple AI clients, assistants, editors, or internal platforms, you need a cleaner packaging pattern.
 
 That is where MCP, the Model Context Protocol, fits.
 
@@ -54,10 +54,9 @@ From the repository root:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install mcp
 ```
 
-The base workshop does not require MCP. This lab adds it as an optional dependency so the first four labs stay lightweight.
+The requirements file includes the MCP, Starlette, and Uvicorn packages used by this lab.
 
 ## Run the local tool test
 

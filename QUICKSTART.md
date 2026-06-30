@@ -28,14 +28,14 @@ curl https://ollama.ai/install.sh | sh
 **Windows:**
 Download from https://ollama.com/download
 
-### 2. Pull Model (2 min)
+### 2. Pull Models
 
 ```bash
 ollama pull llama3.2:3b
 ollama pull deepseek-r1:8b
 ```
 
-This downloads ~2GB. Only needed once!
+Use `llama3.2:3b` for the early prompt, parsing, and chatbot examples. Use `deepseek-r1:8b` for the Lab 4 agentic workflow, including the Chapter 6 and Chapter 7 flow. These downloads are only needed once.
 
 ### 3. Clone Repository (1 min)
 
@@ -43,8 +43,8 @@ This downloads ~2GB. Only needed once!
 git clone https://github.com/PacktPublishing/Building-AI-Agents-for-Network-Operations
 cd Building-AI-Agents-for-Network-Operations
 
-# Install Python dependencies (just requests!)
-pip3 install -r requirements.txt
+# Install Python dependencies
+pip install -r requirements.txt
 ```
 
 ## Run Your First Lab
@@ -68,23 +68,31 @@ Tokens: 156
 
 ## What's Next?
 
-### All Labs Work with Ollama (Free!)
+### Six-Lab Workshop Flow
 
 ```bash
-# Lab 1: Ollama basics
+# Lab 1: Ollama setup and local model calls
 python3 labs/lab1-ollama/simple_ollama_test.py
 
-# Lab 2: Prompt engineering
+# Lab 2: RACE prompt engineering
 python3 labs/lab2-prompts/prompt_engineering_race.py
 
-# Lab 3: Network chatbot
+# Lab 3: Chatbot memory
 python3 labs/lab3-chatbot/chatbot_v2_with_memory.py
 
-# Lab 4: Autonomous agent ⭐
+# Lab 4: Agentic troubleshooting bot ⭐
 python3 labs/lab4-agentic/agentic_network_bot_ollama.py
+
+# Lab 5: MCP server, HTTP bridge, and browser UI
+python3 labs/lab5-mcp/client_test.py
+# Browser UI flow: run mcp_server.py --sse, then http_bridge.py, then open ui.html
+
+# Lab 6: Production-readiness reference patterns
+python3 labs/lab6-production-readiness/safe_tools.py
+python3 labs/lab6-production-readiness/production_agent_skeleton.py
 ```
 
-**All 4 labs - $0 cost!**
+**All 6 labs - $0 cost!**
 
 ## Troubleshooting
 
@@ -99,13 +107,16 @@ ollama serve
 # Check installed models
 ollama list
 
-# Pull if missing
+# Labs 1-3: early prompt, parsing, and chatbot examples
 ollama pull llama3.2:3b
+
+# Lab 4: agentic workflow for Chapter 6 and Chapter 7
+ollama pull deepseek-r1:8b
 ```
 
 **Import errors?**
 ```bash
-pip3 install -r requirements.txt --upgrade
+pip install -r requirements.txt --upgrade
 ```
 
 **Need help?**
@@ -129,11 +140,10 @@ This runs an autonomous AI agent that troubleshoots a mock network!
 👤 User: Check if leaf2 has any issues
 🔧 Agent is calling: get_device_status({"device": "leaf2"})
 🔧 Agent is calling: get_bgp_summary({"device": "leaf2"})
-🔧 Agent is calling: get_interface_status({"device": "leaf2", "interface": "Ethernet3"})
-🤖 Agent: leaf2 has two issues:
-  leaf2 has 1/2 BGP peers established
-neighbor 10.1.2.2 is Idle
-  Recommend checking physical connectivity and BGP configuration.
+🔧 Agent is calling: get_interface_status({"device": "leaf2"})
+🤖 Agent: leaf2 is up. BGP has 1/2 peers Established.
+Neighbor 10.1.2.2 is Idle with 0 prefixes.
+Ethernet3 (server_rack_2) is down.
 ```
 
 

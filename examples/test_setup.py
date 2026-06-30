@@ -37,16 +37,27 @@ def check_ollama():
             response = requests.get("http://localhost:11434/api/tags", timeout=5)
             print("✅ Ollama service running")
             
-            # Check model
+            # Check models used across the chapter flow.
             data = response.json()
             models = [m["name"] for m in data.get("models", [])]
-            if any("llama3.2:3b" in m for m in models):
-                print("✅ llama3.2:3b model installed")
-                return True
-            else:
-                print("❌ llama3.2:3b not found")
-                print("   Run: ollama pull llama3.2:3b")
+            required_models = {
+                "llama3.2:3b": "Labs 1-3 baseline model",
+                "deepseek-r1:8b": "Lab 4 agentic workflow model",
+            }
+            missing_models = []
+            for model, label in required_models.items():
+                if any(model in installed_model for installed_model in models):
+                    print(f"✅ {model} installed ({label})")
+                else:
+                    print(f"❌ {model} not found ({label})")
+                    missing_models.append(model)
+
+            if missing_models:
+                for model in missing_models:
+                    print(f"   Run: ollama pull {model}")
                 return False
+
+            return True
         except:
             print("❌ Ollama not running")
             print("   Run: ollama serve")

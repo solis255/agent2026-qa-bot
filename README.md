@@ -43,6 +43,8 @@ ollama pull deepseek-r1:8b
 python examples/test_setup.py
 ```
 
+Model usage is split by chapter flow: `llama3.2:3b` is the baseline for the early prompt, parsing, and chatbot examples, while `deepseek-r1:8b` is used for the Lab 4 agentic workflow, including the Chapter 6 and Chapter 7 flow.
+
 If Ollama is not already running:
 
 ```bash
@@ -205,7 +207,6 @@ Building-AI-Agents-for-Network-Operations/
 │   └── lab6-production-readiness/
 ├── prompts/
 ├── scripts/
-├── slides/
 ├── tests/
 └── bonus/
 ```
@@ -256,7 +257,11 @@ If Ollama calls fail, confirm the service and models:
 ```bash
 ollama serve
 ollama list
+
+# Labs 1-3: early prompt, parsing, and chatbot examples
 ollama pull llama3.2:3b
+
+# Lab 4: agentic workflow for Chapter 6 and Chapter 7
 ollama pull deepseek-r1:8b
 ```
 

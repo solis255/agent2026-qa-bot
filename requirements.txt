@@ -3,20 +3,22 @@
 
 # 🎯 ALL LABS USE OLLAMA - 100% FREE, NO API KEYS REQUIRED!
 
-# HTTP requests (for Ollama API)
+# Local model API clients
 requests>=2.32.0
 
-# Optional: Network automation (for production use only)
-# paramiko>=3.5.0
-# netmiko>=4.4.0
-
-
+# External API examples
 anthropic>=0.104.0
-mcp[cli]>=1.0.0
-netmiko>=4.4.0
 python-dotenv>=1.0.1
+
+# Network automation and config parsing examples
+netmiko>=4.4.0
 PyYAML>=6.0.2
 rich>=13.9.0
+
+# MCP server, HTTP bridge, and browser UI examples
+mcp[cli]>=1.0.0
 starlette>=0.37.0
 uvicorn>=0.30.0
+
+# Test suite
 pytest>=8.3.0

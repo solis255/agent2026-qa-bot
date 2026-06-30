@@ -95,7 +95,7 @@ def collect_via_ssh(device: dict) -> tuple[str | None, str]:
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        return None, "netmiko not installed — pip install netmiko"
+        return None, "netmiko not installed — pip install -r requirements.txt"
 
     cfg = {k: v for k, v in device.items() if k != "label"}
     try:

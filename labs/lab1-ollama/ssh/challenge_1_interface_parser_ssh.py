@@ -53,7 +53,7 @@ def collect_via_ssh() -> str:
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        print("  ⚠️  netmiko not installed — pip install netmiko")
+        print("  ⚠️  netmiko not installed — pip install -r requirements.txt")
         print("  Falling back to mock data...\n")
         return MOCK_OUTPUT
 

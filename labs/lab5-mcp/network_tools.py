@@ -67,7 +67,7 @@ def safe_interface_status(device: str, interface: Optional[str] = None) -> Dict[
     error = validate_device(device)
     if error:
         return error
-    return get_interface_status(device, interface)
+    return get_interface_status(device, interface=interface)
 
 
 def safe_bgp_summary(device: str) -> Dict[str, Any]:

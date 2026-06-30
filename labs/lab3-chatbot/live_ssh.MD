@@ -88,13 +88,7 @@ That means the chatbot can update what it knows during the conversation.
 Install Python dependencies:
 
 ```bash
-pip install requests
-```
-
-If you want to use real SSH devices, also install Netmiko:
-
-```bash
-pip install netmiko
+pip install -r requirements.txt
 ```
 
 Start Ollama:
