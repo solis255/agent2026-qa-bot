@@ -1,5 +1,5 @@
 # Prompt Template Library
-## AI Networking Workshop
+## Building AI Agents for Network Operations
 
 Reusable prompt templates following the RACE prompt structure.
 
