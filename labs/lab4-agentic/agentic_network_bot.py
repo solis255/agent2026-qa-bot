@@ -432,7 +432,7 @@ if __name__ == "__main__":
     print("\n💡 Key Takeaways:")
     print("  1. Agents autonomously decide which tools to call")
     print("  2. Multi-step reasoning enables complex troubleshooting")
-    print("  3. Tool calling connects LLMs to real infrastructure")
+    print("  3. Tool calling connects LLM decisions to controlled network data sources")
     print("  4. The same pattern can later be adapted for real devices with proper")
     print("     safety controls, credential handling, logging, and approval gates")
     print("="*70)
