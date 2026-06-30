@@ -110,6 +110,6 @@ Do not jump from "agent can troubleshoot" to "agent can configure the network" w
 
 ## Book alignment
 
-This lab supports Chapter 9 of the book outline: **Moving toward production ready network agents**.
+This lab supports Chapter 9 of the book outline: **Moving toward production-ready network agents**.
 
 By the end of this lab, readers should understand the difference between a working demo and a controlled, observable, read-only-first operational prototype.
