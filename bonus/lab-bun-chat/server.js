@@ -935,7 +935,7 @@ const HTML = `<!DOCTYPE html>
 <!-- Top bar -->
 <div class="topbar">
   <div class="topbar-logo">P<span>.</span>E<span>.</span>N<span>.</span>E<span>.</span></div>
-  <div class="topbar-sub">Prompt Engineering Tester &nbsp;·&nbsp; AI Networking Workshop</div>
+  <div class="topbar-sub">Prompt Engineering Tester &nbsp;·&nbsp; Building AI Agents for Network Operations</div>
   <div class="topbar-right">
     <div class="model-chip">model: <b>${MODEL}</b></div>
   </div>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 2: Parse BGP Summary Output to JSON
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 GOAL:
     Feed raw 'show bgp summary' output to Ollama and get back

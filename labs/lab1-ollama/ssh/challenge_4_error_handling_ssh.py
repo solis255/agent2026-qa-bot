@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 4 (SSH): Error Handling with Real Device Output
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 Same goal as challenge_4_error_handling.py but errors come from
 two places now: SSH connection failures AND bad device output.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 1 (SSH): Parse Interface Output to JSON
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 Same goal as challenge_1_interface_parser.py but the input comes
 from a real device over SSH using Netmiko instead of a hardcoded string.

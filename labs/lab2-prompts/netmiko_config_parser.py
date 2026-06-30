@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 2: Netmiko SSH Config Fetch + RACE Prompt Parsing
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
 POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
@@ -354,7 +354,7 @@ def demo_interface_audit():
 
 if __name__ == "__main__":
     mode = "MOCK DATA (no real devices needed)" if USE_MOCK else "LIVE SSH — real devices"
-    print("🎯 RACE + Netmiko SSH  |  AI Networking Workshop")
+    print("🎯 RACE + Netmiko SSH  |  Building AI Agents for Network Operations")
     print("=" * 70)
     print(f"Mode: {mode}")
     print("To use real devices: set USE_MOCK = False and update DEVICE_CONFIG")

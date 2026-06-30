@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1: Netmiko SSH Data Collection + Ollama Analysis
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
 POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
@@ -251,7 +251,7 @@ def demo_bgp_health():
 
 if __name__ == "__main__":
     mode = "MOCK DATA (no real devices needed)" if USE_MOCK else "LIVE SSH — real devices"
-    print("🔧 Netmiko SSH + Ollama  |  AI Networking Workshop")
+    print("🔧 Netmiko SSH + Ollama  |  Building AI Agents for Network Operations")
     print("=" * 70)
     print(f"Mode: {mode}")
     print("To use real devices: set USE_MOCK = False and update DEVICE_CONFIG")

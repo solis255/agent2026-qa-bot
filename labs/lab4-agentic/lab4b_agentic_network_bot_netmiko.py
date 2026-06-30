@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 4B: Agentic Network Bot with Real SSH using Netmiko
-AI Networking Workshop - Local Ollama + Real Network Device SSH
+Building AI Agents for Network Operations - Local Ollama + Real Network Device SSH
 
 WARNING:
 - This version connects to real network devices over SSH.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 3 (SSH): Multi-Vendor Interface Normalisation via SSH
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 Same goal as challenge_3_multi_vendor.py but the input comes from
 real devices over SSH. Each entry in DEVICES can be a different

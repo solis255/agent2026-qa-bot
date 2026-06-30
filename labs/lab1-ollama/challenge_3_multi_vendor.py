@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 3: Multi-Vendor Interface Normalisation
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 GOAL:
     Parse interface status lines from three different vendors

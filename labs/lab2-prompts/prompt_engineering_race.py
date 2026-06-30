@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 2: Prompt Engineering with RACE Framework
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 This lab demonstrates how better prompts produce more consistent,
 accurate, and automation-ready JSON output.

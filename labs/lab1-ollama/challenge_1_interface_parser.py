@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 1: Parse Interface Output to JSON
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 GOAL:
     Get Ollama to read raw Cisco 'show interface' output and

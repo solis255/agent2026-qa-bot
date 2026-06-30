@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 — Challenge 4: Robust JSON Parsing with Error Recovery
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 GOAL:
     Handle the two things that can go wrong when asking an LLM

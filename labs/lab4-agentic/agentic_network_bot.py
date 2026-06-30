@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 4: Agentic Network Bot
-AI Networking Workshop - 100% Free, No API Keys Required
+Building AI Agents for Network Operations - 100% Free, No API Keys Required
 
 This lab demonstrates how to build an AI agent that can autonomously
 query and operate network devices using tool calling.

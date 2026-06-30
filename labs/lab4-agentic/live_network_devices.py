@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 4: Live Network Devices via Netmiko SSH
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 DROP-IN REPLACEMENT for ../../examples/mock_network_devices.py
 

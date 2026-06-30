@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Mock Network Device Simulator
-AI Networking Workshop - macOS Compatible
+Building AI Agents for Network Operations - macOS Compatible
 
 This module simulates Arista cEOS devices without requiring Containerlab.
 All device responses are realistic but mocked for cross-platform compatibility.

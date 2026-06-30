@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1 Challenge: JSON Output from Ollama
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 Learn to get structured JSON output from LLMs.
 This is critical for parsing data and building automation.
@@ -220,7 +220,7 @@ Output only valid JSON."""
 
 
 if __name__ == "__main__":
-    print("🎯 Ollama JSON Challenge - AI Networking Workshop")
+    print("🎯 Ollama JSON Challenge - Building AI Agents for Network Operations")
     print("="*70)
     print("\nGoal: Get LLMs to output valid, structured JSON")
     print("="*70)

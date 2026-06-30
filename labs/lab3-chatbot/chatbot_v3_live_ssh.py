@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 3 Part C: Stateful Chatbot with Live SSH Context
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
 POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
@@ -213,7 +213,7 @@ Be concise and accurate."""
 
 if __name__ == "__main__":
     mode = "MOCK DATA (no real devices needed)" if USE_MOCK else "LIVE SSH — real devices"
-    print("🤖 Live SSH Chatbot  |  AI Networking Workshop")
+    print("🤖 Live SSH Chatbot  |  Building AI Agents for Network Operations")
     print("=" * 70)
     print(f"Mode: {mode}")
     print("To use real devices: set USE_MOCK = False and update DEVICE_CONFIG")

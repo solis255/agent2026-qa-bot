@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 4: Agentic Network Bot (Ollama Version)
-AI Networking Workshop - 100% Free, No API Keys Required
+Building AI Agents for Network Operations - 100% Free, No API Keys Required
 
 This demonstrates building an autonomous AI agent using Ollama that can:
 - Query network devices

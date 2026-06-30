@@ -86,7 +86,7 @@ def check_labs():
 
 
 def main():
-    print("\n🤖 AI Networking Workshop - Setup Test".center(70))
+    print("\n🤖 Building AI Agents for Network Operations - Setup Test".center(70))
     print("100% Free with Ollama - No API Keys!".center(70))
     
     checks = [check_python(), check_ollama(), check_labs()]
