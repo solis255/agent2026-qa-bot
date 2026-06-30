@@ -3,8 +3,8 @@
 Lab 1: Netmiko SSH Data Collection + Ollama Analysis
 Building AI Agents for Network Operations
 
-WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
-POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
+LAB MODE:  USE_MOCK = True  (works without any devices)
+AFTER THE LAB:  Set USE_MOCK = False and update DEVICE_CONFIG
 
 What this shows:
 - SSH into network devices with Netmiko (same pattern as production)
@@ -19,7 +19,7 @@ from typing import Optional
 # TOGGLE: Mock data vs live SSH
 # ============================================================================
 
-USE_MOCK = True  # Flip to False with real devices after the workshop
+USE_MOCK = True  # Flip to False with real devices after the lab
 
 DEVICE_CONFIG = {
     "spine1": {"device_type": "arista_eos", "host": "192.168.0.11", "username": "admin", "password": "admin", "port": 22},
