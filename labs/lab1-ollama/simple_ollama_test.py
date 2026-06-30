@@ -94,7 +94,7 @@ def compare_models(prompt: str, models: list[str]) -> None:
         print(f"\n{'='*70}\n")
 
 
-def test_temperature_effects(prompt: str, model: str = "llama3.2:3b") -> None:
+def demo_temperature_effects(prompt: str, model: str = "llama3.2:3b") -> None:
     """
     Demonstrate how temperature affects output randomness.
     
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     
     # Test 3: Temperature effects
     print("\n📝 Test 3: Temperature Effects")
-    test_temperature_effects(
+    demo_temperature_effects(
         "Generate a creative name for a network monitoring tool",
         model="llama3.2:3b"
     )
