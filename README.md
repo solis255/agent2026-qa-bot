@@ -78,8 +78,17 @@ python labs/lab3-chatbot/chatbot_v2_with_memory.py
 python labs/lab4-agentic/agentic_network_bot_ollama.py
 
 # Lab 5: MCP server and client examples
-python labs/lab5-mcp/mcp_server.py
+# First, test the tool layer
 python labs/lab5-mcp/client_test.py
+
+# Terminal 1: start the MCP server in SSE mode
+python labs/lab5-mcp/mcp_server.py --sse
+
+# Terminal 2: start the HTTP bridge
+python labs/lab5-mcp/http_bridge.py
+
+# Browser: open the UI
+open labs/lab5-mcp/ui.html
 
 # Lab 6: Production-readiness patterns
 python labs/lab6-production-readiness/production_agent_skeleton.py

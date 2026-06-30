@@ -8,14 +8,15 @@ That is where MCP, the Model Context Protocol, fits.
 
 ## What you will build
 
-You will package the existing workshop network tools as an MCP server:
+You will package the existing workshop network tools as an MCP server with these public MCP tools:
 
-- `get_device_status`
-- `get_interface_status`
-- `get_bgp_summary`
-- `ping_device`
-- `execute_show_command`
-- `get_topology_info`
+- `devices`
+- `device_status`
+- `interface_status`
+- `bgp_summary`
+- `ping`
+- `show_command`
+- `topology`
 
 The important idea is simple:
 
