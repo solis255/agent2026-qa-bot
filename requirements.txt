@@ -1,4 +1,4 @@
-# AI Networking Workshop - Python Dependencies
+# Building AI Agents for Network Operations - Python Dependencies
 # Install with: pip install -r requirements.txt
 
 # 🎯 ALL LABS USE OLLAMA - 100% FREE, NO API KEYS REQUIRED!
