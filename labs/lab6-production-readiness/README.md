@@ -8,7 +8,7 @@ The goal is not to create a fully productionized platform in one lab. The goal i
 
 ## What you will build
 
-You will build a production-readiness skeleton around the workshop network tools:
+You will build a production-readiness skeleton around the lab network tools:
 
 - A backend abstraction for mock vs. real network access
 - A read-only-first tool policy
