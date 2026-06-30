@@ -68,7 +68,7 @@ Tokens: 156
 
 ## What's Next?
 
-### Six-Lab Workshop Flow
+### Six-lab learning flow
 
 ```bash
 # Lab 1: Ollama setup and local model calls
