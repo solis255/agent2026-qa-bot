@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Workshop Environment Test Script
-Tests that everything is set up correctly for 100% Ollama-based workshop
+Book Lab Environment Test Script
+Tests that everything is set up correctly for 100% Ollama-based book labs
 """
 
 import sys
