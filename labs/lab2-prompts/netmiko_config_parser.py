@@ -3,8 +3,8 @@
 Lab 2: Netmiko SSH Config Fetch + RACE Prompt Parsing
 Building AI Agents for Network Operations
 
-WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
-POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
+LAB MODE:  USE_MOCK = True  (works without any devices)
+AFTER THE LAB:  Set USE_MOCK = False and update DEVICE_CONFIG
 
 What this shows:
 - Fetch running configs and show output via SSH (Netmiko)
@@ -19,7 +19,7 @@ import requests
 # TOGGLE: Mock data vs live SSH
 # ============================================================================
 
-USE_MOCK = True  # Flip to False with real devices after the workshop
+USE_MOCK = True  # Flip to False with real devices after the lab
 
 DEVICE_CONFIG = {
     "spine1": {"device_type": "arista_eos", "host": "192.168.0.11", "username": "admin", "password": "admin", "port": 22},
