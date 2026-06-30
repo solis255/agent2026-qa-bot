@@ -28,5 +28,5 @@ def test_blocks_non_show_commands():
 def test_rejects_unknown_device_before_running_command():
     result = safe_show_command("unknown", "show version")
 
-    assert "not in the workshop topology" in result["error"]
+    assert "not in the lab topology" in result["error"]
     assert result["available_devices"] == ["spine1", "spine2", "leaf1", "leaf2"]
