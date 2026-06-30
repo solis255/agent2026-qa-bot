@@ -13,7 +13,7 @@ The script supports two modes:
 
 1. **Mock Mode**
    - Uses fake/sample network data.
-   - Great for workshops, demos, and testing without real devices.
+   - Great for demos and testing without real devices.
 
 2. **Live SSH Mode**
    - Connects to real network devices using Netmiko.
@@ -196,7 +196,7 @@ When `USE_MOCK` is `True`, the chatbot uses the sample interface and BGP data al
 
 When `USE_MOCK` is `False`, the chatbot tries to connect to real devices using SSH and Netmiko.
 
-This makes the script workshop-friendly because everyone can run it even without network gear.
+This makes the script lab-friendly because everyone can run it even without network gear.
 
 ---
 
@@ -376,7 +376,7 @@ with ConnectHandler(**cfg) as conn:
 
 If SSH fails, it falls back to mock data.
 
-That is useful for workshops because one bad device connection does not break the entire demo.
+That is useful in a lab because one bad device connection does not break the entire demo.
 
 ---
 
@@ -820,9 +820,9 @@ By the end of this lab, you should understand:
 
 ---
 
-# Workshop Notes
+# Lab Notes
 
-For workshop delivery, keep:
+For lab use, keep:
 
 ```python
 USE_MOCK = True
@@ -830,7 +830,7 @@ USE_MOCK = True
 
 This makes the lab easy for everyone to run.
 
-After the workshop, students can set:
+After the lab, students can set:
 
 ```python
 USE_MOCK = False
