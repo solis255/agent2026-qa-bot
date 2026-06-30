@@ -1,6 +1,6 @@
 # Lab 5: Reusable Network Tools with MCP
 
-This lab extends the workshop from direct tool calling into reusable MCP-based tooling.
+This lab extends the direct tool-calling workflow into reusable MCP-based tooling.
 
 Through Lab 4, the agent called Python functions directly. That is perfect for learning. But as soon as you want the same network tools to be reused by multiple AI clients, assistants, editors, or internal platforms, you need a cleaner packaging pattern.
 
@@ -8,7 +8,7 @@ That is where MCP, the Model Context Protocol, fits.
 
 ## What you will build
 
-You will package the existing workshop network tools as an MCP server with these public MCP tools:
+You will package the existing lab network tools as an MCP server with these public MCP tools:
 
 - `devices`
 - `device_status`
@@ -33,7 +33,7 @@ Network teams already deal with tool sprawl: IPAM, monitoring, SSH, NMS, NetBox,
 
 MCP gives you a consistent way to expose tools and context.
 
-For this lab, we stay read-only and use the workshop mock network. That keeps the lesson safe while still showing the production pattern.
+For this lab, we stay read-only and use the lab mock network. That keeps the lesson safe while still showing the production pattern.
 
 ## Folder contents
 
@@ -41,7 +41,7 @@ For this lab, we stay read-only and use the workshop mock network. That keeps th
 labs/lab5-mcp/
 ├── README.md          # This guide
 ├── mcp_server.py      # MCP server that exposes network tools
-├── network_tools.py   # Safe wrapper around the workshop mock tools
+├── network_tools.py   # Safe wrapper around the lab mock tools
 ├── client_test.py     # Local sanity test for the business logic
 ├── http_bridge.py     # MCP client + HTTP server for the browser UI
 └── ui.html            # Interactive browser UI
@@ -130,7 +130,7 @@ Or double-click `ui.html` in Finder. The UI lets you call every MCP tool interac
 
 This lab intentionally keeps the tools boring and safe:
 
-- Only known workshop devices are allowed.
+- Only known lab devices are allowed.
 - Only `show` commands are allowed.
 - Tool results are structured dictionaries.
 - No configuration changes are exposed.
