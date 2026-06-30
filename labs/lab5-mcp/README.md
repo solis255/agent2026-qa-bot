@@ -90,9 +90,9 @@ Example stdio client configuration for Claude Desktop:
 ```json
 {
   "mcpServers": {
-    "ai-networking-workshop": {
+    "network-agent-tools": {
       "command": "python3",
-      "args": ["/absolute/path/to/ai-networking-workshop/labs/lab5-mcp/mcp_server.py"]
+      "args": ["/absolute/path/to/Building-AI-Agents-for-Network-Operations/labs/lab5-mcp/mcp_server.py"]
     }
   }
 }
