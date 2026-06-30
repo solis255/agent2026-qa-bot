@@ -3,8 +3,8 @@
 Lab 3 Part C: Stateful Chatbot with Live SSH Context
 Building AI Agents for Network Operations
 
-WORKSHOP MODE:  USE_MOCK = True  (works without any devices)
-POST-WORKSHOP:  Set USE_MOCK = False and update DEVICE_CONFIG
+LAB MODE:  USE_MOCK = True  (works without any devices)
+AFTER THE LAB:  Set USE_MOCK = False and update DEVICE_CONFIG
 
 What this adds on top of chatbot_v2_with_memory.py:
 - A LiveDeviceContext class that fetches real device state via Netmiko SSH
@@ -21,7 +21,7 @@ from typing import List, Dict
 # TOGGLE: Mock data vs live SSH
 # ============================================================================
 
-USE_MOCK = True  # Flip to False with real devices after the workshop
+USE_MOCK = True  # Flip to False with real devices after the lab
 
 DEVICE_CONFIG = {
     "spine1": {"device_type": "arista_eos", "host": "192.168.0.11", "username": "admin", "password": "admin", "port": 22},
