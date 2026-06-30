@@ -366,7 +366,7 @@ if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("Key takeaways:")
     print("  1. Same RACE prompts work on real device output — no changes needed")
-    print("  2. fetch_via_ssh() is a production-ready wrapper around Netmiko")
+    print("  2. fetch_via_ssh() shows a reusable Netmiko wrapper pattern for controlled SSH collection")
     print("  3. Structured prompts + real data = reliable JSON automation")
     print("  4. Flip USE_MOCK = False when real devices are available")
     print("=" * 70)
