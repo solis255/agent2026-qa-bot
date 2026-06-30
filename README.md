@@ -6,7 +6,7 @@
 
 Hands-on labs for building AI-powered network operations tools: local LLM prompts, prompt engineering, chatbots with memory, agentic tool calling, MCP tools, and production-readiness patterns.
 
-The workshop is designed to run locally with Ollama and Python. Most labs use the included mock network devices, so you can learn the agent patterns without needing cloud API keys or a live network.
+The book labs are designed to run locally with Ollama and Python. Most labs use the included mock network devices, so you can learn the agent patterns without needing cloud API keys or a live network.
 
 ## Quick Start
 
