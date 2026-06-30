@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lab 6: Mock-to-real backend pattern for production-ready network agents.
+Lab 6: Mock-to-real backend pattern for production-readiness reviews.
 
 This example keeps the agent-facing tool contract stable while allowing the
 backend implementation to change from mock data to real infrastructure later.
