@@ -3,7 +3,7 @@
 Safe network tool wrappers for Lab 5.
 
 These wrappers keep the MCP layer thin. The real network logic stays in the
-existing workshop mock device module so Lab 5 builds on Lab 4 instead of
+existing lab mock device module so Lab 5 builds on Lab 4 instead of
 creating a second topology model.
 """
 
@@ -33,7 +33,7 @@ ALLOWED_SHOW_PREFIX = "show"
 
 
 def list_devices() -> Dict[str, Any]:
-    """Return the devices available in the workshop topology."""
+    """Return the devices available in the lab topology."""
     return {
         "source": "mock_network_devices",
         "devices": MockNetworkDevice.list_devices(),
@@ -47,7 +47,7 @@ def validate_device(device: str) -> Optional[Dict[str, Any]]:
 
     if not MockNetworkDevice.device_exists(device):
         return {
-            "error": f"Device '{device}' is not in the workshop topology",
+            "error": f"Device '{device}' is not in the lab topology",
             "available_devices": MockNetworkDevice.list_devices(),
         }
 
@@ -55,7 +55,7 @@ def validate_device(device: str) -> Optional[Dict[str, Any]]:
 
 
 def safe_device_status(device: str) -> Dict[str, Any]:
-    """Return operational status for one workshop device."""
+    """Return operational status for one lab device."""
     error = validate_device(device)
     if error:
         return error
@@ -63,7 +63,7 @@ def safe_device_status(device: str) -> Dict[str, Any]:
 
 
 def safe_interface_status(device: str, interface: Optional[str] = None) -> Dict[str, Any]:
-    """Return all interfaces or one interface for a workshop device."""
+    """Return all interfaces or one interface for a lab device."""
     error = validate_device(device)
     if error:
         return error
@@ -71,7 +71,7 @@ def safe_interface_status(device: str, interface: Optional[str] = None) -> Dict[
 
 
 def safe_bgp_summary(device: str) -> Dict[str, Any]:
-    """Return BGP summary information for a workshop device."""
+    """Return BGP summary information for a lab device."""
     error = validate_device(device)
     if error:
         return error
@@ -79,14 +79,14 @@ def safe_bgp_summary(device: str) -> Dict[str, Any]:
 
 
 def safe_ping(target: str, count: int = 4) -> Dict[str, Any]:
-    """Run a mock reachability check against a workshop target."""
+    """Run a mock reachability check against a lab target."""
     if count < 1 or count > 10:
         return {"error": "count must be between 1 and 10"}
     return ping_device(target, count)
 
 
 def safe_show_command(device: str, command: str) -> Dict[str, Any]:
-    """Execute a read-only show command against a workshop device."""
+    """Execute a read-only show command against a lab device."""
     error = validate_device(device)
     if error:
         return error
@@ -109,5 +109,5 @@ def safe_show_command(device: str, command: str) -> Dict[str, Any]:
 
 
 def safe_topology_info() -> Dict[str, Any]:
-    """Return the workshop topology map."""
+    """Return the lab topology map."""
     return get_topology_info()
