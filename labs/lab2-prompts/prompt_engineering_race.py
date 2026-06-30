@@ -340,7 +340,7 @@ GigabitEthernet0/2 is down, line protocol is down
 # ============================================================================
 
 if __name__ == "__main__":
-    print("🎯 RACE Prompt Engineering Workshop")
+    print("🎯 RACE Prompt Engineering Lab")
     print("=" * 70)
     
     print("\nFramework:")
