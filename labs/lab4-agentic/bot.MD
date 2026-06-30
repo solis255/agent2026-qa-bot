@@ -112,7 +112,7 @@ python -m venv .venv
 
 ## Step 4: Install Dependencies
 
-From the repository root, install the shared workshop dependencies:
+From the repository root, install the shared book lab dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -674,7 +674,7 @@ ollama pull deepseek-r1:8b
 
 ## Error: No module named requests
 
-Install the shared workshop dependencies from the repository root:
+Install the shared book lab dependencies from the repository root:
 
 ```bash
 pip install -r requirements.txt
