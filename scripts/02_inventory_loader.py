@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load the workshop inventory from YAML."""
+"""Load the lab inventory from YAML."""
 
 from pathlib import Path
 from typing import Any
