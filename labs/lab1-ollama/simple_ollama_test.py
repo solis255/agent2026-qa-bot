@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 1: Simple Ollama Test
-AI Networking Workshop
+Building AI Agents for Network Operations
 
 This script demonstrates basic interaction with Ollama's API.
 You'll learn how to:
@@ -130,7 +130,7 @@ NETWORKING_PROMPTS = [
 
 
 if __name__ == "__main__":
-    print("🤖 Ollama API Test - AI Networking Workshop")
+    print("🤖 Ollama API Test - Building AI Agents for Network Operations")
     print("="*70)
     
     # Test 1: Simple chat
