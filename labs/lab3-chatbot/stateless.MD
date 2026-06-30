@@ -36,7 +36,7 @@ Before running this script, make sure you have:
 - Ollama running locally
 - The `llama3.2:3b` model pulled down
 
-Install the shared workshop dependencies from the repository root:
+Install the shared book lab dependencies from the repository root:
 
 ```bash
 pip install -r requirements.txt
