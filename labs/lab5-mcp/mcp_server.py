@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Lab 5: MCP server for AI Networking Workshop network tools.
+Lab 5: MCP server for the book lab network tools.
 
 Run from the repository root:
     python3 labs/lab5-mcp/mcp_server.py
 
-This server exposes the workshop mock network functions through MCP so the
+This server exposes the lab mock network functions through MCP so the
 same tools can be reused by MCP-capable clients.
 """
 
@@ -30,7 +30,7 @@ mcp = FastMCP("ai-networking-workshop")
 
 @mcp.tool()
 def devices() -> dict:
-    """List the devices available in the workshop mock network."""
+    """List the devices available in the lab mock network."""
     return list_devices()
 
 
