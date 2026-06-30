@@ -5,8 +5,8 @@ Building AI Agents for Network Operations
 
 DROP-IN REPLACEMENT for ../../examples/mock_network_devices.py
 
-WORKSHOP MODE:  USE_LIVE = False  (uses the same mock data as before)
-POST-WORKSHOP:  Set USE_LIVE = True and update DEVICE_CONFIG
+LAB MODE:  USE_LIVE = False  (uses the same mock data as before)
+AFTER THE LAB:  Set USE_LIVE = True and update DEVICE_CONFIG
 
 How to swap in this module:
     # In agentic_network_bot_ollama.py or agentic_network_bot.py, replace:
@@ -25,7 +25,7 @@ from typing import Dict, List, Optional
 # TOGGLE: Mock fallback vs live SSH
 # ============================================================================
 
-USE_LIVE = False  # Flip to True with real devices after the workshop
+USE_LIVE = False  # Flip to True with real devices after the lab
 
 DEVICE_CONFIG = {
     "spine1": {"device_type": "arista_eos", "host": "192.168.0.11", "username": "admin", "password": "admin", "port": 22},
