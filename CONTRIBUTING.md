@@ -23,7 +23,7 @@ We're especially interested in:
 - Real device integration examples
 - Production deployment patterns
 - Custom prompt templates
-- Workshop improvements
+- Book lab improvements
 
 ### Pull Requests
 
