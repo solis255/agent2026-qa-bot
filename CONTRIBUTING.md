@@ -1,6 +1,6 @@
-# Contributing to AI Networking Workshop
+# Contributing to Building AI Agents for Network Operations
 
-Thank you for your interest in contributing! This workshop is designed to teach network engineers how to build AI agents, and we welcome improvements and additions.
+Thank you for your interest in contributing! This book lab repository is designed to help network engineers build AI agents, and we welcome improvements and additions.
 
 ## How to Contribute
 
@@ -105,4 +105,4 @@ Be respectful, constructive, and helpful. We're all learning together!
 
 ---
 
-Thank you for contributing to make this workshop better! 🙏
+Thank you for contributing to make this book lab repository better! 🙏
