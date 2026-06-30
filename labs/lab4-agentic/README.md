@@ -108,7 +108,7 @@ bot.chat("Something is wrong - investigate")
 Live network access is optional and advanced. In a controlled lab, you can adapt the mock tool layer to call real SSH or API backends while keeping safety controls outside the agent:
 
 ```python
-# Mock (workshop)
+# Mock lab
 def get_device_status(device):
     return MOCK_DEVICES.get(device)
 
