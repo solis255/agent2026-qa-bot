@@ -5,7 +5,7 @@ Lab 6: Safety wrappers for production-minded network agents.
 This file demonstrates the guardrail layer that should sit between an AI agent
 and network infrastructure.
 
-It uses the workshop mock devices, but the same pattern applies when the backend
+It uses the lab mock devices, but the same pattern applies when the backend
 is SSH, NetBox, a controller API, or another network system.
 """
 
