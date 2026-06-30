@@ -57,7 +57,7 @@ class NetworkBackend(ABC):
 
 
 class MockNetworkBackend(NetworkBackend):
-    """Workshop backend using the included mock devices."""
+    """Lab backend using the included mock devices."""
 
     def device_status(self, device: str) -> ToolResult:
         data = get_device_status(device)
