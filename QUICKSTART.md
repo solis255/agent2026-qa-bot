@@ -56,7 +56,7 @@ python3 labs/lab1-ollama/simple_ollama_test.py
 
 **Expected output:**
 ```
-🤖 Ollama API Test - AI Networking Workshop
+🤖 Ollama API Test - Building AI Agents for Network Operations
 ==================================================
 
 📝 Test 1: Simple Chat
