@@ -25,7 +25,7 @@ from network_tools import (
     safe_topology_info,
 )
 
-mcp = FastMCP("ai-networking-workshop")
+mcp = FastMCP("network-agent-tools")
 
 
 @mcp.tool()
@@ -58,7 +58,7 @@ def interface_status(device: str, interface: Optional[str] = None) -> dict:
 
 @mcp.tool()
 def bgp_summary(device: str) -> dict:
-    """Get BGP neighbor summary for a workshop network device.
+    """Get BGP neighbor summary for a lab network device.
 
     Args:
         device: Device hostname, such as spine1, spine2, leaf1, or leaf2.
@@ -79,7 +79,7 @@ def ping(target: str, count: int = 4) -> dict:
 
 @mcp.tool()
 def show_command(device: str, command: str) -> dict:
-    """Execute a read-only show command against a workshop device.
+    """Execute a read-only show command against a lab device.
 
     This lab blocks configuration commands. Use commands such as:
     - show version
@@ -95,7 +95,7 @@ def show_command(device: str, command: str) -> dict:
 
 @mcp.tool()
 def topology() -> dict:
-    """Return the workshop spine-leaf topology."""
+    """Return the lab spine-leaf topology."""
     return safe_topology_info()
 
 
