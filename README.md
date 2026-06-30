@@ -94,7 +94,7 @@ open labs/lab5-mcp/ui.html
 python labs/lab6-production-readiness/production_agent_skeleton.py
 ```
 
-## Workshop Structure
+## Lab Structure
 
 ### Lab 1: Ollama and Network Prompts
 
