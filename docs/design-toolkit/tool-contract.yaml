@@ -1,0 +1,28 @@
+tool_contract:
+  name: "bgp_summary"
+  owner: "Network automation team"
+  purpose: "Return BGP neighbor state for an approved device"
+  arguments:
+    device:
+      type: "string"
+      required: true
+      validation: "must exist in approved device allowlist"
+  returns:
+    device: "string"
+    total_peers: "integer"
+    established_peers: "integer"
+    neighbors: "array"
+  blocked_when:
+    - "device is unknown"
+    - "backend times out"
+  error_shape:
+    allowed: false
+    reason: "human readable reason"
+  logs:
+    - "user_or_client_id"
+    - "tool"
+    - "device"
+    - "decision.allowed"
+    - "duration_ms"
+  versioning:
+    compatibility_rule: "new tool name or versioned schema for breaking changes"

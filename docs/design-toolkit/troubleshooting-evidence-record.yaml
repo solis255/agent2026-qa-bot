@@ -1,0 +1,29 @@
+case_id: "INC-12345"
+user_request: "Check whether leaf2 has any issues"
+target_device: "leaf2"
+evidence:
+  device_status:
+    tool: "device_status"
+    status: "up"
+    source: "mock_network_devices"
+  bgp_summary:
+    tool: "bgp_summary"
+    total_peers: 2
+    established_peers: 1
+    unhealthy_neighbors:
+      - ip: "10.1.2.2"
+        state: "Idle"
+        prefixes: 0
+  interface_status:
+    tool: "interface_status"
+    down_interfaces:
+      - name: "Ethernet3"
+        description: "server_rack_2"
+validation:
+  bgp_issue_present: true
+  down_interface_present: true
+  final_answer_must_mention:
+    - "10.1.2.2"
+    - "Ethernet3"
+unknowns:
+  - "No live device check was performed in the mock lab"

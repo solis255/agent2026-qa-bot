@@ -1,0 +1,21 @@
+agent_use_case:
+  name: "Read-only BGP triage assistant"
+  problem: "Engineers spend time collecting BGP and interface evidence after alerts."
+  users:
+    - "NOC engineer"
+    - "Network operator"
+  first_scope: "Read-only triage for approved spine and leaf devices"
+  excluded_scope:
+    - "Configuration changes"
+    - "Session resets"
+    - "Unapproved devices"
+  expected_value:
+    - "Collect device, BGP, interface, and reachability evidence"
+    - "Produce a concise troubleshooting summary"
+    - "Suggest next checks for an engineer"
+  success_measure:
+    - "Final answer matches tool evidence"
+    - "Every tool call is logged"
+    - "No blocked command is executed"
+  owner: "Network automation team"
+  review_status: "draft"
