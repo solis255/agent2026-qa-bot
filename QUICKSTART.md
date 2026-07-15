@@ -22,7 +22,7 @@ brew install ollama
 
 **Linux:**
 ```bash
-curl https://ollama.ai/install.sh | sh
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
 **Windows:**
