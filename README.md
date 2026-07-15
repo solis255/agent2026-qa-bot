@@ -8,6 +8,26 @@ Hands-on labs for building AI-powered network operations tools: local LLM prompt
 
 The book labs are designed to run locally with Ollama and Python. Most labs use the included mock network devices, so you can learn the agent patterns without needing cloud API keys or a live network.
 
+
+## Book chapter and lab map
+
+The following table shows where each chapter connects to the repository files. Some chapters are conceptual, while others use hands-on lab folders or reusable templates.
+
+| Chapter | Main repository files |
+|---|---|
+| Chapter 1: Understanding AI Agents for Network Operations | Conceptual chapter; no lab required |
+| Chapter 2: LLM Fundamentals and Local Setup | `QUICKSTART.md`, `examples/temperature.py`, `labs/lab1-ollama/` |
+| Chapter 3: Prompt Engineering for Network Automation | `labs/lab2-prompts/`, `prompts/` |
+| Chapter 4: Parsing Network Outputs into Structured Data | `labs/lab1-ollama/challenge_*.py`, `examples/interface_output.json`, `examples/bgp_output.json` |
+| Chapter 5: Building a Network Chatbot with Memory | `labs/lab3-chatbot/` |
+| Chapter 6: Designing Tools and Agentic Workflows | `labs/lab4-agentic/agentic_network_bot_ollama.py`, `examples/mock_network_devices.py` |
+| Chapter 7: Building the Main Network Troubleshooting Agent | `labs/lab4-agentic/agentic_network_bot_ollama.py`, `examples/mock_network_devices.py` |
+| Chapter 8: From Lab Agents to Reusable Tools with MCP | `labs/lab5-mcp/` |
+| Chapter 9: Moving Toward Production-Ready Network Agents | `labs/lab6-production-readiness/` |
+| Appendix A: AI Network Agent Design Toolkit | `docs/design-toolkit/` |
+
+Ready-to-copy versions of the Appendix A worksheets and templates are available in `docs/design-toolkit/`.
+
 ## Quick Start
 
 ### Prerequisites
@@ -215,6 +235,8 @@ Building-AI-Agents-for-Network-Operations/
 │   ├── lab5-mcp/
 │   └── lab6-production-readiness/
 ├── prompts/
+├── docs/
+│   └── design-toolkit/
 ├── scripts/
 ├── tests/
 └── bonus/
