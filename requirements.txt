@@ -6,7 +6,10 @@
 # Local model API clients
 requests>=2.32.0
 
-# External API examples
+# TJU Competition API (OpenAI-compatible Chat Completions)
+openai>=1.0,<3
+
+# Upstream external API examples
 anthropic>=0.104.0
 python-dotenv>=1.0.1
 

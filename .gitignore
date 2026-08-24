@@ -59,6 +59,7 @@ htmlcov/
 # API keys (safety)
 *_api_key*
 *_secret*
+*.key
 credentials.json
 
 # Book lab specific
