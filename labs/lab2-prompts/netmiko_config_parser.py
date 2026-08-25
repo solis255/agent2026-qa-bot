@@ -13,7 +13,14 @@ What this shows:
 """
 
 import json
-import requests
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 # ============================================================================
 # TOGGLE: Mock data vs live SSH
@@ -175,22 +182,19 @@ def _mock_lookup(device: str, command: str) -> str:
 
 
 # ============================================================================
-# OLLAMA LLM CALL
+# TJU API LLM CALL
 # ============================================================================
 
-def call_llm(prompt: str, model: str = "llama3.2:3b", temperature: float = 0.2) -> str:
+def call_llm(prompt: str, model: str = DEFAULT_MODEL, temperature: float = 0.2) -> str:
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False,
-                  "options": {"temperature": temperature, "num_predict": 800}},
+        return generate_text(
+            prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=800,
             timeout=60,
         )
-        resp.raise_for_status()
-        return resp.json().get("response", "").strip()
-    except requests.exceptions.ConnectionError:
-        return "Error: Ollama not running — try: ollama serve"
-    except Exception as exc:
+    except TJUAPIError as exc:
         return f"Error: {exc}"
 
 

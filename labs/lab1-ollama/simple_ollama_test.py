@@ -1,73 +1,54 @@
 #!/usr/bin/env python3
 """
-Lab 1: Simple Ollama Test
+Lab 1: Simple TJU Competition API Test
 Building AI Agents for Network Operations
 
-This script demonstrates basic interaction with Ollama's API.
+This script demonstrates basic interaction with the OpenAI-compatible TJU API.
 You'll learn how to:
-- Make API calls to local LLMs
+- Make authenticated API calls to tju-llm
 - Control generation parameters
 - Parse responses
 """
 
-import requests
-import json
-from typing import Optional
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text_result
 
 
-def chat_with_ollama(
+def chat_with_tju(
     prompt: str,
-    model: str = "llama3.2:3b",
+    model: str = DEFAULT_MODEL,
     temperature: float = 0.7,
     max_tokens: int = 500
 ) -> dict:
     """
-    Send a prompt to Ollama and get a response.
+    Send a prompt to the TJU Competition API and get a response.
     
     Args:
         prompt: The question or instruction to send
-        model: Model name (e.g., 'llama3.2:3b', 'llama3.1:8b')
+        model: Competition model name (normally 'tju-llm')
         temperature: Randomness (0.0 = deterministic, 2.0 = very random)
         max_tokens: Maximum length of response
     
     Returns:
         dict with 'response', 'model', 'tokens' keys
     """
-    url = "http://localhost:11434/api/generate"
-    
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens
-        }
-    }
-    
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        return {
-            "response": data.get("response", ""),
-            "model": data.get("model", model),
-            "tokens": {
-                "prompt": data.get("prompt_eval_count", 0),
-                "response": data.get("eval_count", 0),
-                "total": data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
-            }
-        }
-    except requests.exceptions.ConnectionError:
-        print("❌ Error: Cannot connect to Ollama. Is it running?")
-        print("   Try: ollama serve")
+        return generate_text_result(
+            prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=30,
+        )
+    except TJUAPIError as exc:
+        print(f"❌ Error: {exc}")
         return {"response": "", "model": model, "tokens": {}}
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return {"response": "", "model": model, "tokens": {}}
-
-
 def compare_models(prompt: str, models: list[str]) -> None:
     """
     Compare the same prompt across different models.
@@ -84,7 +65,7 @@ def compare_models(prompt: str, models: list[str]) -> None:
         print(f"📊 Model: {model}")
         print(f"{'-'*70}")
         
-        result = chat_with_ollama(prompt, model=model)
+        result = chat_with_tju(prompt, model=model)
         
         if result["response"]:
             print(result["response"])
@@ -94,7 +75,7 @@ def compare_models(prompt: str, models: list[str]) -> None:
         print(f"\n{'='*70}\n")
 
 
-def demo_temperature_effects(prompt: str, model: str = "llama3.2:3b") -> None:
+def demo_temperature_effects(prompt: str, model: str = DEFAULT_MODEL) -> None:
     """
     Demonstrate how temperature affects output randomness.
     
@@ -112,7 +93,7 @@ def demo_temperature_effects(prompt: str, model: str = "llama3.2:3b") -> None:
         print(f"🌡️  Temperature: {temp}")
         print(f"{'-'*70}")
         
-        result = chat_with_ollama(prompt, model=model, temperature=temp)
+        result = chat_with_tju(prompt, model=model, temperature=temp)
         
         if result["response"]:
             print(result["response"][:300] + "...")  # First 300 chars
@@ -130,28 +111,23 @@ NETWORKING_PROMPTS = [
 
 
 if __name__ == "__main__":
-    print("🤖 Ollama API Test - Building AI Agents for Network Operations")
+    print("🤖 TJU Competition API Test - Building AI Agents for Network Operations")
     print("="*70)
     
     # Test 1: Simple chat
     print("\n📝 Test 1: Simple Chat")
-    result = chat_with_ollama("Explain OSPF in 2 sentences")
+    result = chat_with_tju("Explain OSPF in 2 sentences")
     if result["response"]:
         print(f"Response: {result['response']}")
         print(f"Tokens: {result['tokens']['total']}")
     
-    # Test 2: Compare models (uncomment if you have both models)
-    # print("\n📝 Test 2: Model Comparison")
-    # compare_models(
-    #     "Explain BGP route selection in 3 bullet points",
-    #     ["llama3.2:3b", "llama3.1:8b"]
-    # )
+    # The competition endpoint currently fixes the model to tju-llm.
     
     # Test 3: Temperature effects
     print("\n📝 Test 3: Temperature Effects")
     demo_temperature_effects(
         "Generate a creative name for a network monitoring tool",
-        model="llama3.2:3b"
+        model=DEFAULT_MODEL
     )
     
     # Interactive mode
@@ -168,7 +144,7 @@ if __name__ == "__main__":
         if not user_input:
             continue
         
-        result = chat_with_ollama(user_input)
+        result = chat_with_tju(user_input)
         if result["response"]:
             print(f"\n🤖: {result['response']}")
             print(f"   [{result['tokens']['total']} tokens]")

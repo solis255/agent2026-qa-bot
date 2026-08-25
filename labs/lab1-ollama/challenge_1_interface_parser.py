@@ -4,7 +4,7 @@ Lab 1 — Challenge 1: Parse Interface Output to JSON
 Building AI Agents for Network Operations
 
 GOAL:
-    Get Ollama to read raw Cisco 'show interface' output and
+    Get tju-llm to read raw Cisco 'show interface' output and
     return it as structured JSON your code can work with.
 
 WHY THIS MATTERS:
@@ -16,15 +16,22 @@ RUN:
     python challenge_1_interface_parser.py
 """
 
-import requests
 import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 
 # ── Helper ────────────────────────────────────────────────────────────────
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> dict | None:
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> dict | None:
     """
-    Send a prompt to Ollama and try to parse the response as JSON.
+    Send a prompt to the TJU API and try to parse the response as JSON.
 
     Returns a dict on success, or None if the response isn't valid JSON.
     """
@@ -37,18 +44,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},  # low temp = consistent output
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         # Strip markdown code fences if the model added them anyway
         if raw.startswith("```"):
@@ -62,7 +64,7 @@ Output only valid JSON:"""
     except json.JSONDecodeError:
         print(f"❌ Model didn't return valid JSON. Raw output:\n{raw[:300]}")
         return None
-    except Exception as e:
+    except TJUAPIError as e:
         print(f"❌ Error: {e}")
         return None
 
@@ -98,9 +100,9 @@ def run():
     print("=" * 60)
     print("\nInput (raw CLI output):")
     print(INTERFACE_OUTPUT)
-    print("Asking Ollama to parse it...\n")
+    print("Asking tju-llm to parse it...\n")
 
-    result = ask_ollama(PROMPT)
+    result = ask_tju(PROMPT)
 
     if result:
         print("✅ Parsed JSON:")

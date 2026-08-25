@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Lab 4B: Agentic Network Bot with Real SSH using Netmiko
-Building AI Agents for Network Operations - Local Ollama + Real Network Device SSH
+Building AI Agents for Network Operations - TJU API + Real Network Device SSH
 
 WARNING:
 - This version connects to real network devices over SSH.
@@ -12,9 +12,8 @@ WARNING:
 Requirements:
     pip install -r requirements.txt
 
-Ollama:
-    ollama serve
-    ollama pull deepseek-r1:8b
+TJU API:
+    Configure TJU_API_KEY, TJU_API_BASE, and TJU_MODEL in the project .env file.
 
 Optional environment variables:
     export NETMIKO_USERNAME="admin"
@@ -34,9 +33,15 @@ import ipaddress
 import json
 import os
 import re
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import requests
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, chat_message
 
 try:
     from netmiko import ConnectHandler
@@ -47,8 +52,7 @@ except ImportError as exc:
     ) from exc
 
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
-MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
+MODEL = DEFAULT_MODEL
 DEFAULT_DEVICE_TYPE = os.getenv("NETMIKO_DEVICE_TYPE", "arista_eos")
 DEFAULT_PORT = int(os.getenv("NETMIKO_PORT", "22"))
 
@@ -193,7 +197,7 @@ class AgenticNetworkBot:
     An AI agent that can autonomously query real network devices using SSH.
 
     Features:
-    - Ollama local LLM
+    - TJU competition API
     - Netmiko SSH tool functions
     - Read-only safety guardrails
     - Conversation memory
@@ -223,7 +227,7 @@ class AgenticNetworkBot:
             "get_topology_info": self.get_topology_info,
         }
 
-        # Ollama/OpenAI-compatible tool schemas.
+        # OpenAI-compatible native function schemas.
         self.tools = [
             {
                 "type": "function",
@@ -540,7 +544,7 @@ Be concise and technical. Focus on facts from device output."""
     # Core agent loop
     # ------------------------------------------------------------------
 
-    def chat(self, user_message: str, verbose: bool = True, max_iterations: int = 10) -> str:
+    def chat(self, user_message: str, verbose: bool = True, max_iterations: int = 6) -> str:
         """
         Send a message and let the agent autonomously solve the problem.
 
@@ -555,7 +559,7 @@ Be concise and technical. Focus on facts from device output."""
         self.conversation_history.append({"role": "user", "content": user_message})
 
         for _ in range(max_iterations):
-            response_msg = self._call_ollama()
+            response_msg = self._call_tju()
             tool_calls = response_msg.get("tool_calls") or []
 
             if not tool_calls:
@@ -590,34 +594,26 @@ Be concise and technical. Focus on facts from device output."""
                 self.conversation_history.append(
                     {
                         "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
                         "content": json.dumps(result),
                     }
                 )
 
-        return self._call_ollama().get("content", "Max iterations reached.")
+        return self._call_tju().get("content", "Max iterations reached.")
 
-    def _call_ollama(self) -> Dict[str, Any]:
-        """POST to Ollama /api/chat and return the message dictionary."""
+    def _call_tju(self) -> Dict[str, Any]:
+        """Call the TJU OpenAI-compatible API and return an assistant message."""
         messages = [{"role": "system", "content": self.system_prompt}] + self.conversation_history
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": self.tools,
-            "stream": False,
-            "options": {"temperature": 0.2},
-        }
-
         try:
-            resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-            resp.raise_for_status()
-            return resp.json().get("message", {"role": "assistant", "content": "No response"})
-        except requests.exceptions.ConnectionError:
-            return {
-                "role": "assistant",
-                "content": "Error: Cannot connect to Ollama. Is it running? Try: ollama serve",
-            }
-        except Exception as exc:
+            return chat_message(
+                messages,
+                tools=self.tools,
+                tool_choice="auto",
+                temperature=0.2,
+                max_tokens=1200,
+                model=self.model,
+            )
+        except TJUAPIError as exc:
             return {"role": "assistant", "content": f"Error: {exc}"}
 
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -735,11 +731,10 @@ def interactive_mode():
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("\n🎯 Lab 4B: Agentic Network Bot with Real SSH  (Netmiko + Ollama)")
+    print("\n🎯 Lab 4B: Agentic Network Bot with Real SSH  (Netmiko + TJU API)")
     print("=" * 70)
     print("This version connects to real devices over SSH.")
-    print("Make sure Ollama is running:      ollama serve")
-    print("Make sure model is pulled:        ollama pull deepseek-r1:8b")
+    print("Configure TJU API values in:      project root .env")
     print("Install dependencies:             pip install -r requirements.txt")
     print("Set credentials with env vars or enter them when prompted.")
     print("=" * 70)

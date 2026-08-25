@@ -5,7 +5,7 @@ Building AI Agents for Network Operations
 
 Same goal as challenge_3_multi_vendor.py but the input comes from
 real devices over SSH. Each entry in DEVICES can be a different
-vendor — Netmiko handles the connection, Ollama handles the parsing.
+vendor — Netmiko handles the connection, tju-llm handles the parsing.
 
 The key insight: the prompt stays identical across all vendors.
 Only the device_type in DEVICE_CONFIG changes.
@@ -18,8 +18,15 @@ RUN:
     python challenge_3_multi_vendor_ssh.py
 """
 
-import requests
 import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 # ============================================================================
 # TOGGLE — flip to False + update DEVICES for real connections
@@ -140,11 +147,11 @@ def get_raw_output(device: dict) -> str:
 
 
 # ============================================================================
-# OLLAMA — parse one device's output into normalised JSON
+# TJU API — parse one device's output into normalised JSON
 # ============================================================================
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> dict | None:
-    """Send a prompt to Ollama, return parsed JSON or None."""
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> dict | None:
+    """Send a prompt to the TJU API, return parsed JSON or None."""
     json_prompt = f"""You are a JSON-only API. Return ONLY valid JSON.
 No markdown, no explanation, no code fences — just the JSON object.
 
@@ -153,18 +160,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -177,7 +179,7 @@ Output only valid JSON:"""
     except json.JSONDecodeError:
         print(f"  ❌ Model didn't return valid JSON. Raw:\n{raw[:200]}")
         return None
-    except Exception as e:
+    except TJUAPIError as e:
         print(f"  ❌ Error: {e}")
         return None
 
@@ -216,7 +218,7 @@ def run():
         print(f"── {device['label']} ──")
 
         raw = get_raw_output(device)
-        result = ask_ollama(PROMPT_TEMPLATE.format(
+        result = ask_tju(PROMPT_TEMPLATE.format(
             label=device["label"],
             cli_output=raw,
         ))

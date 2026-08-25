@@ -1,9 +1,9 @@
 # Building AI Agents for Network Operations - Python Dependencies
 # Install with: pip install -r requirements.txt
 
-# 🎯 ALL LABS USE OLLAMA - 100% FREE, NO API KEYS REQUIRED!
+# Labs 1-4 use the TJU competition API configured in the project .env file.
 
-# Local model API clients
+# General HTTP clients used by MCP and external examples
 requests>=2.32.0
 
 # TJU Competition API (OpenAI-compatible Chat Completions)

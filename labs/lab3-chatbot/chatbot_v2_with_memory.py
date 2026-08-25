@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """ Lab 3 Part B: Stateful Chatbot with Memory
 Maintains conversation history for multi-turn conversations """
-import requests
-import json
+import sys
+from pathlib import Path
 from typing import List, Dict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, chat_message
 
 class NetworkChatbot:
     """Chatbot with conversation memory for network engineering."""
-    def __init__(self, model: str = "llama3.2:3b"):
+    def __init__(self, model: str = DEFAULT_MODEL):
         self.model = model
         self.conversation_history: List[Dict[str, str]] = []
         self.system_prompt = """You are a network engineer assistant. Available devices:
@@ -20,34 +26,21 @@ Provide accurate, concise answers about networking."""
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message })
         
-        # Build full prompt with history
-        full_prompt = self._build_prompt()
-        
-        # Call Ollama
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": self.model,
-            "prompt": full_prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.7,
-                "num_predict": 1024
-            }
-        }
-        
         try:
-            response = requests.post(url, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            assistant_message = data.get("response", "")
+            messages = [{"role": "system", "content": self.system_prompt}]
+            messages.extend(self.conversation_history)
+            assistant_message = chat_message(
+                messages,
+                model=self.model,
+                temperature=0.7,
+                max_tokens=1024,
+            )["content"]
             
             # Add assistant response to history
             self.conversation_history.append({"role": "assistant", "content": assistant_message })
             return assistant_message
-        except requests.exceptions.ConnectionError:
-            return "Error: Cannot connect to Ollama. Is it running? Try: ollama serve"
-        except Exception as e:
-            return f"Error: {e}"
+        except TJUAPIError as exc:
+            return f"Error: {exc}"
 
     def _build_prompt(self) -> str:
         """Build prompt with system message and conversation history."""
@@ -69,7 +62,7 @@ Provide accurate, concise answers about networking."""
         return len(self.conversation_history)
 
 if __name__ == "__main__":
-    print("🤖 Stateful Chatbot Demo (Ollama)")
+    print("🤖 Stateful Chatbot Demo (TJU DeepSeek API)")
     print("="*70)
     
     bot = NetworkChatbot()
@@ -84,11 +77,8 @@ if __name__ == "__main__":
     
     # Improved check logic
     if response1.startswith("Error:") or response2.startswith("Error:"):
-        print("❌ SETUP CHECK FAILED: The bot could not get a valid Ollama response.")
-        print("   Please make sure Ollama is running:")
-        print("   ollama serve")
-        print("   Also make sure the required model is installed:")
-        print("   ollama pull llama3.2:3b")
+        print("❌ SETUP CHECK FAILED: The bot could not get a valid API response.")
+        print("   Check TJU_API_KEY, TJU_API_BASE and TJU_MODEL in the project .env file.")
         print(f"   Conversation length: {bot.get_history_length()} messages")
     else:
         print("✅ SUCCESS: The bot remembers!")

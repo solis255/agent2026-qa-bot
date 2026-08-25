@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Lab 4: Agentic Network Bot
-Building AI Agents for Network Operations - 100% Free, No API Keys Required
+Building AI Agents for Network Operations - TJU Competition API
 
 This lab demonstrates how to build an AI agent that can autonomously
 query and operate network devices using tool calling.
 
-Uses Ollama (deepseek-r1:8b) with native tool calling — no paid API needed.
+Uses the configured TJU DeepSeek-compatible API with native tool calling.
 
 The agent can:
 - Check device status
@@ -17,8 +17,7 @@ The agent can:
 """
 
 import json
-import requests
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # Import our mock network devices
 import sys
@@ -32,11 +31,10 @@ from mock_network_devices import (
     ping_device,
     execute_command,
     get_topology_info,
-    MockNetworkDevice
 )
+from tju_llm_client import DEFAULT_MODEL, TJUAPIError, chat_message
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "deepseek-r1:8b"
+MODEL = DEFAULT_MODEL
 
 
 class AgenticNetworkBot:
@@ -46,7 +44,7 @@ class AgenticNetworkBot:
     Features:
     - Autonomous decision making
     - Multi-step problem solving
-    - Native tool calling via Ollama
+    - Native tool calling via the TJU API
     - Conversation memory
     """
 
@@ -64,7 +62,7 @@ class AgenticNetworkBot:
             "get_topology_info": get_topology_info,
         }
 
-        # Ollama/OpenAI-compatible tool schemas
+        # OpenAI-compatible native function schemas
         self.tools = [
             {
                 "type": "function",
@@ -190,7 +188,7 @@ Be concise and technical. Focus on facts from device output."""
     # Core chat loop
     # ------------------------------------------------------------------
 
-    def chat(self, user_message: str, verbose: bool = True, max_iterations: int = 10) -> str:
+    def chat(self, user_message: str, verbose: bool = True, max_iterations: int = 6) -> str:
         """
         Send a message and let the agent autonomously solve the problem.
 
@@ -205,7 +203,7 @@ Be concise and technical. Focus on facts from device output."""
         self.conversation_history.append({"role": "user", "content": user_message})
 
         for _ in range(max_iterations):
-            response_msg = self._call_ollama()
+            response_msg = self._call_tju()
 
             tool_calls = response_msg.get("tool_calls") or []
 
@@ -239,35 +237,30 @@ Be concise and technical. Focus on facts from device output."""
 
                 self.conversation_history.append({
                     "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
                     "content": json.dumps(result),
                 })
 
         # Fallback if we hit the iteration cap
-        return self._call_ollama().get("content", "Max iterations reached.")
+        return self._call_tju().get("content", "Max iterations reached.")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _call_ollama(self) -> Dict:
-        """POST to Ollama /api/chat and return the message dict."""
+    def _call_tju(self) -> Dict:
+        """Call the TJU OpenAI-compatible API and return an assistant message."""
         messages = [{"role": "system", "content": self.system_prompt}] + self.conversation_history
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": self.tools,
-            "stream": False,
-            "options": {"temperature": 0.3},
-        }
-
         try:
-            resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-            resp.raise_for_status()
-            return resp.json().get("message", {"role": "assistant", "content": "No response"})
-        except requests.exceptions.ConnectionError:
-            return {"role": "assistant", "content": "Error: Cannot connect to Ollama. Is it running? Try: ollama serve"}
-        except Exception as exc:
+            return chat_message(
+                messages,
+                tools=self.tools,
+                tool_choice="auto",
+                temperature=0.3,
+                max_tokens=1200,
+                model=self.model,
+            )
+        except TJUAPIError as exc:
             return {"role": "assistant", "content": f"Error: {exc}"}
 
     def _execute_tool(self, tool_name: str, args: Dict) -> Dict:
@@ -331,7 +324,7 @@ def demo_topology_analysis():
 
 def interactive_mode():
     print("\n" + "="*70)
-    print("🤖 Interactive Agentic Network Bot  (Ollama / deepseek-r1:8b)")
+    print("🤖 Interactive Agentic Network Bot  (TJU DeepSeek API)")
     print("="*70)
     print("Available devices: spine1, spine2, leaf1, leaf2")
     print("Type 'quit' to exit, 'reset' to clear history\n")
@@ -406,11 +399,10 @@ def challenge_3():
 # =============================================================================
 
 if __name__ == "__main__":
-    print("\n🎯 Lab 4: Agentic Network Bot  (Ollama / deepseek-r1:8b)")
+    print("\n🎯 Lab 4: Agentic Network Bot  (TJU DeepSeek API)")
     print("="*70)
-    print("No API keys required! Uses Ollama running locally.")
-    print("Make sure Ollama is running:  ollama serve")
-    print("Make sure model is pulled:    ollama pull deepseek-r1:8b")
+    print("Configuration is loaded from the project root .env file.")
+    print("Required: TJU_API_KEY, TJU_API_BASE, TJU_MODEL")
     print("="*70)
 
     demo_simple_query()

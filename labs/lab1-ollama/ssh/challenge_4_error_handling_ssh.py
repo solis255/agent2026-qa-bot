@@ -15,9 +15,16 @@ RUN:
     python challenge_4_error_handling_ssh.py
 """
 
-import requests
 import json
 import re
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 # ============================================================================
 # TOGGLE — flip to False + update DEVICES for real connections
@@ -117,12 +124,12 @@ def get_raw_output(device: dict) -> tuple[str | None, str]:
 
 
 # ============================================================================
-# OLLAMA — parse with error recovery (upgraded helper)
+# TJU API — parse with error recovery (upgraded helper)
 # ============================================================================
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> tuple[dict | None, str]:
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> tuple[dict | None, str]:
     """
-    Send a prompt to Ollama.
+    Send a prompt to the TJU API.
 
     Returns:
         (dict, "")       — success
@@ -136,18 +143,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         # Recovery 1: strip markdown fences
         if raw.startswith("```"):
@@ -166,8 +168,8 @@ Output only valid JSON:"""
 
     except json.JSONDecodeError as e:
         return None, f"JSON parse error: {e}"
-    except requests.exceptions.ConnectionError:
-        return None, "Cannot connect to Ollama — is it running? (ollama serve)"
+    except TJUAPIError as e:
+        return None, str(e)
     except Exception as e:
         return None, f"Unexpected error: {e}"
 
@@ -209,8 +211,8 @@ def process_device(device: dict) -> None:
         print("   ℹ️  Logging and moving on...\n")
         return
 
-    # Step 2: parse with Ollama
-    result, parse_error = ask_ollama(
+    # Step 2: parse with tju-llm
+    result, parse_error = ask_tju(
         PROMPT_TEMPLATE.format(label=label, cli_output=raw)
     )
 
@@ -247,9 +249,9 @@ def run():
     print("=" * 60)
     print("Error handling layers demonstrated:")
     print("  1. SSH failure     → caught in collect_via_ssh(), logged, skipped")
-    print("  2. Device error    → Ollama sets parse_status='error', we handle it")
-    print("  3. Bad JSON        → caught in ask_ollama(), returns (None, reason)")
-    print("  4. Ollama offline  → ConnectionError caught, returns (None, reason)")
+    print("  2. Device error    → tju-llm sets parse_status='error', we handle it")
+    print("  3. Bad JSON        → caught in ask_tju(), returns (None, reason)")
+    print("  4. API failure     → TJUAPIError caught, returns (None, reason)")
 
     # ── YOUR TURN ──────────────────────────────────────────────────────
     print("\n" + "-" * 60)

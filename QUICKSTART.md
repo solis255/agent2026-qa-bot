@@ -1,153 +1,83 @@
-# Quick Start Guide
-## Get Running in 5 Minutes
+# Windows Quick Start Guide
 
-**100% Free using Ollama - No API keys required!**
+Labs 1–4 now use the school's TJU competition API through its OpenAI-compatible interface. Labs 5–6 do not call an LLM directly. You do **not** need to install Ollama or download local models.
 
-This guide gets you from zero to running your first lab in 5 minutes.
+## 1. Prepare Python
 
-## Prerequisites
+Install Python 3.10 or newer and Git, then open PowerShell:
 
-- macOS, Linux, or Windows
-- 5-10 minutes of time
-- Internet connection (for initial setup only)
-
-## Installation
-
-### 1. Install Ollama (2 min)
-
-**macOS:**
-```bash
-brew install ollama
-```
-
-**Linux:**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-**Windows:**
-Download from https://ollama.com/download
-
-### 2. Pull Models
-
-```bash
-ollama pull llama3.2:3b
-ollama pull deepseek-r1:8b
-```
-
-Use `llama3.2:3b` for the early prompt, parsing, and chatbot examples. Use `deepseek-r1:8b` for the Lab 4 agentic workflow, including the Chapter 6 and Chapter 7 flow. These downloads are only needed once.
-
-### 3. Clone Repository (1 min)
-
-```bash
+```powershell
 git clone https://github.com/PacktPublishing/Building-AI-Agents-for-Network-Operations
 cd Building-AI-Agents-for-Network-Operations
-
-# Install Python dependencies
-pip install -r requirements.txt
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-## Run Your First Lab
+If this project is already cloned, start at `cd` and create/activate the virtual environment.
 
-```bash
-# Test Ollama connection
-python3 labs/lab1-ollama/simple_ollama_test.py
+## 2. Configure the TJU API
+
+Create the private configuration file once:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
 ```
 
-**Expected output:**
+Fill in these values:
+
+```dotenv
+TJU_API_KEY=replace-with-your-real-api-key
+TJU_API_BASE=https://ai.tju.edu.cn/api/agent2026/your-exclusive-address
+TJU_MODEL=tju-llm
+TJU_SHOW_TOKEN_USAGE=true
 ```
-🤖 Ollama API Test - Building AI Agents for Network Operations
-==================================================
 
-📝 Test 1: Simple Chat
-Response: OSPF (Open Shortest Path First) is a link-state routing protocol...
-Tokens: 156
+Put your API Key only after `TJU_API_KEY=` in the project-root `.env`. Do not add `/chat/completions` to `TJU_API_BASE`; the SDK adds it automatically. `.env` is ignored by Git.
+
+Validate the local configuration without using tokens, then perform one live request if desired:
+
+```powershell
+python examples\test_setup.py
+python scripts\test_tju_api.py
 ```
 
-**✅ Success!** You're now running AI agents locally!
+## 3. Run Labs 1–6
 
-## What's Next?
+Run commands from the project root while `.venv` is active:
 
-### Six-lab learning flow
-
-```bash
-# Lab 1: Ollama setup and local model calls
-python3 labs/lab1-ollama/simple_ollama_test.py
+```powershell
+# Lab 1: API calls, structured output, and parsing
+python labs\lab1-ollama\simple_ollama_test.py
 
 # Lab 2: RACE prompt engineering
-python3 labs/lab2-prompts/prompt_engineering_race.py
+python labs\lab2-prompts\prompt_engineering_race.py
 
-# Lab 3: Chatbot memory
-python3 labs/lab3-chatbot/chatbot_v2_with_memory.py
+# Lab 3: chatbot memory
+python labs\lab3-chatbot\chatbot_v2_with_memory.py
 
-# Lab 4: Agentic troubleshooting bot ⭐
-python3 labs/lab4-agentic/agentic_network_bot_ollama.py
+# Lab 4: native Function Calling over the TJU API
+python labs\lab4-agentic\agentic_network_bot.py
 
-# Lab 5: MCP server, HTTP bridge, and browser UI
-python3 labs/lab5-mcp/client_test.py
-# Browser UI flow: run mcp_server.py --sse, then http_bridge.py, then open ui.html
+# Lab 5: MCP client test (no direct LLM call)
+python labs\lab5-mcp\client_test.py
 
-# Lab 6: Production-readiness reference patterns
-python3 labs/lab6-production-readiness/safe_tools.py
-python3 labs/lab6-production-readiness/production_agent_skeleton.py
+# Lab 6: production-readiness examples (no direct LLM call)
+python labs\lab6-production-readiness\safe_tools.py
+python labs\lab6-production-readiness\production_agent_skeleton.py
 ```
 
-**All 6 labs - $0 cost!**
+The names `lab1-ollama` and `agentic_network_bot_ollama.py` are retained only for compatibility with the original course paths. Their current implementations use the TJU API.
 
 ## Troubleshooting
 
-**Ollama not connecting?**
-```bash
-# Start Ollama service
-ollama serve
-```
+- `401`: check `TJU_API_KEY` in `.env`; remove surrounding quotes and spaces.
+- `429`: wait and retry; the competition platform is rate-limiting requests.
+- Address error: copy the exclusive base address from the competition platform and omit `/chat/completions`.
+- Import error: reactivate `.venv`, then run `python -m pip install -r requirements.txt`.
+- Token display: set `TJU_SHOW_TOKEN_USAGE=true`; set it to `false` to hide usage output.
 
-**Model not found?**
-```bash
-# Check installed models
-ollama list
-
-# Labs 1-3: early prompt, parsing, and chatbot examples
-ollama pull llama3.2:3b
-
-# Lab 4: agentic workflow for Chapter 6 and Chapter 7
-ollama pull deepseek-r1:8b
-```
-
-**Import errors?**
-```bash
-pip install -r requirements.txt --upgrade
-```
-
-**Need help?**
-- Run: `python3 examples/test_setup.py`
-- Open: GitHub Issue
-
-## Skip to the Good Stuff
-
-Want to see the autonomous agent in action?
-
-```bash
-# Jump to Lab 4 (star lab)
-cd labs/lab4-agentic
-python3 agentic_network_bot_ollama.py
-```
-
-This runs an autonomous AI agent that troubleshoots a mock network!
-
-**Sample interaction:**
-```
-👤 User: Check if leaf2 has any issues
-🔧 Agent is calling: get_device_status({"device": "leaf2"})
-🔧 Agent is calling: get_bgp_summary({"device": "leaf2"})
-🔧 Agent is calling: get_interface_status({"device": "leaf2"})
-🤖 Agent: leaf2 is up. BGP has 1/2 peers Established.
-Neighbor 10.1.2.2 is Idle with 0 prefixes.
-Ethernet3 (server_rack_2) is down.
-```
-
-
-
-**Cost:** $0 Forever  
-**API Keys:** None Required  
-**Privacy:** 100% Local Processing
+Lab 4 may execute several model rounds because every tool result is sent back to the model. A six-round safety cap prevents an unbounded loop.

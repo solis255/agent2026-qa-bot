@@ -18,16 +18,23 @@ RUN:
     python challenge_4_error_handling.py
 """
 
-import requests
 import json
 import re
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 
 # ── Helper (with better error recovery than challenges 1-3) ───────────────
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> tuple[dict | None, str]:
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> tuple[dict | None, str]:
     """
-    Send a prompt to Ollama and return (parsed_dict, error_message).
+    Send a prompt to the TJU API and return (parsed_dict, error_message).
 
     Returns:
         (dict, "")       — success
@@ -41,18 +48,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         # Recovery step 1: strip markdown code fences
         if raw.startswith("```"):
@@ -71,8 +73,8 @@ Output only valid JSON:"""
 
     except json.JSONDecodeError as e:
         return None, f"JSON parse error: {e} | raw: {raw[:200]}"
-    except requests.exceptions.ConnectionError:
-        return None, "Cannot connect to Ollama — is it running? (ollama serve)"
+    except TJUAPIError as e:
+        return None, str(e)
     except Exception as e:
         return None, f"Unexpected error: {e}"
 
@@ -114,7 +116,7 @@ Return a JSON object with:
 - warning: string or null  (any notable condition, or null)
 """
 
-    result, error = ask_ollama(prompt)
+    result, error = ask_tju(prompt)
 
     if result:
         print(f"   ✅ {json.dumps(result)}")
@@ -137,7 +139,7 @@ def run():
     parse_with_recovery("No data available",     EMPTY_OUTPUT)
 
     print("=" * 60)
-    print("Key patterns used in ask_ollama():")
+    print("Key patterns used in ask_tju():")
     print("  1. Strip markdown fences (``` blocks)")
     print("  2. Grab first {...} block if model adds preamble text")
     print("  3. Return (result, error) tuple — never raise, never crash")

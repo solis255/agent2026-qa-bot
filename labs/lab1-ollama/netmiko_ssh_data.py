@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lab 1: Netmiko SSH Data Collection + Ollama Analysis
+Lab 1: Netmiko SSH Data Collection + TJU API Analysis
 Building AI Agents for Network Operations
 
 LAB MODE:  USE_MOCK = True  (works without any devices)
@@ -9,11 +9,18 @@ AFTER THE LAB:  Set USE_MOCK = False and update DEVICE_CONFIG
 What this shows:
 - SSH into network devices with Netmiko (same pattern as production)
 - Collect raw 'show' command output
-- Feed real CLI output directly into Ollama for AI analysis
+- Feed real CLI output directly into tju-llm for AI analysis
 """
 
-import requests
+import sys
+from pathlib import Path
 from typing import Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 # ============================================================================
 # TOGGLE: Mock data vs live SSH
@@ -173,15 +180,15 @@ def collect_via_ssh(device_name: str, command: str) -> str:
 
 
 # ============================================================================
-# OLLAMA ANALYSIS
+# TJU API ANALYSIS
 # ============================================================================
 
-def analyze_with_ollama(
+def analyze_with_tju(
     device_output: str,
     question: str,
-    model: str = "llama3.2:3b",
+    model: str = DEFAULT_MODEL,
 ) -> str:
-    """Feed raw CLI output into Ollama and ask a question about it."""
+    """Feed raw CLI output into tju-llm and ask a question about it."""
     prompt = f"""You are a network engineer analyzing live device output.
 
 DEVICE OUTPUT:
@@ -192,20 +199,15 @@ QUESTION: {question}
 Give a concise, accurate answer based only on the output above."""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.2, "num_predict": 400},
-            },
+        return generate_text(
+            prompt,
+            model=model,
+            temperature=0.2,
+            max_tokens=400,
             timeout=60,
         )
-        resp.raise_for_status()
-        return resp.json().get("response", "").strip()
-    except requests.exceptions.ConnectionError:
-        return "Error: Ollama not running — try: ollama serve"
+    except TJUAPIError as exc:
+        return f"Error: {exc}"
     except Exception as exc:
         return f"Error: {exc}"
 
@@ -215,7 +217,7 @@ Give a concise, accurate answer based only on the output above."""
 # ============================================================================
 
 def demo_interface_health():
-    """Collect interface data from every device and ask Ollama for issues."""
+    """Collect interface data from every device and ask tju-llm for issues."""
     mode = "MOCK" if USE_MOCK else "LIVE SSH"
     print(f"\n{'='*70}")
     print(f"INTERFACE HEALTH CHECK  [{mode}]")
@@ -225,12 +227,12 @@ def demo_interface_health():
         print(f"\n[{device.upper()}]")
         raw = collect_via_ssh(device, "show ip interface brief")
         print(raw)
-        analysis = analyze_with_ollama(raw, "Are there any down interfaces? List them and suggest next steps.")
+        analysis = analyze_with_tju(raw, "Are there any down interfaces? List them and suggest next steps.")
         print(f"AI: {analysis}")
 
 
 def demo_bgp_health():
-    """Collect BGP summaries from all devices and ask Ollama for a roll-up."""
+    """Collect BGP summaries from all devices and ask tju-llm for a roll-up."""
     mode = "MOCK" if USE_MOCK else "LIVE SSH"
     print(f"\n{'='*70}")
     print(f"BGP HEALTH CHECK  [{mode}]")
@@ -241,8 +243,8 @@ def demo_bgp_health():
         raw = collect_via_ssh(device, "show bgp summary")
         combined += f"\n=== {device} ===\n{raw}\n"
 
-    print("Collected BGP data from all devices. Asking Ollama...")
-    analysis = analyze_with_ollama(
+    print("Collected BGP data from all devices. Asking tju-llm...")
+    analysis = analyze_with_tju(
         combined,
         "Summarize BGP health. Are all sessions Established? Highlight any Idle or Active sessions.",
     )
@@ -251,7 +253,7 @@ def demo_bgp_health():
 
 if __name__ == "__main__":
     mode = "MOCK DATA (no real devices needed)" if USE_MOCK else "LIVE SSH — real devices"
-    print("🔧 Netmiko SSH + Ollama  |  Building AI Agents for Network Operations")
+    print("🔧 Netmiko SSH + TJU API  |  Building AI Agents for Network Operations")
     print("=" * 70)
     print(f"Mode: {mode}")
     print("To use real devices: set USE_MOCK = False and update DEVICE_CONFIG")
@@ -264,6 +266,6 @@ if __name__ == "__main__":
     print("Key takeaways:")
     print("  1. collect_via_ssh() is the same code pattern used in production")
     print("  2. Netmiko handles Cisco IOS, Arista EOS, Juniper, and 30+ more")
-    print("  3. Raw CLI output can go straight into Ollama — no pre-parsing needed")
+    print("  3. Raw CLI output can go straight into tju-llm — no pre-parsing needed")
     print("  4. Flip USE_MOCK = False when you have real devices available")
     print("=" * 70)

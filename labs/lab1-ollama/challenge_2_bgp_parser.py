@@ -4,7 +4,7 @@ Lab 1 — Challenge 2: Parse BGP Summary Output to JSON
 Building AI Agents for Network Operations
 
 GOAL:
-    Feed raw 'show bgp summary' output to Ollama and get back
+    Feed raw 'show bgp summary' output to tju-llm and get back
     a structured list of neighbors you can loop over in code.
 
 WHY THIS MATTERS:
@@ -16,14 +16,21 @@ RUN:
     python challenge_2_bgp_parser.py
 """
 
-import requests
 import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 
 # ── Helper ────────────────────────────────────────────────────────────────
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> dict | None:
-    """Send a prompt to Ollama, return parsed JSON or None."""
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> dict | None:
+    """Send a prompt to the TJU API, return parsed JSON or None."""
     json_prompt = f"""You are a JSON-only API. Return ONLY valid JSON.
 No markdown, no explanation, no code fences — just the JSON object.
 
@@ -32,18 +39,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -56,7 +58,7 @@ Output only valid JSON:"""
     except json.JSONDecodeError:
         print(f"❌ Model didn't return valid JSON. Raw output:\n{raw[:300]}")
         return None
-    except Exception as e:
+    except TJUAPIError as e:
         print(f"❌ Error: {e}")
         return None
 
@@ -94,9 +96,9 @@ def run():
     print("=" * 60)
     print("\nInput (raw CLI output):")
     print(BGP_OUTPUT)
-    print("Asking Ollama to parse it...\n")
+    print("Asking tju-llm to parse it...\n")
 
-    result = ask_ollama(PROMPT)
+    result = ask_tju(PROMPT)
 
     if result:
         print("✅ Parsed JSON:")

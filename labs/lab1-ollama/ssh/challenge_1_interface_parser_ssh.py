@@ -14,8 +14,15 @@ RUN:
     python challenge_1_interface_parser_ssh.py
 """
 
-import requests
 import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 # ============================================================================
 # TOGGLE — flip to False + update DEVICE_CONFIG for a real device
@@ -77,11 +84,11 @@ def get_raw_output() -> str:
 
 
 # ============================================================================
-# OLLAMA — parse the CLI output into JSON
+# TJU API — parse the CLI output into JSON
 # ============================================================================
 
-def ask_ollama(prompt: str, model: str = "llama3.2:3b") -> dict | None:
-    """Send a prompt to Ollama, return parsed JSON or None."""
+def ask_tju(prompt: str, model: str = DEFAULT_MODEL) -> dict | None:
+    """Send a prompt to the TJU API, return parsed JSON or None."""
     json_prompt = f"""You are a JSON-only API. Return ONLY valid JSON.
 No markdown, no explanation, no code fences — just the JSON object.
 
@@ -90,18 +97,13 @@ No markdown, no explanation, no code fences — just the JSON object.
 Output only valid JSON:"""
 
     try:
-        resp = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": json_prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
+        raw = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
             timeout=30,
         )
-        resp.raise_for_status()
-        raw = resp.json().get("response", "").strip()
 
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -114,7 +116,7 @@ Output only valid JSON:"""
     except json.JSONDecodeError:
         print(f"❌ Model didn't return valid JSON. Raw:\n{raw[:300]}")
         return None
-    except Exception as e:
+    except TJUAPIError as e:
         print(f"❌ Error: {e}")
         return None
 
@@ -150,9 +152,9 @@ def run():
     print(raw)
     print()
 
-    # Step 2: parse with Ollama
-    print("Asking Ollama to parse it...\n")
-    result = ask_ollama(PROMPT_TEMPLATE.format(cli_output=raw))
+    # Step 2: parse with tju-llm
+    print("Asking tju-llm to parse it...\n")
+    result = ask_tju(PROMPT_TEMPLATE.format(cli_output=raw))
 
     if result:
         print("✅ Parsed JSON:")
@@ -178,7 +180,7 @@ def run():
     print("  2. Change the host to leaf1 (192.168.0.21) — all interfaces up")
     print("     vs leaf2 (192.168.0.22) — Ethernet3 is down. See the difference.")
     print("  3. Try device_type = 'cisco_ios' against a Cisco device")
-    print("     The prompt stays the same — Ollama handles the format difference")
+    print("     The prompt stays the same — tju-llm handles the format difference")
     print("-" * 60)
 
 

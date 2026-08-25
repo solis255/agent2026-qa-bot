@@ -13,9 +13,15 @@ What this adds on top of chatbot_v2_with_memory.py:
 - Commands: 'refresh' re-fetches device data mid-conversation
 """
 
-import requests
-import json
+import sys
+from pathlib import Path
 from typing import List, Dict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, chat_message
 
 # ============================================================================
 # TOGGLE: Mock data vs live SSH
@@ -143,7 +149,7 @@ class LiveNetworkChatbot:
     Supports 'refresh' to re-fetch device state mid-conversation.
     """
 
-    def __init__(self, model: str = "llama3.2:3b"):
+    def __init__(self, model: str = DEFAULT_MODEL):
         self.model = model
         self.conversation_history: List[Dict[str, str]] = []
         self.context = LiveDeviceContext()
@@ -170,26 +176,18 @@ Be concise and accurate."""
 
     def chat(self, user_message: str) -> str:
         self.conversation_history.append({"role": "user", "content": user_message})
-        prompt = self._build_prompt()
-
         try:
-            resp = requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.5, "num_predict": 1024},
-                },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            assistant_msg = resp.json().get("response", "").strip()
+            messages = [{"role": "system", "content": self.system_prompt}]
+            messages.extend(self.conversation_history)
+            assistant_msg = chat_message(
+                messages,
+                model=self.model,
+                temperature=0.5,
+                max_tokens=1024,
+            )["content"].strip()
             self.conversation_history.append({"role": "assistant", "content": assistant_msg})
             return assistant_msg
-        except requests.exceptions.ConnectionError:
-            return "Error: Ollama not running — try: ollama serve"
-        except Exception as exc:
+        except TJUAPIError as exc:
             return f"Error: {exc}"
 
     def _build_prompt(self) -> str:

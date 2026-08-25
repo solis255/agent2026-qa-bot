@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """
-Lab 1 Challenge: JSON Output from Ollama
+Lab 1 Challenge: JSON Output from the TJU Competition API
 Building AI Agents for Network Operations
 
 Learn to get structured JSON output from LLMs.
 This is critical for parsing data and building automation.
 """
 
-import requests
 import json
+import sys
+from pathlib import Path
 from typing import Optional
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def get_json_from_ollama(prompt: str, model: str = "llama3.2:3b") -> Optional[dict]:
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
+
+
+def get_json_from_tju(prompt: str, model: str = DEFAULT_MODEL) -> Optional[dict]:
     """
-    Get structured JSON output from Ollama.
+    Get structured JSON output from tju-llm.
     
     The key is in the prompt engineering - we explicitly tell the LLM
     to output ONLY valid JSON with no preamble or markdown.
@@ -26,8 +33,6 @@ def get_json_from_ollama(prompt: str, model: str = "llama3.2:3b") -> Optional[di
     Returns:
         Parsed JSON dict, or None if parsing fails
     """
-    url = "http://localhost:11434/api/generate"
-    
     # Wrap the user's prompt with JSON formatting instructions
     json_prompt = f"""You are a JSON-only API. Return ONLY valid JSON with no markdown, no preamble, no explanation.
 
@@ -35,21 +40,14 @@ def get_json_from_ollama(prompt: str, model: str = "llama3.2:3b") -> Optional[di
 
 Output only the JSON:"""
     
-    payload = {
-        "model": model,
-        "prompt": json_prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1  # Lower temperature for more consistent structure
-        }
-    }
-    
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        raw_response = data.get("response", "").strip()
+        raw_response = generate_text(
+            json_prompt,
+            model=model,
+            temperature=0.1,
+            max_tokens=800,
+            timeout=30,
+        )
         
         # Try to parse as JSON
         # Remove markdown code fences if present
@@ -65,7 +63,7 @@ Output only the JSON:"""
         print(f"❌ JSON Parse Error: {e}")
         print(f"Raw response: {raw_response[:200]}...")
         return None
-    except Exception as e:
+    except TJUAPIError as e:
         print(f"❌ Error: {e}")
         return None
 
@@ -101,7 +99,7 @@ Output only valid JSON."""
     print("🔧 Challenge 1: Interface Parser")
     print("="*70)
     
-    result = get_json_from_ollama(prompt)
+    result = get_json_from_tju(prompt)
     
     if result:
         print("✅ Success! Parsed JSON:")
@@ -140,7 +138,7 @@ Output only valid JSON with a 'neighbors' array."""
     print("\n🔧 Challenge 2: BGP Neighbor Parser")
     print("="*70)
     
-    result = get_json_from_ollama(prompt)
+    result = get_json_from_tju(prompt)
     
     if result:
         print("✅ Success! Generated BGP data:")
@@ -181,7 +179,7 @@ Return JSON with:
 
 Output only valid JSON."""
         
-        result = get_json_from_ollama(prompt)
+        result = get_json_from_tju(prompt)
         
         if result:
             print(f"\n{vendor}: {json.dumps(result)}")
@@ -210,7 +208,7 @@ Return JSON with:
 
 Output only valid JSON."""
     
-    result = get_json_from_ollama(prompt)
+    result = get_json_from_tju(prompt)
     
     if result:
         print("✅ Gracefully handled error case:")
@@ -220,7 +218,7 @@ Output only valid JSON."""
 
 
 if __name__ == "__main__":
-    print("🎯 Ollama JSON Challenge - Building AI Agents for Network Operations")
+    print("🎯 TJU API JSON Challenge - Building AI Agents for Network Operations")
     print("="*70)
     print("\nGoal: Get LLMs to output valid, structured JSON")
     print("="*70)

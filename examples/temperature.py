@@ -1,12 +1,16 @@
-import requests
+#!/usr/bin/env python3
+"""Demonstrate temperature using the shared TJU API client."""
 
-prompt = "Generate a BGP configuration for AS 65001 with neighbor 10.0.0.1"
+from tju_llm_client import TJUAPIError, generate_text
 
-# Temperature 0.0
-response = requests.post("http://localhost:11434/api/generate", json={
-    "model": "llama3.2:3b",
-    "prompt": prompt,
-    "stream": False,
-    "options": {"temperature": 1.5, "num_predict": 200}
-}).json()
-print(response["response"])
+
+def main() -> None:
+    prompt = "Generate a BGP configuration for AS 65001 with neighbor 10.0.0.1"
+    try:
+        print(generate_text(prompt, temperature=1.5, max_tokens=200))
+    except TJUAPIError as exc:
+        print(f"Error: {exc}")
+
+
+if __name__ == "__main__":
+    main()

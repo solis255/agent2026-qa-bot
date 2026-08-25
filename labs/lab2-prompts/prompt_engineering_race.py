@@ -12,8 +12,15 @@ Expected output (RACE) prompt framework.
 
 import json
 import re
-import requests
+import sys
+from pathlib import Path
 from typing import Any, Dict, Optional, Union
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 
 # ============================================================================
@@ -45,57 +52,33 @@ INTERFACE_SCHEMA: Dict[str, Any] = {
 
 
 # ============================================================================
-# Ollama Helper
+# TJU API Helper
 # ============================================================================
 
 def call_llm(
     prompt: str,
-    model: str = "llama3.2:3b",
+    model: str = DEFAULT_MODEL,
     temperature: float = 0.0,
     timeout: int = 60,
     response_format: Optional[Union[str, Dict[str, Any]]] = None,
 ) -> str:
     """
-    Call the local Ollama API with a prompt.
+    Call the TJU Competition API with a prompt.
 
-    response_format can be:
-    - None: normal free-form text output
-    - "json": Ollama JSON mode
-    - JSON schema dict: stronger structured output
+    response_format remains as a teaching hint. The official competition API
+    does not document JSON-schema response_format, so output is constrained by
+    the prompt and validated in application code below.
     """
 
-    url = "http://localhost:11434/api/generate"
-
-    payload: Dict[str, Any] = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": temperature
-        }
-    }
-
-    # This is the important fix.
-    # It tells Ollama to constrain the model output instead of relying only on
-    # prompt wording.
-    if response_format is not None:
-        payload["format"] = response_format
-
     try:
-        response = requests.post(url, json=payload, timeout=timeout)
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-
-    except requests.exceptions.ConnectionError:
-        return (
-            "Error: Could not connect to Ollama. "
-            "Make sure Ollama is running with: ollama serve"
+        return generate_text(
+            prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=1200,
+            timeout=timeout,
         )
-
-    except requests.exceptions.Timeout:
-        return "Error: Ollama request timed out."
-
-    except Exception as e:
+    except TJUAPIError as e:
         return f"Error: {e}"
 
 
@@ -363,5 +346,5 @@ if __name__ == "__main__":
     print("3. Context examples are often more powerful than instructions alone.")
     print("4. Automation needs structured output, not pretty paragraphs or Python code.")
     print("5. Always validate LLM output before using it in a workflow.")
-    print("6. Lower temperature plus Ollama structured output gives more predictable results.")
+    print("6. Lower temperature plus strict validation gives more predictable results.")
     print("=" * 70)

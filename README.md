@@ -2,11 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Ollama](https://img.shields.io/badge/Ollama-local-brightgreen.svg)](https://ollama.com/)
+[![TJU API](https://img.shields.io/badge/LLM-TJU_API-brightgreen.svg)](https://agent2026.tju.edu.cn/)
 
-Hands-on labs for building AI-powered network operations tools: local LLM prompts, prompt engineering, chatbots with memory, agentic tool calling, MCP tools, and production-readiness patterns.
+Hands-on labs for building AI-powered network operations tools: LLM prompts, prompt engineering, chatbots with memory, agentic tool calling, MCP tools, and production-readiness patterns.
 
-The book labs are designed to run locally with Ollama and Python. Most labs use the included mock network devices, so you can learn the agent patterns without needing cloud API keys or a live network.
+Labs 1–4 use the school's OpenAI-compatible TJU competition API. Labs 5–6 do not call an LLM directly. Most labs use included mock network devices, so no live network is required.
 
 
 ## Book chapter and lab map
@@ -34,16 +34,8 @@ Ready-to-copy versions of the Appendix A worksheets and templates are available 
 
 - Python 3.10+
 - Git
-- Ollama
+- TJU competition API Key and exclusive base address
 - Optional for live network labs: Docker, Containerlab, Arista cEOS image
-
-Install Ollama on macOS:
-
-```bash
-brew install ollama
-```
-
-Or download it from [ollama.com/download](https://ollama.com/download).
 
 ### Setup
 
@@ -57,19 +49,13 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
-ollama pull llama3.2:3b
-ollama pull deepseek-r1:8b
-
+cp .env.example .env
+# Edit .env and fill TJU_API_KEY plus the competition platform's exclusive TJU_API_BASE.
 python examples/test_setup.py
+python scripts/test_tju_api.py
 ```
 
-Model usage is split by chapter flow: `llama3.2:3b` is the baseline for the early prompt, parsing, and chatbot examples, while `deepseek-r1:8b` is used for the Lab 4 agentic workflow, including the Chapter 6 and Chapter 7 flow.
-
-If Ollama is not already running:
-
-```bash
-ollama serve
-```
+The configured model name is `tju-llm`. The old `lab1-ollama` directory and `agentic_network_bot_ollama.py` filename remain only to preserve existing course links; their implementations now call the TJU API. Windows users should follow [QUICKSTART.md](QUICKSTART.md).
 
 Keep the virtual environment active while running the labs. If you open a new terminal, run:
 
@@ -82,7 +68,7 @@ source .venv/bin/activate
 Run commands from the repo root unless a lab README says otherwise.
 
 ```bash
-# Lab 1: Ollama basics and structured output
+# Lab 1: TJU API basics and structured output
 python labs/lab1-ollama/simple_ollama_test.py
 python labs/lab1-ollama/json_output_challenge.py
 
@@ -116,9 +102,9 @@ python labs/lab6-production-readiness/production_agent_skeleton.py
 
 ## Lab Structure
 
-### Lab 1: Ollama and Network Prompts
+### Lab 1: TJU API and Network Prompts
 
-- Call local Ollama models from Python
+- Call the configured competition model from Python
 - Control generation parameters
 - Parse JSON output
 - Practice error handling and model comparison
@@ -244,13 +230,13 @@ Building-AI-Agents-for-Network-Operations/
 
 ## Environment Variables
 
-Copy the example environment file only if you are running examples that require external credentials:
+Create the private environment file before running Labs 1–4:
 
 ```bash
 cp .env.example .env
 ```
 
-Most Ollama labs do not require `.env` values. External API examples and some live network examples may require credentials; check the relevant lab file or README before running them.
+Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. `.env` is ignored by Git and the API Key must never be committed.
 
 ## Safety Boundary
 
@@ -283,24 +269,14 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-If Ollama calls fail, confirm the service and models:
-
-```bash
-ollama serve
-ollama list
-
-# Labs 1-3: early prompt, parsing, and chatbot examples
-ollama pull llama3.2:3b
-
-# Lab 4: agentic workflow for Chapter 6 and Chapter 7
-ollama pull deepseek-r1:8b
-```
-
-Run the setup check:
+If an API call fails, validate configuration and then make one live test request:
 
 ```bash
 python examples/test_setup.py
+python scripts/test_tju_api.py
 ```
+
+HTTP 401 indicates an API Key problem; HTTP 429 indicates rate limiting. See [QUICKSTART.md](QUICKSTART.md) for Windows-specific commands.
 
 ## Contributing
 

@@ -4,36 +4,26 @@ Lab 3 Part A: Stateless Chatbot
 Shows the problem - no memory between calls
 """
 
-import requests
-import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.tju_llm_client import DEFAULT_MODEL, TJUAPIError, generate_text
 
 
-def simple_chat(user_message: str, model: str = "llama3.2:3b") -> str:
+def simple_chat(user_message: str, model: str = DEFAULT_MODEL) -> str:
     """Send single message with NO conversation history."""
-    url = "http://localhost:11434/api/generate"
-    
-    payload = {
-        "model": model,
-        "prompt": user_message,
-        "stream": False,
-        "options": {
-            "temperature": 0.7
-        }
-    }
-    
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("response", "")
-    except requests.exceptions.ConnectionError:
-        return "Error: Cannot connect to Ollama. Is it running? Try: ollama serve"
-    except Exception as e:
-        return f"Error: {e}"
+        return generate_text(user_message, model=model, temperature=0.7, max_tokens=1024)
+    except TJUAPIError as exc:
+        return f"Error: {exc}"
 
 
 if __name__ == "__main__":
-    print("🤖 Stateless Chatbot Demo (Ollama)")
+    print("🤖 Stateless Chatbot Demo (TJU DeepSeek API)")
     print("="*70)
     
     # First question
