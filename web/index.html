@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
+    <title>TJU NetPilot</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="TJU NetPilot 首页">
+        <span class="brand-mark">NP</span>
+        <span>
+          <strong>TJU NetPilot</strong>
+          <small>校园网络智能诊断与服务 Agent</small>
+        </span>
+      </a>
+      <div class="service-state" id="service-state" role="status" aria-live="polite">
+        <span class="state-dot"></span>
+        正在连接后端…
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="chat-panel" aria-labelledby="chat-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">诊断会话</p>
+            <h1 id="chat-title">你好，我是 NetPilot</h1>
+          </div>
+          <button type="button" class="secondary-button" disabled>新建会话</button>
+        </div>
+
+        <div class="conversation" aria-live="polite">
+          <article class="message assistant-message">
+            <span class="avatar">AI</span>
+            <div>
+              <strong>诊断助手</strong>
+              <p>正式应用骨架已经就绪。后续里程碑将接入只读网络工具、TJU LLM 与校园网络知识库。</p>
+            </div>
+          </article>
+        </div>
+
+        <form class="composer" id="chat-form">
+          <label class="sr-only" for="message-input">描述你的网络问题</label>
+          <textarea id="message-input" rows="3" placeholder="例如：我连上 Wi-Fi 了，但是网页打不开" disabled></textarea>
+          <button type="submit" disabled>开始诊断</button>
+        </form>
+        <p class="milestone-note">Milestone 1：基础界面与服务状态已启用，聊天功能将在 Agent 里程碑开放。</p>
+      </section>
+
+      <aside class="diagnostics-panel" aria-label="诊断状态">
+        <section class="status-card">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">运行状态</p>
+              <h2>服务概览</h2>
+            </div>
+            <span class="mode-badge" id="tool-mode">--</span>
+          </div>
+          <dl class="health-grid">
+            <div>
+              <dt>后端 API</dt>
+              <dd id="api-status">检查中</dd>
+            </div>
+            <div>
+              <dt>TJU LLM</dt>
+              <dd id="llm-status">检查中</dd>
+            </div>
+            <div>
+              <dt>知识库</dt>
+              <dd id="rag-status">检查中</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="status-card">
+          <p class="eyebrow">工具执行步骤</p>
+          <h2>诊断时间线</h2>
+          <div class="empty-state">
+            <span>01</span>
+            <p>开始诊断后，此处将展示每一步只读检测及其证据。</p>
+          </div>
+        </section>
+
+        <section class="status-card">
+          <p class="eyebrow">参考知识</p>
+          <h2>校园网络来源</h2>
+          <div class="empty-state">
+            <span>KB</span>
+            <p>使用知识库后，此处将展示标题、来源和相关内容。</p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

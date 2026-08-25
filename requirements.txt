@@ -9,6 +9,12 @@ requests>=2.32.0
 # TJU Competition API (OpenAI-compatible Chat Completions)
 openai>=1.0,<3
 
+# TJU NetPilot application API and validated environment settings
+fastapi>=0.115,<1
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+httpx>=0.27,<1
+
 # Upstream external API examples
 anthropic>=0.104.0
 python-dotenv>=1.0.1

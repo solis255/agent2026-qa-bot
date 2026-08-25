@@ -48,6 +48,7 @@ source .venv/bin/activate
 
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install -e .
 
 cp .env.example .env
 # Edit .env and fill TJU_API_KEY plus the competition platform's exclusive TJU_API_BASE.
@@ -62,6 +63,37 @@ Keep the virtual environment active while running the labs. If you open a new te
 ```bash
 source .venv/bin/activate
 ```
+
+Windows PowerShell users should activate the repository environment explicitly:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+This avoids accidentally running the project with another system or Anaconda Python installation.
+
+## TJU NetPilot Application
+
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and currently provides the Milestone 1 application shell, validated settings, static Chinese Web UI, and a public health endpoint.
+
+Start the application from the repository root:
+
+```bash
+python -m uvicorn netpilot.main:app --reload
+```
+
+Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://127.0.0.1:8000/api/health>:
+
+```json
+{
+  "status": "ok",
+  "llm_configured": true,
+  "tool_mode": "mock",
+  "rag_ready": false
+}
+```
+
+The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Milestone 1 does not load a knowledge index, so `rag_ready` remains false until the RAG milestone initializes a usable retriever. Neither response exposes credentials.
 
 ## Run the Labs
 
@@ -201,8 +233,20 @@ Building-AI-Agents-for-Network-Operations/
 ├── README.md
 ├── QUICKSTART.md
 ├── requirements.txt
+├── pyproject.toml
 ├── Makefile
 ├── .env.example
+├── src/
+│   └── netpilot/
+│       ├── api/
+│       ├── models/
+│       ├── config.py
+│       └── main.py
+├── web/
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── favicon.svg
 ├── examples/
 │   ├── mock_network_devices.py
 │   ├── test_setup.py
@@ -236,7 +280,7 @@ Create the private environment file before running Labs 1–4:
 cp .env.example .env
 ```
 
-Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. `.env` is ignored by Git and the API Key must never be committed.
+Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. NetPilot also reads the Agent, Tool, RAG, and App variables documented in `.env.example`. `.env` is ignored by Git and the API Key must never be committed or returned by an API.
 
 ## Safety Boundary
 
@@ -267,6 +311,7 @@ If imports fail, make sure the virtual environment is active and dependencies ar
 ```bash
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 If an API call fails, validate configuration and then make one live test request:

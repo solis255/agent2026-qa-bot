@@ -1,6 +1,6 @@
 # 项目代码导航与文件职责说明
 
-> 最后扫描：2026-08-24
+> 最后扫描：2026-08-25
 > 扫描范围：仓库中除 `.git/`、虚拟环境和缓存外的项目文件。
 > 用途：后续修改前先查本文的“按需求快速定位”和对应目录，只有在职责或依赖不明确时再做局部扫描。
 
@@ -17,12 +17,15 @@ TJU API 基础与结构化解析
   -> 生产安全、审计与后端抽象
 ```
 
-主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。Lab 1～4 共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。Bonus Lab 仍是独立的 Bun/本地模型教学项目，不属于本次迁移范围。
+主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品骨架位于 `src/netpilot/`，通过 FastAPI 同源提供 `/api/health` 和 `web/` 中文页面；它不依赖教学 Lab 启动。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。Bonus Lab 仍是独立的 Bun/本地模型教学项目，不属于本次迁移范围。
 
 ## 2. 按需求快速定位
 
 | 要修改的内容 | 首选位置 | 经常需要联动检查的位置 |
 |---|---|---|
+| NetPilot 配置、启动或健康状态 | `src/netpilot/config.py`、`src/netpilot/main.py` | `.env.example`、`src/netpilot/api/routes.py`、`tests/test_netpilot_config.py`、`tests/test_netpilot_api.py` |
+| NetPilot API schema 或路由 | `src/netpilot/models/schemas.py`、`src/netpilot/api/routes.py` | `web/app.js`、API 测试、README |
+| NetPilot 中文 Web 页面 | `web/index.html`、`web/app.js`、`web/style.css` | `src/netpilot/main.py` 的静态目录挂载、API schema |
 | 模拟设备、接口/BGP 故障场景 | `examples/mock_network_devices.py` | `labs/lab4-agentic/live_network_devices.py`、Lab 3/1 内嵌的 mock 数据、相关文档示例 |
 | TJU API 地址、模型、重试或生成参数 | `examples/tju_llm_client.py`、根目录 `.env` | `.env.example`、`README.md`、`QUICKSTART.md`、`scripts/test_tju_api.py` |
 | JSON 结构化输出与验证 | `labs/lab2-prompts/prompt_engineering_race.py` | Lab 1 各 parser、`docs/design-toolkit/structured-output-validation.md` |
@@ -43,7 +46,18 @@ TJU API 基础与结构化解析
 
 ## 3. 关键调用链与数据源
 
-### 3.1 Lab 1～3 模型调用链
+### 3.1 NetPilot 正式应用链
+
+```text
+浏览器 / Web
+  -> FastAPI src/netpilot/main.py
+  -> src/netpilot/api/routes.py
+  -> Settings / readiness state
+```
+
+`create_app()` 不发起外部请求，允许未配置 API Key 时启动。`/api/health` 仅公开布尔就绪状态、Tool 模式和服务状态；静态页面通过同源 `/api/health` 获取这些字段。
+
+### 3.2 Lab 1～3 模型调用链
 
 ```text
 Lab 1～3 入口脚本
@@ -54,7 +68,7 @@ Lab 1～3 入口脚本
 
 凭据只由共享客户端从根目录 `.env` 或进程环境读取。修改鉴权、超时、错误映射或 token 展示时只需优先修改共享客户端并扩展 `tests/test_tju_llm_client.py`。
 
-### 3.2 TJU API 原生工具调用链
+### 3.3 TJU API 原生工具调用链
 
 ```text
 labs/lab4-agentic/agentic_network_bot.py
@@ -65,7 +79,7 @@ labs/lab4-agentic/agentic_network_bot.py
 
 `agentic_network_bot_ollama.py` 仅为旧路径兼容启动器。Lab 4B 沿用同类循环，但把工具实现替换成真实 Netmiko SSH。工具结果必须携带对应 `tool_call_id`，默认最多六轮。
 
-### 3.3 MCP 与浏览器链
+### 3.4 MCP 与浏览器链
 
 ```text
 labs/lab5-mcp/ui.html
@@ -79,7 +93,7 @@ labs/lab5-mcp/ui.html
 
 若修改工具名或参数，必须自右向左检查整条链；只改 MCP server 会造成 UI 或 bridge 路由不匹配。
 
-### 3.4 生产安全链
+### 3.5 生产安全链
 
 ```text
 Agent/调用方
@@ -96,7 +110,7 @@ Agent/调用方
 2. **`scripts/02_inventory_loader.py`、`03_connect_to_device.py`、`04_get_interfaces.py` 引用缺失文件** `mcp_server/inventory.yml`。当前仓库没有 `mcp_server/` 目录，这三个目标和 Makefile 的 `inventory`/`version`/`interfaces` 入口会因此失败，除非补回清单或改为现有数据源。
 3. **凭据仅适合教学环境。** 多个 Lab 和 Containerlab 配置中硬编码 `admin/admin`。接入真实网络前应改用环境变量或 secrets manager，并使用只读、最小权限账号。
 4. **命令安全实现不统一。** Lab 5 只检查命令以 `show` 开头；Lab 4B 还检查阻断词、危险 show 模式和目标格式；Lab 6 使用白名单。生产改动应以更严格的 Lab 4B/Lab 6 思路为基线。
-5. **自动测试覆盖仍有限。** 现有测试覆盖 Lab 5 命令安全、TJU 客户端配置校验和 Lab 4 单轮工具协议，但未覆盖真实 API、多轮异常分支、MCP 传输、真实 SSH、提示输出、UI 或 Lab 6 策略。
+5. **自动测试覆盖仍有限。** 现有测试覆盖 NetPilot Settings/health/静态页面、Lab 5 命令安全、TJU 客户端配置校验和 Lab 4 单轮工具协议，但尚未覆盖 NetPilot 网络 Tool、Agent 多轮异常、RAG、真实 API、MCP 传输、真实 SSH 或 Lab 6 策略。
 6. **文档中有教学草稿痕迹。** Lab 3 的大写扩展名 `.MD` 文档很长，包含代码逐段讲解；其中个别示例文件名与实际脚本名不同。以当前代码文件名为准。
 7. **Bonus README 与主实现存在演进差异。** README 描述“四个 TODO、端口 3000”的入门任务；根 `server.js` 已发展为端口 3003 的完整 RACE Prompt Builder，`solution/server.js` 才是较精简的端口 3000 解答版。
 8. **`config.txt` 是独立的 BGP 安全配置样例**，当前没有代码直接读取它；其中仍有占位符 `<LOCAL_AS>` 和示例口令字段。
@@ -116,14 +130,33 @@ Agent/调用方
 | `QUICKSTART.md` | 五分钟快速启动路线和最短实验路径；比 README 更面向首次运行者。 |
 | `CONTRIBUTING.md` | 贡献流程、PEP 8/类型提示要求、测试建议和优先改进方向。 |
 | `LICENSE` | MIT 许可证文本。通常不参与代码修改。 |
-| `requirements.txt` | 全仓 Python 依赖：requests、Anthropic、dotenv、Netmiko、PyYAML、Rich、MCP、Starlette、Uvicorn、pytest。 |
+| `requirements.txt` | 全仓 Python 依赖：OpenAI/Anthropic 客户端、FastAPI/Pydantic、HTTP、Netmiko、PyYAML、Rich、MCP、Uvicorn 和 pytest。 |
+| `pyproject.toml` | NetPilot 的 setuptools `src` 布局与 editable install 元数据；依赖继续以 `requirements.txt` 为单一清单。 |
 | `REQUIREMENTS_TJU_NetPilot_Codex.md` | TJU NetPilot 比赛项目的需求、架构约束、里程碑与验收标准；正式应用开发以此为产品目标。 |
 | `Makefile` | setup、Containerlab、基础脚本、Claude、MCP 和 pytest 的快捷命令；其中三个设备脚本依赖当前缺失的 inventory。 |
 | `config.txt` | Cisco 风格的 eBGP 入站过滤、会话认证、最大前缀与 peer policy 配置样例；不在运行调用链中。 |
 | `ai-networking-workshop-home.jpeg` | 1920×1278、约 290 KiB 的仓库/Workshop 首页图片资源；当前 Markdown 未直接引用。 |
 | `PROJECT_CODE_MAP.md` | 本文件；新增、删除、重命名文件或改变核心调用链时更新。 |
 
-### 5.2 `examples/`：共享模拟数据与小型示例
+### 5.2 `src/netpilot/`：正式 NetPilot 应用
+
+| 文件 | 作用与修改提示 |
+|---|---|
+| `src/netpilot/config.py` | 使用 Pydantic Settings 读取根 `.env`，校验 TJU、Agent、Tool、RAG、App 配置；API Key 使用 `SecretStr` 且允许缺失启动。 |
+| `src/netpilot/main.py` | FastAPI 应用工厂和正式入口；注册 `/api` 路由、保存组件 readiness、同源挂载 `web/`，导入时不访问外部服务。 |
+| `src/netpilot/api/routes.py` | 当前提供 `/api/health`，只返回公开的布尔/枚举状态，不返回凭据。复杂 Agent 逻辑不得写入此层。 |
+| `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；当前定义 `HealthResponse`，后续按 Milestone 增加会话和诊断模型。 |
+
+### 5.3 `web/`：正式中文 Web 壳
+
+| 文件 | 作用与修改提示 |
+|---|---|
+| `web/index.html` | 中文单页结构，包含聊天、服务概览、Tool Timeline 和知识来源占位区；不保存 Key。 |
+| `web/app.js` | 同源读取 `/api/health` 并渲染后端、LLM、RAG 和 Tool 模式状态。 |
+| `web/style.css` | 桌面优先且支持窄屏的页面样式。 |
+| `web/favicon.svg` | NetPilot 本地矢量页签图标，避免页面依赖外部图片资源。 |
+
+### 5.4 `examples/`：共享模拟数据与小型示例
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -136,7 +169,7 @@ Agent/调用方
 | `examples/bgp_output.json` | leaf1 `show ip bgp summary` 的示例输入。 |
 | `examples/claude_response_example.md` | 对 interface 示例数据的期望 Claude 分析输出，展示固定章节结构和“缺失数据”表达。 |
 
-### 5.3 `scripts/`：章节前置与外部 API/SSH 脚本
+### 5.5 `scripts/`：章节前置与外部 API/SSH 脚本
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -147,14 +180,14 @@ Agent/调用方
 | `scripts/05_claude_race_analysis.py` | 读取 RACE system prompt 和输入文件，调用 Anthropic Messages API；使用 `.env` 的 API key/model，默认输入示例为 `examples/interface_output.json`。 |
 | `scripts/test_tju_api.py` | 从本地 `.env` 读取 TJU 专属端点和 Key，通过 OpenAI SDK 发送最小请求；不会输出 API Key，并对 401、429、连接和服务错误给出提示。 |
 
-### 5.4 `prompts/`：外置提示词
+### 5.6 `prompts/`：外置提示词
 
 | 文件 | 作用与修改提示 |
 |---|---|
 | `prompts/bad_prompt.txt` | 故意模糊的单句提示，用作结构化提示的反例。 |
 | `prompts/race_network_analysis_prompt.txt` | Claude 网络输出分析的 RACE system prompt；规定只依据数据、只读、安全的下一检查和固定 Markdown 输出结构。 |
 
-### 5.5 `labs/lab1-ollama/`：TJU API 基础与解析（目录名为历史兼容）
+### 5.7 `labs/lab1-ollama/`：TJU API 基础与解析（目录名为历史兼容）
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -170,7 +203,7 @@ Agent/调用方
 | `labs/lab1-ollama/ssh/challenge_3_multi_vendor_ssh.py` | Challenge 3 的多设备/多厂商 SSH 版；每个设备可有独立 Netmiko 类型和 mock 输出。 |
 | `labs/lab1-ollama/ssh/challenge_4_error_handling_ssh.py` | Challenge 4 的 SSH 版；同时处理连接错误、无输出、异常设备状态和模型 JSON 错误。 |
 
-### 5.6 `labs/lab2-prompts/`：RACE 提示工程
+### 5.8 `labs/lab2-prompts/`：RACE 提示工程
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -178,7 +211,7 @@ Agent/调用方
 | `labs/lab2-prompts/netmiko_config_parser.py` | 用 RACE 分析 SSH 或 mock 的运行配置/接口状态；演示接口配置解析和故障接口审计，默认 mock。 |
 | `PROMPT_TEMPLATES.md` | 可复制的配置解析、安全告警、配置风险评分 RACE 模板与最佳实践。 |
 
-### 5.7 `labs/lab3-chatbot/`：聊天状态与实时上下文
+### 5.9 `labs/lab3-chatbot/`：聊天状态与实时上下文
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -189,7 +222,7 @@ Agent/调用方
 | `labs/lab3-chatbot/memory.MD` | v2 的逐段教学说明，覆盖历史结构、prompt 构建、reset 和交互命令。 |
 | `labs/lab3-chatbot/live_ssh.MD` | v3 的逐段教学说明，覆盖 mock/live 切换、状态快照、refresh 与交互流程；文中个别示例名可能滞后。 |
 
-### 5.8 `labs/lab4-agentic/`：Agent 与工具调用
+### 5.10 `labs/lab4-agentic/`：Agent 与工具调用
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -200,7 +233,7 @@ Agent/调用方
 | `labs/lab4-agentic/README.md` | Lab 4 简明入口、工具列表、运行命令、文本工具调用流程和真实设备适配原则。 |
 | `labs/lab4-agentic/bot.MD` | 原生 tool-calling Agent 的详细教学文档，涵盖 demos、交互、加工具、调温度和常见错误。 |
 
-### 5.9 `labs/lab5-mcp/`：MCP 复用层与 UI
+### 5.11 `labs/lab5-mcp/`：MCP 复用层与 UI
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -211,7 +244,7 @@ Agent/调用方
 | `ui.html` | 单文件浏览器 UI；调用 bridge 的 endpoints，展示原始 JSON，并用 SVG 绘制 spine/leaf 拓扑。 |
 | `labs/lab5-mcp/README.md` | Lab 5 架构、两终端启动顺序、stdio 客户端配置、安全规则和练习。 |
 
-### 5.10 `labs/lab6-production-readiness/`：生产就绪模式
+### 5.12 `labs/lab6-production-readiness/`：生产就绪模式
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -220,7 +253,7 @@ Agent/调用方
 | `labs/lab6-production-readiness/production_checklist.md` | 上生产前的十类检查：范围、安全、凭据、审批、可观测性、可靠性、数据质量、测试、变更控制、go/no-go。 |
 | `labs/lab6-production-readiness/README.md` | Lab 6 目标、运行命令、策略链、read-only-first 演进路线和练习。 |
 
-### 5.11 `lab/`：Containerlab 真实实验拓扑
+### 5.13 `lab/`：Containerlab 真实实验拓扑
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -229,7 +262,7 @@ Agent/调用方
 | `lab/configs/leaf1.cfg` | leaf1 启动配置：AS 65101、到 spine1/leaf2 的接口、Loopback 和管理平面。 |
 | `lab/configs/leaf2.cfg` | leaf2 启动配置：AS 65102、到 spine1/leaf1 的接口、Loopback 和管理平面。 |
 
-### 5.12 `docs/design-toolkit/`：附录模板
+### 5.14 `docs/design-toolkit/`：附录模板
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -247,15 +280,17 @@ Agent/调用方
 | `docs/design-toolkit/feature-flag-kill-switch.md` | read-only、设备范围、工具白名单、审批和全局禁用控制表及 kill switch 测试。 |
 | `docs/design-toolkit/go-no-go-review.md` | 从只读继续扩展前的最终风险、检测、停止、解释、secret、审批和审计评审。 |
 
-### 5.13 `tests/`：自动测试
+### 5.15 `tests/`：自动测试
 
 | 文件 | 作用与修改提示 |
 |---|---|
 | `tests/test_command_safety.py` | pytest 测试 Lab 5 `safe_show_command()`：允许 show、阻止 configure、未知设备先拒绝。新增安全策略时应优先扩展这里。 |
 | `tests/test_tju_llm_client.py` | 离线校验 Key 必填、base URL 不含 completion 路径、专属比赛地址和模型读取，不发送网络请求。 |
 | `tests/test_agentic_tju_loop.py` | 用模拟模型响应验证 Lab 4 原生 Function Calling，并确保工具结果携带匹配的 `tool_call_id`。 |
+| `tests/test_netpilot_config.py` | 离线验证 Settings 默认值、API Key 脱敏、模式/范围校验和 TJU base URL 约束。 |
+| `tests/test_netpilot_api.py` | 使用 FastAPI TestClient 验证 health、有/无 Key 启动、无 secret 响应、中文首页和静态资源。 |
 
-### 5.14 `bonus/lab-bun-chat/`：Bun Web Chat
+### 5.16 `bonus/lab-bun-chat/`：Bun Web Chat
 
 | 文件 | 作用与修改提示 |
 |---|---|
@@ -268,6 +303,10 @@ Agent/调用方
 ```bash
 # 安装
 python -m pip install -r requirements.txt
+python -m pip install -e .
+
+# NetPilot 正式应用
+python -m uvicorn netpilot.main:app --reload
 
 # 配置检查（离线，不消耗 token）
 python examples/test_setup.py
