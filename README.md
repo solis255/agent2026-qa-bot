@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and currently provides the Milestone 1 application shell, validated settings, static Chinese Web UI, and a public health endpoint.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, and the Milestone 2 read-only network Tool layer.
 
 Start the application from the repository root:
 
@@ -93,7 +93,38 @@ Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://12
 }
 ```
 
-The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Milestone 1 does not load a knowledge index, so `rag_ready` remains false until the RAG milestone initializes a usable retriever. Neither response exposes credentials.
+The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Milestones 1–2 do not load a knowledge index, so `rag_ready` remains false until the RAG milestone initializes a usable retriever. Neither response exposes credentials.
+
+### Network Tool Providers
+
+NetPilot creates one provider from `TOOL_MODE` when the FastAPI application starts. Provider construction performs no network request.
+
+- `TOOL_MODE=mock` is deterministic and fully offline. It supports `healthy`, `dns_failure`, `gateway_unreachable`, `tcp_ssh_blocked`, `http_failure`, and `partial_connectivity`.
+- `TOOL_MODE=local` runs bounded, read-only checks against the machine hosting NetPilot. It supports Windows, Linux, and macOS with graceful degradation when a system traceroute command is unavailable.
+
+Both providers expose the same six tools:
+
+```text
+get_network_info
+ping_host
+dns_lookup
+tcp_check
+http_check
+traceroute
+```
+
+Every call returns a structured `ToolResult` containing `success`, `tool`, `summary`, `data`, `error`, and `duration_ms`. `success` means that the tool produced diagnostic evidence; a valid negative observation such as `reachable=false` remains successful evidence. Invalid input, unavailable executables, and unexpected execution failures return `success=false` with a stable error code.
+
+The HTTP tool accepts only HTTP(S), validates each redirect, blocks localhost, metadata, internal, private, loopback, and link-local targets, limits redirects and response headers, and streams only response metadata instead of downloading content. System tools always use fixed argument lists, `shell=False`, output caps, and timeouts.
+
+Milestone 2 tests are fully offline by default:
+
+```bash
+python -m pytest tests/test_tools.py -q
+python -m pytest tests/test_mock_scenarios.py -q
+python -m pytest tests/test_tool_security.py -q
+python -m pytest -q
+```
 
 ## Run the Labs
 
@@ -240,6 +271,7 @@ Building-AI-Agents-for-Network-Operations/
 │   └── netpilot/
 │       ├── api/
 │       ├── models/
+│       ├── tools/
 │       ├── config.py
 │       └── main.py
 ├── web/

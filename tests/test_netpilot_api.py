@@ -41,6 +41,18 @@ def test_application_starts_without_an_api_key() -> None:
     assert response.json()["llm_configured"] is False
 
 
+def test_application_factory_initializes_the_configured_tool_provider() -> None:
+    settings = Settings(
+        _env_file=None,
+        tool_mode="mock",
+        mock_scenario="tcp_ssh_blocked",
+    )
+    application = create_app(settings)
+
+    assert application.state.network_tools.provider_name == "mock"
+    assert application.state.network_tools.provider.scenario.value == "tcp_ssh_blocked"
+
+
 def test_root_serves_the_chinese_web_shell() -> None:
     with build_client() as client:
         response = client.get("/")

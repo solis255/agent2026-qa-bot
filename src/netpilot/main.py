@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from netpilot import __version__
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
+from netpilot.tools import build_network_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=__version__,
     )
     app.state.settings = settings or Settings()
+    app.state.network_tools = build_network_tools(app.state.settings)
     # Milestone 1 does not load a retriever. A later lifespan hook will set this
     # only after a usable knowledge index has been opened successfully.
     app.state.rag_ready = False
