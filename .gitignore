@@ -43,6 +43,13 @@ env/
 # Logs
 *.log
 
+# Locally generated RAG models and vector indexes
+.cache/
+knowledge/index/*
+!knowledge/index/.gitkeep
+knowledge/processed/*
+!knowledge/processed/.gitkeep
+
 # Test coverage
 .coverage
 htmlcov/

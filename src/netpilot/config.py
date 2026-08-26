@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     rag_enabled: bool = True
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     rag_top_k: int = Field(default=4, ge=1, le=20)
+    rag_min_score: float = Field(default=0.35, ge=-1.0, le=1.0)
+    rag_chunk_size: int = Field(default=700, ge=200, le=4000)
+    rag_chunk_overlap: int = Field(default=120, ge=0, le=1000)
+    rag_index_dir: Path = PROJECT_ROOT / "knowledge" / "index"
+    rag_model_cache_dir: Path = PROJECT_ROOT / ".cache" / "fastembed"
 
     app_host: str = "127.0.0.1"
     app_port: int = Field(default=8000, ge=1, le=65535)
@@ -91,6 +96,14 @@ class Settings(BaseSettings):
         if not normalized:
             raise ValueError("value must not be empty")
         return normalized
+
+    @field_validator("rag_chunk_overlap")
+    @classmethod
+    def validate_chunk_overlap(cls, value: int, info) -> int:
+        chunk_size = info.data.get("rag_chunk_size", 700)
+        if value >= chunk_size:
+            raise ValueError("RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE")
+        return value
 
     @property
     def llm_configured(self) -> bool:

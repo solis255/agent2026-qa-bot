@@ -17,7 +17,7 @@ TJU API 基础与结构化解析
   -> 生产安全、审计与后端抽象
 ```
 
-主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供 `/api/health` 和 `web/` 中文页面，并初始化 Milestone 4 `TJUClient`、`ToolRegistry`、`AgentOrchestrator` 以及由 `TOOL_MODE` 选择的统一 Mock/Local 只读网络 Tool 层；所有组件构造均不发起外部请求。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。Bonus Lab 仍是独立的 Bun/本地模型教学项目，不属于本次迁移范围。
+主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供 `/api/health` 和 `web/` 中文页面，并初始化 Milestone 5 `TJUClient`、`ToolRegistry`、`AgentOrchestrator`、本地 FAISS Retriever 以及由 `TOOL_MODE` 选择的统一 Mock/Local 只读网络 Tool 层；应用启动不发起模型下载，RAG 不可用时安全降级。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。
 
 ## 2. 按需求快速定位
 
@@ -32,6 +32,7 @@ TJU API 基础与结构化解析
 | 模拟设备、接口/BGP 故障场景 | `examples/mock_network_devices.py` | `labs/lab4-agentic/live_network_devices.py`、Lab 3/1 内嵌的 mock 数据、相关文档示例 |
 | 正式 NetPilot TJU Chat、错误或结果 | `src/netpilot/llm/`、`src/netpilot/config.py` | `src/netpilot/main.py`、`tests/test_netpilot_llm.py`、`scripts/test_tju_api.py` |
 | 正式 NetPilot Agent 编排与工具注册 | `src/netpilot/agent/` | `src/netpilot/llm/`、`src/netpilot/tools/`、三组 Agent 测试、`scripts/test_netpilot_agent.py` |
+| NetPilot 知识加载、索引与检索 | `src/netpilot/rag/`、`knowledge/raw/` | `scripts/build_knowledge_index.py`、`tests/test_rag_*.py`、ToolRegistry、Agent prompt |
 | Lab 1～4 TJU API 地址、模型或生成参数 | `examples/tju_llm_client.py`、根目录 `.env` | `.env.example`、`README.md`、`QUICKSTART.md` |
 | JSON 结构化输出与验证 | `labs/lab2-prompts/prompt_engineering_race.py` | Lab 1 各 parser、`docs/design-toolkit/structured-output-validation.md` |
 | RACE 提示词 | `prompts/race_network_analysis_prompt.txt` 或 Lab 2 | `labs/lab2-prompts/PROMPT_TEMPLATES.md`、`docs/design-toolkit/race-prompt-worksheet.md` |
@@ -57,7 +58,7 @@ TJU API 基础与结构化解析
 浏览器 / Web
   -> FastAPI src/netpilot/main.py
   -> src/netpilot/api/routes.py
-  -> Settings / TJUClient / ToolRegistry / AgentOrchestrator / NetworkToolService
+  -> Settings / TJUClient / ToolRegistry / AgentOrchestrator / Retriever / NetworkToolService
 ```
 
 `create_app()` 不发起外部请求，允许未配置 API Key 时启动。TJU SDK transport 只在存在 Key 时创建，并在应用 lifespan 结束时关闭；真正的网络请求只由 `TJUClient.chat()` 发起。`/api/health` 仅公开布尔就绪状态、Tool 模式和服务状态；静态页面通过同源 `/api/health` 获取这些字段。
@@ -87,7 +88,21 @@ AgentOrchestrator
 
 Milestone 4 使用非流式原生 Function Calling，支持同一响应内的多个工具调用并保留精确 `tool_call_id`。工具只来自六项只读白名单，参数错误会作为结构化失败回传模型；循环默认最多执行六轮。普通 Chat 继续兼容，测试通过 Fake LLM/Mock SDK 保持离线，独立脚本负责真实模型验收。
 
-### 3.4 Lab 1～3 模型调用链
+### 3.4 NetPilot RAG 调用链
+
+```text
+knowledge/raw 中带来源的 Markdown/TXT
+  -> loader + deterministic chunker
+  -> FastEmbed BGE-small-zh-v1.5
+  -> FAISS index + chunks metadata + manifest
+  -> FaissRetriever
+  -> ToolRegistry knowledge_search
+  -> AgentResult.sources + 带原始 URL 的最终回答
+```
+
+索引构建脚本是唯一允许下载 Embedding 模型的正式入口；应用只使用本地缓存。索引缺失、损坏、模型不匹配或缓存不可用时 `rag_ready=false`，并且不注册 `knowledge_search`。当前种子资料是从北洋维基页面整理的社区测试摘要，必须与天津大学官方现行规定区分。
+
+### 3.5 Lab 1～3 模型调用链
 
 ```text
 Lab 1～3 入口脚本
@@ -98,7 +113,7 @@ Lab 1～3 入口脚本
 
 凭据只由共享客户端从根目录 `.env` 或进程环境读取。修改鉴权、超时、错误映射或 token 展示时只需优先修改共享客户端并扩展 `tests/test_tju_llm_client.py`。
 
-### 3.5 TJU API 原生工具调用链
+### 3.6 TJU API 原生工具调用链
 
 ```text
 labs/lab4-agentic/agentic_network_bot.py
@@ -109,7 +124,7 @@ labs/lab4-agentic/agentic_network_bot.py
 
 `agentic_network_bot_ollama.py` 仅为旧路径兼容启动器。Lab 4B 沿用同类循环，但把工具实现替换成真实 Netmiko SSH。工具结果必须携带对应 `tool_call_id`，默认最多六轮。
 
-### 3.5 MCP 与浏览器链
+### 3.7 MCP 与浏览器链
 
 ```text
 labs/lab5-mcp/ui.html
@@ -123,7 +138,7 @@ labs/lab5-mcp/ui.html
 
 若修改工具名或参数，必须自右向左检查整条链；只改 MCP server 会造成 UI 或 bridge 路由不匹配。
 
-### 3.6 生产安全链
+### 3.8 生产安全链
 
 ```text
 Agent/调用方
@@ -140,7 +155,7 @@ Agent/调用方
 2. **`scripts/02_inventory_loader.py`、`03_connect_to_device.py`、`04_get_interfaces.py` 引用缺失文件** `mcp_server/inventory.yml`。当前仓库没有 `mcp_server/` 目录，这三个目标和 Makefile 的 `inventory`/`version`/`interfaces` 入口会因此失败，除非补回清单或改为现有数据源。
 3. **凭据仅适合教学环境。** 多个 Lab 和 Containerlab 配置中硬编码 `admin/admin`。接入真实网络前应改用环境变量或 secrets manager，并使用只读、最小权限账号。
 4. **命令安全实现不统一。** Lab 5 只检查命令以 `show` 开头；Lab 4B 还检查阻断词、危险 show 模式和目标格式；Lab 6 使用白名单。生产改动应以更严格的 Lab 4B/Lab 6 思路为基线。
-5. **自动测试覆盖仍有限。** 现有测试已覆盖 NetPilot Settings/health/静态页面、六个网络 Tool、六种 Mock 场景、跨平台命令构造、SSRF/注入边界、TJU 客户端、正式 Agent 多工具协议、多轮上限与 DNS Mock 自动诊断；尚未自动化覆盖 RAG、真实 API 的稳定性、MCP 传输、真实 SSH 或 Lab 6 策略。真实 Agent Function Calling 另由 `scripts/test_netpilot_agent.py` 手工验收。
+5. **自动测试覆盖仍有限。** 现有测试已覆盖 NetPilot Settings/health/静态页面、六个网络 Tool、六种 Mock 场景、跨平台命令构造、SSRF/注入边界、TJU 客户端、Agent 多轮、RAG 加载/切块/FAISS/检索、知识工具和来源聚合；尚未自动化覆盖真实 API 稳定性、MCP 传输、真实 SSH 或 Lab 6 策略。真实 Agent 与 RAG 分别由两个独立脚本手工验收。
 6. **文档中有教学草稿痕迹。** Lab 3 的大写扩展名 `.MD` 文档很长，包含代码逐段讲解；其中个别示例文件名与实际脚本名不同。以当前代码文件名为准。
 7. **Bonus README 与主实现存在演进差异。** README 描述“四个 TODO、端口 3000”的入门任务；根 `server.js` 已发展为端口 3003 的完整 RACE Prompt Builder，`solution/server.js` 才是较精简的端口 3000 解答版。
 8. **`config.txt` 是独立的 BGP 安全配置样例**，当前没有代码直接读取它；其中仍有占位符 `<LOCAL_AS>` 和示例口令字段。
@@ -160,7 +175,7 @@ Agent/调用方
 | `QUICKSTART.md` | 五分钟快速启动路线和最短实验路径；比 README 更面向首次运行者。 |
 | `CONTRIBUTING.md` | 贡献流程、PEP 8/类型提示要求、测试建议和优先改进方向。 |
 | `LICENSE` | MIT 许可证文本。通常不参与代码修改。 |
-| `requirements.txt` | 全仓 Python 依赖：OpenAI/Anthropic 客户端、FastAPI/Pydantic、HTTP、psutil/dnspython 本机网络信息、Netmiko、PyYAML、Rich、MCP、Uvicorn 和 pytest。 |
+| `requirements.txt` | 全仓 Python 依赖：OpenAI/Anthropic、FastAPI/Pydantic、网络检测、FastEmbed/FAISS/NumPy 本地 RAG、Netmiko、MCP、Uvicorn 和 pytest。 |
 | `pyproject.toml` | NetPilot 的 setuptools `src` 布局与 editable install 元数据；依赖继续以 `requirements.txt` 为单一清单。 |
 | `REQUIREMENTS_TJU_NetPilot_Codex.md` | TJU NetPilot 比赛项目的需求、架构约束、里程碑与验收标准；正式应用开发以此为产品目标。 |
 | `Makefile` | setup、Containerlab、基础脚本、Claude、MCP 和 pytest 的快捷命令；其中三个设备脚本依赖当前缺失的 inventory。 |
@@ -173,16 +188,16 @@ Agent/调用方
 | 文件 | 作用与修改提示 |
 |---|---|
 | `src/netpilot/config.py` | 使用 Pydantic Settings 读取根 `.env`，校验 TJU、Agent、Tool、RAG、App 配置；API Key 使用 `SecretStr` 且允许缺失启动。 |
-| `src/netpilot/main.py` | FastAPI 应用工厂和正式入口；注册 `/api` 路由、创建 TJUClient、Tool Service、ToolRegistry 与 AgentOrchestrator，保存 readiness、同源挂载 `web/`，并通过 lifespan 关闭 LLM transport。 |
+| `src/netpilot/main.py` | FastAPI 应用工厂和正式入口；创建 TJUClient、网络 Tool、可选 Retriever、ToolRegistry 与 AgentOrchestrator，并准确设置 `rag_ready`。 |
 | `src/netpilot/api/routes.py` | 当前提供 `/api/health`，只返回公开的布尔/枚举状态，不返回凭据。复杂 Agent 逻辑不得写入此层。 |
 | `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；当前定义 `HealthResponse`，后续按 Milestone 增加会话和诊断模型。 |
 | `src/netpilot/llm/base.py` | Agent 依赖的 provider-neutral `LLMClient` Protocol，便于 Fake LLM 测试。 |
 | `src/netpilot/llm/schemas.py` | 普通消息、assistant tool calls、tool result 消息、token 用量与稳定 `ChatResult`，不暴露 SDK 响应对象。 |
 | `src/netpilot/llm/errors.py` | 未配置、请求、认证、限流、超时、连接、服务和异常响应的安全错误层。 |
 | `src/netpilot/llm/tju_client.py` | 正式 TJU OpenAI-compatible Chat Completions 客户端；支持普通 Chat 和原生 Function Calling，配置 timeout/有限 retry，支持 Mock SDK 注入，校验响应并记录耗时。 |
-| `src/netpilot/agent/prompts.py` | 证据优先、只读、禁止重复检测和固定最终回答要素的系统提示词。 |
-| `src/netpilot/agent/schemas.py` | `AgentResult`、状态、累计 token 与逐次工具证据时间线 schema。 |
-| `src/netpilot/agent/tool_registry.py` | 六个只读工具的严格 function schema、白名单分派、参数校验与安全失败转换。 |
+| `src/netpilot/agent/prompts.py` | 证据优先、只读、来源区分、RAG Prompt Injection 防护和禁止重复检测的系统提示词。 |
+| `src/netpilot/agent/schemas.py` | `AgentResult`、状态、token、工具证据时间线与结构化知识来源 schema。 |
+| `src/netpilot/agent/tool_registry.py` | 六个网络工具及可选 `knowledge_search` 的严格 schema、白名单分派、参数校验与安全失败转换。 |
 | `src/netpilot/agent/orchestrator.py` | 有界 messages → tool_calls → tool results → answer 循环，支持多调用并安全处理 LLM 错误和最大轮次。 |
 | `src/netpilot/tools/schemas.py` | 六个工具的 Pydantic 输入/数据模型、稳定错误码与泛型 `ToolResult`；负面网络观察与工具执行错误分开表达。 |
 | `src/netpilot/tools/validation.py` | Host/Domain/URL 的集中校验以及 HTTP localhost、metadata、内网和非公网地址阻断。 |
@@ -190,6 +205,11 @@ Agent/调用方
 | `src/netpilot/tools/mock_network.py` | 面向终端用户的六个完全离线故障场景；不复用 spine/leaf/BGP 产品语义。 |
 | `src/netpilot/tools/local_network.py` | 本机接口/网关/DNS、Ping、DNS、TCP、HTTP 和 traceroute 的跨平台只读实现，含 timeout、输出上限、重定向与 SSRF 基础防护。 |
 | `src/netpilot/tools/service.py` | 按 Settings 创建 Provider 并提供稳定委托接口；预留内部 Mock 场景切换，不提前公开 HTTP API。 |
+| `src/netpilot/rag/loader.py` | 限量扫描 Markdown/TXT，要求 YAML 来源元数据并阻断符号链接、越界与超大文件。 |
+| `src/netpilot/rag/chunker.py` | 中文友好的确定性重叠切块，并为每块生成稳定 ID。 |
+| `src/netpilot/rag/embeddings.py` | 延迟加载的 FastEmbed 中文 BGE Provider，以及仅供离线测试的确定性 Hash Embedding。 |
+| `src/netpilot/rag/index.py` | FAISS cosine 索引构建、原子文件替换、chunk 元数据和 manifest 完整性校验。 |
+| `src/netpilot/rag/retriever.py` | Top-K、最低分数过滤、来源保留及应用本地只读加载工厂。 |
 
 ### 5.3 `web/`：正式中文 Web 壳
 
@@ -224,6 +244,8 @@ Agent/调用方
 | `scripts/05_claude_race_analysis.py` | 读取 RACE system prompt 和输入文件，调用 Anthropic Messages API；使用 `.env` 的 API key/model，默认输入示例为 `examples/interface_output.json`。 |
 | `scripts/test_tju_api.py` | 通过正式 `Settings` 与 `TJUClient` 发送最小在线请求；不会输出 API Key，展示安全错误、token 用量和耗时。 |
 | `scripts/test_netpilot_agent.py` | 以真实 `tju-llm` 和离线 `dns_failure` Mock 验收完整 Function Calling 链，不探测本机网络。 |
+| `scripts/build_knowledge_index.py` | 从 `knowledge/raw` 构建 BGE + FAISS 本地索引；首次允许下载，支持 `--offline`。 |
+| `scripts/test_netpilot_rag.py` | 以真实 `tju-llm` 验收 `knowledge_search`、社区来源标识、URL 引用和结构化 sources。 |
 
 ### 5.6 `prompts/`：外置提示词
 

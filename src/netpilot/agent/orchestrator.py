@@ -12,6 +12,7 @@ from netpilot.llm import (
     TJUClientError,
     TokenUsage,
 )
+from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 
 
 MAX_TOOL_ROUNDS_ANSWER = "已达到自动诊断步骤上限，当前证据不足以继续自动分析。"
@@ -46,6 +47,7 @@ class AgentOrchestrator:
         usage = TokenUsage()
         llm_duration_ms = 0.0
         tool_rounds = 0
+        sources: list[KnowledgeSource] = []
         tools = self.registry.schemas()
 
         while True:
@@ -63,6 +65,7 @@ class AgentOrchestrator:
                     status=AgentStatus.LLM_ERROR,
                     tool_rounds=tool_rounds,
                     steps=steps,
+                    sources=sources,
                     usage=usage,
                     llm_duration_ms=llm_duration_ms,
                 )
@@ -78,6 +81,7 @@ class AgentOrchestrator:
                     status=AgentStatus.COMPLETED,
                     tool_rounds=tool_rounds,
                     steps=steps,
+                    sources=sources,
                     usage=usage,
                     llm_duration_ms=llm_duration_ms,
                 )
@@ -88,6 +92,7 @@ class AgentOrchestrator:
                     status=AgentStatus.MAX_TOOL_ROUNDS,
                     tool_rounds=tool_rounds,
                     steps=steps,
+                    sources=sources,
                     usage=usage,
                     llm_duration_ms=llm_duration_ms,
                 )
@@ -107,6 +112,8 @@ class AgentOrchestrator:
                         result=execution.result,
                     )
                 )
+                if tool_call.function.name == "knowledge_search":
+                    sources = _merge_sources(sources, execution.result.data)
                 messages.append(
                     ChatMessage(
                         role=ChatRole.TOOL,
@@ -114,3 +121,35 @@ class AgentOrchestrator:
                         content=execution.result.model_dump_json(),
                     )
                 )
+
+
+def _merge_sources(
+    existing: list[KnowledgeSource],
+    data: object,
+) -> list[KnowledgeSource]:
+    if isinstance(data, KnowledgeSearchData):
+        results = data.results
+    elif isinstance(data, dict):
+        try:
+            results = KnowledgeSearchData.model_validate(data).results
+        except ValueError:
+            return existing
+    else:
+        return existing
+    merged = list(existing)
+    known = {source.chunk_id for source in merged}
+    for result in results:
+        if result.chunk_id in known:
+            continue
+        merged.append(
+            KnowledgeSource(
+                title=result.title,
+                source=result.source,
+                source_type=result.source_type,
+                file=result.file,
+                chunk_id=result.chunk_id,
+                score=result.score,
+            )
+        )
+        known.add(result.chunk_id)
+    return merged

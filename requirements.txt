@@ -17,6 +17,11 @@ httpx>=0.27,<1
 psutil>=5.9,<8
 dnspython>=2.6,<3
 
+# NetPilot Milestone 5 local Chinese embeddings and vector search
+fastembed>=0.7,<1
+faiss-cpu>=1.9,<2
+numpy>=1.26,<3
+
 # Upstream external API examples
 anthropic>=0.104.0
 python-dotenv>=1.0.1

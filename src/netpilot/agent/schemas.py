@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from netpilot.llm import TokenUsage
+from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
 
 
@@ -41,5 +42,6 @@ class AgentResult(BaseModel):
     status: AgentStatus
     tool_rounds: int = Field(ge=0)
     steps: list[AgentToolStep] = Field(default_factory=list)
+    sources: list[KnowledgeSource] = Field(default_factory=list)
     usage: TokenUsage = Field(default_factory=TokenUsage)
     llm_duration_ms: float = Field(default=0, ge=0)

@@ -11,7 +11,7 @@ def build_client(api_key: str | None = None) -> TestClient:
         _env_file=None,
         tju_api_key=api_key,
         tool_mode="mock",
-        rag_enabled=True,
+        rag_enabled=False,
     )
     return TestClient(create_app(settings))
 
@@ -42,9 +42,15 @@ def test_application_starts_without_an_api_key() -> None:
 
 
 def test_application_factory_initializes_the_llm_client_without_network_io() -> None:
-    unconfigured = create_app(Settings(_env_file=None, tju_api_key=None))
+    unconfigured = create_app(
+        Settings(_env_file=None, tju_api_key=None, rag_enabled=False)
+    )
     configured = create_app(
-        Settings(_env_file=None, tju_api_key="application-test-secret")
+        Settings(
+            _env_file=None,
+            tju_api_key="application-test-secret",
+            rag_enabled=False,
+        )
     )
 
     assert unconfigured.state.llm_client.configured is False
@@ -59,6 +65,7 @@ def test_application_factory_initializes_the_configured_tool_provider() -> None:
         _env_file=None,
         tool_mode="mock",
         mock_scenario="tcp_ssh_blocked",
+        rag_enabled=False,
     )
     application = create_app(settings)
 
@@ -72,6 +79,7 @@ def test_application_factory_initializes_the_milestone_four_agent() -> None:
             _env_file=None,
             tool_mode="mock",
             max_tool_rounds=4,
+            rag_enabled=False,
         )
     )
 

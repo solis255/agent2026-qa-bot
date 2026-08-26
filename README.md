@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the read-only network Tool layer, the production TJU client, and the Milestone 4 native Function Calling Agent loop.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the read-only network Tool layer, the production TJU client, the native Function Calling Agent loop, and the Milestone 5 source-preserving local RAG layer.
 
 Start the application from the repository root:
 
@@ -89,11 +89,11 @@ Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://12
   "status": "ok",
   "llm_configured": true,
   "tool_mode": "mock",
-  "rag_ready": false
+  "rag_ready": true
 }
 ```
 
-The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Creating the configured `TJUClient` does not send a network request; the isolated live check below performs the first call. `rag_ready` remains false until the RAG milestone initializes a usable retriever. No health response exposes credentials.
+The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Creating the configured `TJUClient` does not send a network request; the isolated live check below performs the first call. `rag_ready` is true only when RAG is enabled, all index files are valid, the configured model matches the index manifest, and the embedding model is available in the local cache. Missing RAG artifacts never prevent the application or the six network tools from starting. No health response exposes credentials.
 
 ### Network Tool Providers
 
@@ -102,7 +102,7 @@ NetPilot creates one provider from `TOOL_MODE` when the FastAPI application star
 - `TOOL_MODE=mock` is deterministic and fully offline. It supports `healthy`, `dns_failure`, `gateway_unreachable`, `tcp_ssh_blocked`, `http_failure`, and `partial_connectivity`.
 - `TOOL_MODE=local` runs bounded, read-only checks against the machine hosting NetPilot. It supports Windows, Linux, and macOS with graceful degradation when a system traceroute command is unavailable.
 
-Both providers expose the same six tools:
+Both providers expose the same six network tools:
 
 ```text
 get_network_info
@@ -112,6 +112,8 @@ tcp_check
 http_check
 traceroute
 ```
+
+When the local knowledge index is ready, `ToolRegistry` additionally exposes `knowledge_search`.
 
 Every call returns a structured `ToolResult` containing `success`, `tool`, `summary`, `data`, `error`, and `duration_ms`. `success` means that the tool produced diagnostic evidence; a valid negative observation such as `reachable=false` remains successful evidence. Invalid input, unavailable executables, and unexpected execution failures return `success=false` with a stable error code.
 
@@ -145,6 +147,33 @@ With a configured `TJU_API_KEY`, run the real-model acceptance check. The model 
 ```bash
 python scripts/test_netpilot_agent.py
 ```
+
+### Milestone 5 Local RAG
+
+The knowledge pipeline loads attributed UTF-8 Markdown/TXT files from `knowledge/raw/`, validates their front matter, creates deterministic source-preserving chunks, embeds them with configurable `BAAI/bge-small-zh-v1.5`, and stores cosine-search vectors in FAISS. Every result retains `title`, `source`, `source_type`, `file`, `chunk_id`, and `score`.
+
+The included seed documents are concise test summaries of the [TJU Wiki campus network page](https://wiki.tjubot.cn/e-life/network), its [VPN page](https://wiki.tjubot.cn/e-life/vpn), and its [eduroam page](https://wiki.tjubot.cn/e-life/eduroam). They are explicitly marked as community material, not current Tianjin University official policy. Replace or supplement them with reviewed official documents before production use.
+
+Build the local index (the first run downloads the configured embedding model):
+
+```bash
+python scripts/build_knowledge_index.py
+```
+
+Subsequent offline rebuilds can require the existing cache:
+
+```bash
+python scripts/build_knowledge_index.py --offline
+```
+
+Run the offline RAG suite and the isolated real-model acceptance check:
+
+```bash
+python -m pytest tests/test_rag_loader.py tests/test_rag_index.py tests/test_agent_rag_scenario.py -q
+python scripts/test_netpilot_rag.py
+```
+
+The Agent treats retrieved text as untrusted reference material, distinguishes community and official sources, cites original URLs, and states that the knowledge base has insufficient evidence when no result clears `RAG_MIN_SCORE`. Generated model files and indexes are local artifacts and are not committed.
 
 ## Run the Labs
 

@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from netpilot.agent.schemas import RegistryExecution
+from netpilot.rag import KnowledgeSearchData, KnowledgeSearchInput, Retriever
 from netpilot.tools.schemas import (
     DNSLookupInput,
     GetNetworkInfoInput,
@@ -39,11 +40,17 @@ class ToolSpec:
 
 
 class ToolRegistry:
-    """Expose only the six validated, read-only network tools to the model."""
+    """Expose validated read-only network and optional knowledge tools."""
 
-    def __init__(self, service: NetworkToolService, *, strict: bool = True) -> None:
+    def __init__(
+        self,
+        service: NetworkToolService,
+        retriever: Retriever | None = None,
+        *,
+        strict: bool = True,
+    ) -> None:
         self._strict = strict
-        specs = (
+        specs = [
             ToolSpec(
                 "get_network_info",
                 "获取本机网卡、IP、默认网关和 DNS 配置，用于判断本地接入状态。",
@@ -80,7 +87,16 @@ class ToolRegistry:
                 TracerouteInput,
                 service.traceroute,
             ),
-        )
+        ]
+        if retriever is not None:
+            specs.append(
+                ToolSpec(
+                    "knowledge_search",
+                    "检索带来源的校园网络、VPN、无线网络和 eduroam 参考资料。",
+                    KnowledgeSearchInput,
+                    lambda query: _search_knowledge(retriever, query),
+                )
+            )
         self._specs = {spec.name: spec for spec in specs}
 
     @property
@@ -154,7 +170,7 @@ class ToolRegistry:
         try:
             result = spec.handler(**arguments)
         except Exception:
-            logger.exception("Unexpected ToolRegistry handler failure: %s", tool_name)
+            logger.warning("ToolRegistry handler failed safely: %s", tool_name)
             return RegistryExecution(
                 arguments=arguments,
                 result=_failure(
@@ -201,5 +217,22 @@ def _failure(
         summary=message,
         data=None,
         error=ToolError(code=code, message=message),
+        duration_ms=max(0, round((perf_counter() - started) * 1000)),
+    )
+
+
+def _search_knowledge(retriever: Retriever, query: str) -> ToolResult[Any]:
+    started = perf_counter()
+    results = retriever.search(query)
+    if results:
+        summary = f"知识库找到 {len(results)} 条带来源的参考内容"
+    else:
+        summary = "知识库没有找到足够依据。"
+    return ToolResult[Any](
+        success=True,
+        tool="knowledge_search",
+        summary=summary,
+        data=KnowledgeSearchData(results=results),
+        error=None,
         duration_ms=max(0, round((perf_counter() - started) * 1000)),
     )

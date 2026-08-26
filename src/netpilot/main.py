@@ -14,6 +14,7 @@ from netpilot.agent import AgentOrchestrator, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
+from netpilot.rag import load_configured_retriever
 from netpilot.tools import build_network_tools
 
 
@@ -45,15 +46,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings or Settings()
     app.state.llm_client = TJUClient(app.state.settings)
     app.state.network_tools = build_network_tools(app.state.settings)
-    app.state.tool_registry = ToolRegistry(app.state.network_tools)
+    app.state.retriever = load_configured_retriever(app.state.settings)
+    app.state.tool_registry = ToolRegistry(
+        app.state.network_tools,
+        app.state.retriever,
+    )
     app.state.agent = AgentOrchestrator(
         app.state.llm_client,
         app.state.tool_registry,
         max_tool_rounds=app.state.settings.max_tool_rounds,
     )
-    # Milestone 4 does not load a retriever. A later lifespan hook will set this
-    # only after a usable knowledge index has been opened successfully.
-    app.state.rag_ready = False
+    app.state.rag_ready = app.state.retriever is not None
 
     app.include_router(api_router, prefix="/api")
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

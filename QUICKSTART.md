@@ -100,3 +100,23 @@ python scripts\test_netpilot_agent.py
 ```
 
 A successful run shows `completed`, both `ping_host` and `dns_lookup` with their call IDs, and a final DNS diagnosis. `MAX_TOOL_ROUNDS=6` is the default safety limit.
+
+## 5. Build and Verify the Milestone 5 Knowledge Base
+
+The repository includes three attributed community test summaries covering campus network access, VPN, and eduroam. They are test material rather than official policy.
+
+Build the FAISS index. The first run downloads the configured Chinese BGE model; later rebuilds can use `--offline`:
+
+```powershell
+python scripts\build_knowledge_index.py
+python scripts\build_knowledge_index.py --offline
+```
+
+Run the download-free test suite, then verify that the real `tju-llm` chooses `knowledge_search` and cites the original URL:
+
+```powershell
+python -m pytest tests\test_rag_loader.py tests\test_rag_index.py tests\test_agent_rag_scenario.py -q
+python scripts\test_netpilot_rag.py
+```
+
+`/api/health` reports `rag_ready: true` only when the index and locally cached embedding model are usable. Use `RAG_ENABLED=false` to disable knowledge search without affecting the network tools.
