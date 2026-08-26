@@ -1,4 +1,4 @@
-"""Production TJU OpenAI-compatible ordinary chat client."""
+"""Production TJU OpenAI-compatible chat and Function Calling client."""
 
 from __future__ import annotations
 
@@ -29,7 +29,13 @@ from netpilot.llm.errors import (
     LLMTimeoutError,
     TJUClientError,
 )
-from netpilot.llm.schemas import ChatMessage, ChatResult, TokenUsage
+from netpilot.llm.schemas import (
+    ChatMessage,
+    ChatResult,
+    FunctionCall,
+    TokenUsage,
+    ToolCall,
+)
 
 
 ClientFactory = Callable[..., Any]
@@ -86,10 +92,12 @@ class TJUClient:
         self,
         messages: Sequence[ChatMessage],
         *,
+        tools: Sequence[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
         temperature: float = 0.2,
         max_tokens: int = 1024,
     ) -> ChatResult:
-        """Send one non-streaming ordinary chat request."""
+        """Send one non-streaming chat or native Function Calling request."""
 
         if not self.configured:
             raise LLMNotConfiguredError(
@@ -103,17 +111,25 @@ class TJUClient:
             raise LLMRequestError("max_tokens 必须在 1 到 32768 之间。")
         if any(not isinstance(message, ChatMessage) for message in messages):
             raise LLMRequestError("messages 中的每一项都必须是 ChatMessage。")
+        if tools is not None and not tools:
+            raise LLMRequestError("tools 不能为空列表。")
+        if tools is not None and tool_choice not in {"auto", "none", "required"}:
+            raise LLMRequestError("tool_choice 必须是 auto、none 或 required。")
 
         request_messages = [message.to_api_dict() for message in messages]
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": request_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if tools is not None:
+            request["tools"] = list(tools)
+            request["tool_choice"] = tool_choice
         started = perf_counter()
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=request_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False,
-            )
+            response = self._client.chat.completions.create(**request)
         except AuthenticationError as exc:
             raise LLMAuthenticationError(
                 "TJU API 认证失败（401），请检查 TJU_API_KEY。",
@@ -171,9 +187,12 @@ def _parse_response(response: Any, configured_model: str, duration_ms: float) ->
         if not choices:
             raise ValueError("missing choices")
         choice = choices[0]
-        content = choice.message.content
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("missing message content")
+        raw_content = getattr(choice.message, "content", None)
+        content = raw_content.strip() if isinstance(raw_content, str) else None
+        content = content or None
+        tool_calls = _parse_tool_calls(getattr(choice.message, "tool_calls", None))
+        if content is None and not tool_calls:
+            raise ValueError("missing message content and tool calls")
 
         response_model = getattr(response, "model", None) or configured_model
         if not isinstance(response_model, str) or not response_model.strip():
@@ -190,7 +209,8 @@ def _parse_response(response: Any, configured_model: str, duration_ms: float) ->
             finish_reason = str(finish_reason)
 
         return ChatResult(
-            content=content.strip(),
+            content=content,
+            tool_calls=tool_calls,
             model=response_model.strip(),
             finish_reason=finish_reason,
             usage=token_usage,
@@ -201,6 +221,28 @@ def _parse_response(response: Any, configured_model: str, duration_ms: float) ->
         raise
     except (AttributeError, IndexError, TypeError, ValueError) as exc:
         raise LLMResponseError("TJU API 返回了不完整或异常的响应。") from exc
+
+
+def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
+    if raw_tool_calls is None:
+        return []
+    if not isinstance(raw_tool_calls, (list, tuple)):
+        raise ValueError("tool_calls must be a list")
+
+    parsed: list[ToolCall] = []
+    for raw_call in raw_tool_calls:
+        function = raw_call.function
+        parsed.append(
+            ToolCall(
+                id=raw_call.id,
+                type=raw_call.type,
+                function=FunctionCall(
+                    name=function.name,
+                    arguments=function.arguments,
+                ),
+            )
+        )
+    return parsed
 
 
 def _token_count(usage: Any, field: str) -> int:

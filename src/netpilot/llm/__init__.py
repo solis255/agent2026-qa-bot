@@ -1,5 +1,6 @@
 """LLM clients and provider-neutral chat result models."""
 
+from netpilot.llm.base import LLMClient
 from netpilot.llm.errors import (
     LLMAuthenticationError,
     LLMConnectionError,
@@ -11,13 +12,21 @@ from netpilot.llm.errors import (
     LLMTimeoutError,
     TJUClientError,
 )
-from netpilot.llm.schemas import ChatMessage, ChatResult, ChatRole, TokenUsage
+from netpilot.llm.schemas import (
+    ChatMessage,
+    ChatResult,
+    ChatRole,
+    FunctionCall,
+    TokenUsage,
+    ToolCall,
+)
 from netpilot.llm.tju_client import TJUClient
 
 __all__ = [
     "ChatMessage",
     "ChatResult",
     "ChatRole",
+    "FunctionCall",
     "LLMAuthenticationError",
     "LLMConnectionError",
     "LLMNotConfiguredError",
@@ -26,7 +35,9 @@ __all__ = [
     "LLMResponseError",
     "LLMServiceError",
     "LLMTimeoutError",
+    "LLMClient",
     "TJUClient",
     "TJUClientError",
     "TokenUsage",
+    "ToolCall",
 ]

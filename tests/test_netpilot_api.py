@@ -66,6 +66,26 @@ def test_application_factory_initializes_the_configured_tool_provider() -> None:
     assert application.state.network_tools.provider.scenario.value == "tcp_ssh_blocked"
 
 
+def test_application_factory_initializes_the_milestone_four_agent() -> None:
+    application = create_app(
+        Settings(
+            _env_file=None,
+            tool_mode="mock",
+            max_tool_rounds=4,
+        )
+    )
+
+    assert set(application.state.tool_registry.names) == {
+        "get_network_info",
+        "ping_host",
+        "dns_lookup",
+        "tcp_check",
+        "http_check",
+        "traceroute",
+    }
+    assert application.state.agent.max_tool_rounds == 4
+
+
 def test_root_serves_the_chinese_web_shell() -> None:
     with build_client() as client:
         response = client.get("/")

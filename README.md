@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the Milestone 2 read-only network Tool layer, and the Milestone 3 production TJU ordinary-chat client.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the read-only network Tool layer, the production TJU client, and the Milestone 4 native Function Calling Agent loop.
 
 Start the application from the repository root:
 
@@ -124,6 +124,26 @@ python -m pytest tests/test_tools.py -q
 python -m pytest tests/test_mock_scenarios.py -q
 python -m pytest tests/test_tool_security.py -q
 python -m pytest -q
+```
+
+### Milestone 4 Agent Tool Calling
+
+`AgentOrchestrator` sends the conversation and six allowlisted function schemas to `tju-llm`, executes every returned native `tool_call`, correlates each structured tool result by `tool_call_id`, and asks the model for the evidence-based answer. `ToolRegistry` validates model-generated JSON with strict Pydantic input models and never exposes the internal Mock scenario switch or arbitrary command execution.
+
+The loop accepts multiple tool calls in one model response, preserves the complete assistant/tool message sequence, reports model errors safely, and stops before a seventh tool-execution round by default. The limit can be changed with `MAX_TOOL_ROUNDS`.
+
+Run the fully offline Milestone 4 acceptance suite:
+
+```bash
+python -m pytest tests/test_tool_registry.py -q
+python -m pytest tests/test_agent_orchestrator.py -q
+python -m pytest tests/test_agent_dns_scenario.py -q
+```
+
+With a configured `TJU_API_KEY`, run the real-model acceptance check. The model call is online, while all network evidence comes from the deterministic `dns_failure` Mock provider:
+
+```bash
+python scripts/test_netpilot_agent.py
 ```
 
 ## Run the Labs

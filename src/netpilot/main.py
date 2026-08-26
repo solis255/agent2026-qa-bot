@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from netpilot import __version__
+from netpilot.agent import AgentOrchestrator, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
@@ -44,7 +45,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings or Settings()
     app.state.llm_client = TJUClient(app.state.settings)
     app.state.network_tools = build_network_tools(app.state.settings)
-    # Milestone 1 does not load a retriever. A later lifespan hook will set this
+    app.state.tool_registry = ToolRegistry(app.state.network_tools)
+    app.state.agent = AgentOrchestrator(
+        app.state.llm_client,
+        app.state.tool_registry,
+        max_tool_rounds=app.state.settings.max_tool_rounds,
+    )
+    # Milestone 4 does not load a retriever. A later lifespan hook will set this
     # only after a usable knowledge index has been opened successfully.
     app.state.rag_ready = False
 

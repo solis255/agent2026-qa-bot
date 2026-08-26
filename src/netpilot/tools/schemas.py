@@ -115,39 +115,50 @@ class ToolResult(BaseModel, Generic[DataT]):
         return self
 
 
-class GetNetworkInfoInput(BaseModel):
+class ToolInput(BaseModel):
+    """Strict base for every argument object exposed to the model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GetNetworkInfoInput(ToolInput):
     """Marker schema for the argument-free get_network_info tool."""
 
 
-class PingHostInput(BaseModel):
-    host: str
-    count: int = Field(default=3, ge=1, le=5)
+class PingHostInput(ToolInput):
+    host: str = Field(description="目标主机名或 IP 地址")
+    count: int = Field(default=3, ge=1, le=5, description="发送探测包数量")
 
     _normalize_host = field_validator("host")(normalize_host)
 
 
-class DNSLookupInput(BaseModel):
-    domain: str
+class DNSLookupInput(ToolInput):
+    domain: str = Field(description="需要解析的域名")
 
     _normalize_domain = field_validator("domain")(normalize_host)
 
 
-class TCPCheckInput(BaseModel):
-    host: str
-    port: int = Field(ge=1, le=65535)
-    timeout: float = Field(default=3.0, ge=1.0, le=10.0)
+class TCPCheckInput(ToolInput):
+    host: str = Field(description="目标主机名或 IP 地址")
+    port: int = Field(ge=1, le=65535, description="目标 TCP 端口")
+    timeout: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=10.0,
+        description="连接超时秒数",
+    )
 
     _normalize_host = field_validator("host")(normalize_host)
 
 
-class HTTPCheckInput(BaseModel):
-    url: str
+class HTTPCheckInput(ToolInput):
+    url: str = Field(description="需要检测的 HTTP 或 HTTPS URL")
 
     _validate_url = field_validator("url")(validate_http_url)
 
 
-class TracerouteInput(BaseModel):
-    host: str
-    max_hops: int = Field(default=15, ge=1, le=30)
+class TracerouteInput(ToolInput):
+    host: str = Field(description="目标主机名或 IP 地址")
+    max_hops: int = Field(default=15, ge=1, le=30, description="最大跳数")
 
     _normalize_host = field_validator("host")(normalize_host)

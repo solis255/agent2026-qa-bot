@@ -18,6 +18,7 @@ from openai import (
 from netpilot.config import Settings
 from netpilot.llm import (
     ChatMessage,
+    FunctionCall,
     LLMAuthenticationError,
     LLMConnectionError,
     LLMNotConfiguredError,
@@ -27,6 +28,7 @@ from netpilot.llm import (
     LLMServiceError,
     LLMTimeoutError,
     TJUClient,
+    ToolCall,
 )
 
 
@@ -176,6 +178,47 @@ def test_chat_allows_a_response_without_usage() -> None:
     assert result.usage.total_tokens == 0
 
 
+def test_chat_sends_tools_and_parses_native_function_calls() -> None:
+    raw_tool_call = SimpleNamespace(
+        id="call_dns_1",
+        type="function",
+        function=SimpleNamespace(
+            name="dns_lookup",
+            arguments='{"domain":"github.com"}',
+        ),
+    )
+    response = make_response(content=None)
+    response.choices[0].message.tool_calls = [raw_tool_call]
+    fake = FakeSDKClient(response)
+    client = TJUClient(make_settings(), sdk_client=fake)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "dns_lookup",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
+
+    result = client.chat(messages(), tools=tools, tool_choice="auto")
+
+    assert fake.completions.calls[0]["tools"] == tools
+    assert fake.completions.calls[0]["tool_choice"] == "auto"
+    assert result.content is None
+    assert result.tool_calls == [
+        ToolCall(
+            id="call_dns_1",
+            function=FunctionCall(
+                name="dns_lookup",
+                arguments='{"domain":"github.com"}',
+            ),
+        )
+    ]
+    serialized_call = result.to_assistant_message().to_api_dict()["tool_calls"][0]
+    assert serialized_call["id"] == "call_dns_1"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -298,6 +341,21 @@ def test_malformed_chat_responses_are_rejected(response: Any) -> None:
 
     with pytest.raises(LLMResponseError, match="不完整或异常"):
         client.chat(messages())
+
+
+def test_malformed_native_tool_call_is_rejected() -> None:
+    response = make_response(content=None)
+    response.choices[0].message.tool_calls = [
+        SimpleNamespace(
+            id="",
+            type="function",
+            function=SimpleNamespace(name="dns_lookup", arguments="{}"),
+        )
+    ]
+    client = TJUClient(make_settings(), sdk_client=FakeSDKClient(response))
+
+    with pytest.raises(LLMResponseError, match="不完整或异常"):
+        client.chat(messages(), tools=[{"type": "function", "function": {}}])
 
 
 def test_injected_mock_client_is_not_closed_by_the_wrapper() -> None:
