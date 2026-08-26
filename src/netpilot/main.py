@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,11 +12,24 @@ from fastapi.staticfiles import StaticFiles
 from netpilot import __version__
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
+from netpilot.llm import TJUClient
 from netpilot.tools import build_network_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = PROJECT_ROOT / "web"
+
+
+@asynccontextmanager
+async def app_lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """Release locally owned client transports when the application stops."""
+
+    try:
+        yield
+    finally:
+        llm_client = getattr(application.state, "llm_client", None)
+        if llm_client is not None:
+            llm_client.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -24,8 +39,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="TJU NetPilot API",
         summary="天津大学校园网络智能诊断与服务 Agent",
         version=__version__,
+        lifespan=app_lifespan,
     )
     app.state.settings = settings or Settings()
+    app.state.llm_client = TJUClient(app.state.settings)
     app.state.network_tools = build_network_tools(app.state.settings)
     # Milestone 1 does not load a retriever. A later lifespan hook will set this
     # only after a usable knowledge index has been opened successfully.

@@ -25,12 +25,16 @@ def test_settings_detect_a_configured_llm_without_exposing_the_key() -> None:
 def test_settings_load_valid_operational_values() -> None:
     settings = Settings(
         _env_file=None,
+        tju_timeout_seconds=90,
+        tju_max_retries=3,
         tool_mode="local",
         mock_scenario="partial_connectivity",
         network_timeout_seconds=10,
         app_port=9000,
     )
 
+    assert settings.tju_timeout_seconds == 90
+    assert settings.tju_max_retries == 3
     assert settings.tool_mode is ToolMode.LOCAL
     assert settings.mock_scenario is MockScenario.PARTIAL_CONNECTIVITY
     assert settings.network_timeout_seconds == 10
@@ -41,6 +45,10 @@ def test_settings_load_valid_operational_values() -> None:
     ("field", "value"),
     [
         ("tool_mode", "unsafe"),
+        ("tju_timeout_seconds", 0),
+        ("tju_timeout_seconds", 301),
+        ("tju_max_retries", -1),
+        ("tju_max_retries", 6),
         ("network_timeout_seconds", 0),
         ("network_timeout_seconds", 31),
         ("max_tool_rounds", 0),

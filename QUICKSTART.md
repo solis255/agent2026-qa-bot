@@ -34,6 +34,8 @@ TJU_API_KEY=replace-with-your-real-api-key
 TJU_API_BASE=https://ai.tju.edu.cn/api/agent2026/your-exclusive-address
 TJU_MODEL=tju-llm
 TJU_SHOW_TOKEN_USAGE=true
+TJU_TIMEOUT_SECONDS=60
+TJU_MAX_RETRIES=2
 ```
 
 Put your API Key only after `TJU_API_KEY=` in the project-root `.env`. Do not add `/chat/completions` to `TJU_API_BASE`; the SDK adds it automatically. `.env` is ignored by Git.
@@ -76,6 +78,7 @@ The names `lab1-ollama` and `agentic_network_bot_ollama.py` are retained only fo
 
 - `401`: check `TJU_API_KEY` in `.env`; remove surrounding quotes and spaces.
 - `429`: wait and retry; the competition platform is rate-limiting requests.
+- Timeout: raise `TJU_TIMEOUT_SECONDS` only when the competition endpoint is consistently slow; keep `TJU_MAX_RETRIES` bounded from 0 to 5.
 - Address error: copy the exclusive base address from the competition platform and omit `/chat/completions`.
 - Import error: reactivate `.venv`, then run `python -m pip install -r requirements.txt`.
 - Token display: set `TJU_SHOW_TOKEN_USAGE=true`; set it to `false` to hide usage output.

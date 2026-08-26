@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, and the Milestone 2 read-only network Tool layer.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the Milestone 2 read-only network Tool layer, and the Milestone 3 production TJU ordinary-chat client.
 
 Start the application from the repository root:
 
@@ -93,7 +93,7 @@ Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://12
 }
 ```
 
-The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Milestones 1–2 do not load a knowledge index, so `rag_ready` remains false until the RAG milestone initializes a usable retriever. Neither response exposes credentials.
+The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Creating the configured `TJUClient` does not send a network request; the isolated live check below performs the first call. `rag_ready` remains false until the RAG milestone initializes a usable retriever. No health response exposes credentials.
 
 ### Network Tool Providers
 
@@ -312,7 +312,7 @@ Create the private environment file before running Labs 1–4:
 cp .env.example .env
 ```
 
-Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. NetPilot also reads the Agent, Tool, RAG, and App variables documented in `.env.example`. `.env` is ignored by Git and the API Key must never be committed or returned by an API.
+Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. `TJU_TIMEOUT_SECONDS` defaults to 60 and `TJU_MAX_RETRIES` defaults to 2 bounded SDK retries. NetPilot also reads the Agent, Tool, RAG, and App variables documented in `.env.example`. `.env` is ignored by Git and the API Key must never be committed or returned by an API.
 
 ## Safety Boundary
 

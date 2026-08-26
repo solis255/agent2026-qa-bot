@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     )
     tju_model: Literal["tju-llm"] = "tju-llm"
     tju_show_token_usage: bool = True
+    tju_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
+    tju_max_retries: int = Field(default=2, ge=0, le=5)
 
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
     max_history_messages: int = Field(default=20, ge=1, le=200)

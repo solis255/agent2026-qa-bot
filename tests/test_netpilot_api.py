@@ -41,6 +41,19 @@ def test_application_starts_without_an_api_key() -> None:
     assert response.json()["llm_configured"] is False
 
 
+def test_application_factory_initializes_the_llm_client_without_network_io() -> None:
+    unconfigured = create_app(Settings(_env_file=None, tju_api_key=None))
+    configured = create_app(
+        Settings(_env_file=None, tju_api_key="application-test-secret")
+    )
+
+    assert unconfigured.state.llm_client.configured is False
+    assert configured.state.llm_client.configured is True
+    assert configured.state.llm_client.model == "tju-llm"
+    assert "application-test-secret" not in repr(configured.state.llm_client)
+    configured.state.llm_client.close()
+
+
 def test_application_factory_initializes_the_configured_tool_provider() -> None:
     settings = Settings(
         _env_file=None,
