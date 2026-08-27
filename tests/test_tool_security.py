@@ -76,7 +76,10 @@ def test_domain_resolving_to_a_private_address_is_blocked() -> None:
 
     assert result.success is False
     assert result.error is not None
-    assert result.error.code is ToolErrorCode.INVALID_INPUT
+    assert result.error.code is ToolErrorCode.SECURITY_BLOCKED
+    assert result.data is not None
+    assert result.data.request_sent is False
+    assert result.data.resolved_addresses == ["127.0.0.1"]
 
 
 def test_redirect_to_localhost_is_blocked_before_second_request() -> None:

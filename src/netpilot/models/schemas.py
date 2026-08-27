@@ -44,7 +44,14 @@ class ChatRequest(BaseModel):
         return normalized
 
 
-EvidenceStatus = Literal["normal", "abnormal", "error", "reference"]
+EvidenceStatus = Literal[
+    "normal",
+    "abnormal",
+    "error",
+    "inconclusive",
+    "blocked",
+    "reference",
+]
 
 
 class EvidenceView(BaseModel):
@@ -80,6 +87,10 @@ class DiagnosisView(BaseModel):
     summary: str
     tool_rounds: int = Field(ge=0)
     evidence: list[EvidenceView] = Field(default_factory=list)
+    primary_issue: str = "undetermined"
+    confidence: Literal["high", "medium", "low"] = "low"
+    recommendations: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

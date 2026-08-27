@@ -45,6 +45,8 @@ const STATUS_LABELS = {
   normal: "正常",
   abnormal: "发现异常",
   error: "执行失败",
+  inconclusive: "结果不确定",
+  blocked: "安全阻止",
   reference: "参考资料",
 };
 

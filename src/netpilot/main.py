@@ -15,6 +15,7 @@ from netpilot.agent import AgentOrchestrator, SessionStore, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
+from netpilot.observability import configure_observability, request_logging_middleware
 from netpilot.rag import load_configured_retriever
 from netpilot.tools import build_network_tools
 
@@ -45,6 +46,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=app_lifespan,
     )
     app.state.settings = settings or Settings()
+    configure_observability(app.state.settings.log_level)
+    app.middleware("http")(request_logging_middleware)
     app.state.llm_client = TJUClient(app.state.settings)
     app.state.network_tools = build_network_tools(app.state.settings)
     app.state.retriever = load_configured_retriever(app.state.settings)
@@ -59,7 +62,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.rag_ready = app.state.retriever is not None
     app.state.sessions = SessionStore(
-        max_history_messages=app.state.settings.max_history_messages
+        max_history_messages=app.state.settings.max_history_messages,
+        max_sessions=app.state.settings.max_sessions,
     )
     # The Mock provider is shared mutable demo state. Serialize Agent runs with
     # scenario changes so a diagnostic turn cannot observe two scenarios.

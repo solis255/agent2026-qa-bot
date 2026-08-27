@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from netpilot.agent import SessionBusyError, SessionNotFoundError, SessionStore
+import pytest
+
+from netpilot.agent import (
+    SessionBusyError,
+    SessionCapacityError,
+    SessionNotFoundError,
+    SessionStore,
+)
 
 
 def test_session_store_creates_isolated_uuid_sessions() -> None:
@@ -55,3 +62,26 @@ def test_session_store_clear_invalidates_old_sessions() -> None:
         pass
     else:
         raise AssertionError("cleared session should not exist")
+
+
+def test_session_store_evicts_oldest_idle_and_never_evicts_busy() -> None:
+    store = SessionStore(max_sessions=2)
+    first = store.create()
+    second = store.create()
+    store.begin_turn(second.session_id)
+
+    third = store.create()
+
+    with pytest.raises(SessionNotFoundError):
+        store.get(first.session_id)
+    assert store.get(second.session_id).busy is True
+    assert store.get(third.session_id).busy is False
+
+
+def test_session_store_rejects_when_all_slots_are_busy() -> None:
+    store = SessionStore(max_sessions=1)
+    session = store.create()
+    store.begin_turn(session.session_id)
+
+    with pytest.raises(SessionCapacityError):
+        store.create()

@@ -14,6 +14,7 @@ class ToolErrorCode(str, Enum):
     """Stable error categories consumed by later Agent and API layers."""
 
     INVALID_INPUT = "invalid_input"
+    SECURITY_BLOCKED = "security_blocked"
     TIMEOUT = "timeout"
     DNS_ERROR = "dns_error"
     UNSUPPORTED = "unsupported"
@@ -71,6 +72,8 @@ class HTTPCheckData(BaseModel):
     redirected: bool = False
     final_url: str | None = None
     failure_reason: str | None = None
+    request_sent: bool = False
+    resolved_addresses: list[str] = Field(default_factory=list)
 
 
 class TraceHop(BaseModel):

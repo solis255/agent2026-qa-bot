@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
-from netpilot.agent.evidence import finding_status, json_data, llm_tool_feedback
+from netpilot.agent.diagnosis import build_diagnostic_answer, step_status
+from netpilot.agent.evidence import llm_tool_feedback
 from netpilot.agent.prompts import NETPILOT_SYSTEM_PROMPT
 from netpilot.agent.schemas import AgentResult, AgentStatus, AgentToolStep
 from netpilot.agent.tool_registry import ToolRegistry
@@ -67,6 +68,12 @@ class AgentOrchestrator:
         tool_rounds = 0
         sources: list[KnowledgeSource] = []
         tools = self.registry.schemas()
+        if not _should_enable_knowledge_search(user_message):
+            tools = [
+                schema
+                for schema in tools
+                if schema["function"]["name"] != "knowledge_search"
+            ]
         tool_schemas = {
             schema["function"]["name"]: schema
             for schema in tools
@@ -338,7 +345,7 @@ def _fallback_result(
     status: AgentStatus = AgentStatus.COMPLETED,
 ) -> AgentResult:
     return AgentResult(
-        answer=_evidence_fallback_answer(steps),
+        answer=build_diagnostic_answer(steps),
         status=status,
         tool_rounds=tool_rounds,
         steps=steps,
@@ -353,77 +360,44 @@ def _has_decisive_abnormal_evidence(steps: list[AgentToolStep]) -> bool:
 
     return any(
         step.tool_name != "knowledge_search"
-        and finding_status(
-            step.tool_name,
-            step.result.success,
-            json_data(step.result.data),
-        )
-        == "abnormal"
+        and step_status(step) == "abnormal"
         for step in steps
     )
 
 
-def _evidence_fallback_answer(steps: list[AgentToolStep]) -> str:
-    """Produce a stable conclusion when a model loops on an existing check."""
+def _should_enable_knowledge_search(user_message: str) -> bool:
+    """Expose RAG only for explicit campus-information requests."""
 
-    lines: list[str] = []
-    statuses: list[str] = []
-    abnormal_tools: set[str] = set()
-    has_error = False
-    labels = {
-        "get_network_info": "网络接口",
-        "ping_host": "Ping 可达性",
-        "dns_lookup": "DNS 解析",
-        "tcp_check": "TCP 端口",
-        "http_check": "HTTP 访问",
-        "traceroute": "路由追踪",
-        "knowledge_search": "校园网络知识检索",
-    }
-    for step in steps:
-        status = finding_status(
-            step.tool_name,
-            step.result.success,
-            json_data(step.result.data),
-        )
-        statuses.append(status)
-        if status == "abnormal":
-            abnormal_tools.add(step.tool_name)
-        elif status == "error":
-            has_error = True
-        marker = {
-            "normal": "正常",
-            "abnormal": "发现异常",
-            "error": "执行失败",
-            "reference": "已找到参考资料",
-        }[status]
-        label = labels.get(step.tool_name, step.tool_name)
-        lines.append(f"- {label}：{marker}，{step.result.summary}")
-
-    if "abnormal" in statuses:
-        judgment = "现有证据显示网络检查存在异常。"
-    elif has_error:
-        judgment = "部分检测未能执行，现有证据不足以排除网络问题。"
-    else:
-        judgment = "现有检测未发现明显网络异常。"
-
-    suggestions: list[str] = []
-    if "dns_lookup" in abnormal_tools:
-        suggestions.append("检查设备当前 DNS 配置，断开并重新连接网络后再试。")
-    if {"ping_host", "get_network_info", "traceroute"} & abnormal_tools:
-        suggestions.append("检查 Wi-Fi 或网线连接，并确认是否能访问默认网关。")
-    if {"tcp_check", "http_check"} & abnormal_tools:
-        suggestions.append("确认目标服务地址、端口和服务状态后重试。")
-    if has_error:
-        suggestions.append("可稍后重试失败的检测，避免把工具失败当作网络故障。")
-    if not suggestions:
-        suggestions.append("若现象仍存在，请补充目标地址、错误提示和发生范围后继续诊断。")
-
-    return (
-        f"问题判断：{judgment}\n\n"
-        "检测结果：\n"
-        + "\n".join(lines)
-        + "\n\n建议操作：\n"
-        + "\n".join(f"- {suggestion}" for suggestion in suggestions)
+    lowered = user_message.lower()
+    if "knowledge_search" in lowered:
+        return True
+    campus_terms = (
+        "天津大学",
+        "天大",
+        "校园网",
+        "tjuwlan",
+        "eduroam",
+        "统一身份认证",
+        "vpn",
+    )
+    information_terms = (
+        "怎么",
+        "如何",
+        "配置",
+        "开通",
+        "使用",
+        "入口",
+        "账号",
+        "资费",
+        "规定",
+        "政策",
+        "说明",
+        "资料",
+        "文档",
+        "连接",
+    )
+    return any(term in lowered for term in campus_terms) and any(
+        term in lowered for term in information_terms
     )
 
 

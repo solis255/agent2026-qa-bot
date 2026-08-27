@@ -24,9 +24,18 @@ def json_data(data: Any) -> Any:
     return data
 
 
-def finding_status(tool_name: str, success: bool, data: Any) -> str:
+def finding_status(
+    tool_name: str,
+    success: bool,
+    data: Any,
+    error_code: str | None = None,
+) -> str:
     """Separate execution failures from valid negative network observations."""
 
+    if not success and error_code == "security_blocked":
+        return "blocked"
+    if not success and error_code in {"timeout", "unsupported"}:
+        return "inconclusive"
     if not success:
         return "error"
     if tool_name == "knowledge_search":
@@ -52,7 +61,10 @@ def llm_tool_feedback(tool_name: str, result: Any) -> dict[str, Any]:
     """
 
     data = json_data(result.data)
-    status = finding_status(tool_name, result.success, data)
+    error_code = None
+    if result.error is not None:
+        error_code = str(getattr(result.error.code, "value", result.error.code))
+    status = finding_status(tool_name, result.success, data, error_code)
     if result.error is not None:
         return {
             "tool": tool_name,

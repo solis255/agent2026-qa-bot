@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, Milestone 6 Chinese Web demo, server-side sessions, structured diagnostic API, the read-only network Tool layer, the production TJU client, the native Function Calling Agent loop, and the source-preserving local RAG layer.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, Chinese Web demo, bounded server-side sessions, structured evidence diagnosis, the read-only network Tool layer, the production TJU client, native Function Calling, local RAG, and Milestone 7 safety/observability controls.
 
 Start the application from the repository root:
 
@@ -195,6 +195,20 @@ python -m pytest tests\test_sessions.py tests\test_chat_api.py tests\test_scenar
 ```
 
 See [Milestone 6 manual test cases](docs/MILESTONE6_MANUAL_TEST_CASES.md). If Windows rejects port 8000 with `WinError 10013`, keep port 8001 as shown above or choose another unreserved local port.
+
+### Milestone 7 Safety and Testing
+
+Milestone 7 distinguishes real negative observations from tool errors, inconclusive timeouts, and requests blocked before execution. Local HTTP evidence records whether a request was sent and which addresses were resolved. A domain in the proxy-reserved `198.18.0.0/15` range now produces specific Fake-IP/TUN/DNS recovery steps instead of being reported as a generic website failure. `knowledge_search` is offered only for explicit campus information intent, so generic public-connectivity diagnosis does not collect unrelated references.
+
+The service enforces strict Pydantic inputs, SSRF and redirect checks, bounded command/HTTP output, per-tool timeouts, `MAX_TOOL_ROUNDS`, `MAX_HISTORY_MESSAGES`, and `MAX_SESSIONS`. JSON logs correlate requests, sessions, tools, LLM duration, HTTP status, and safe error types; API keys, authorization headers, messages, and tool arguments are not logged. Every response includes an `X-Request-ID` header.
+
+Run the complete offline acceptance suite from the project environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+See [Milestone 7 validation](docs/MILESTONE7_VALIDATION.md) for the automated coverage and Local/Mock manual checks.
 
 ## Run the Labs
 

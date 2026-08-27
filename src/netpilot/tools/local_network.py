@@ -117,7 +117,13 @@ class LocalNetworkProvider(NetworkProvider):
 
     def _ping_host(self, request: PingHostInput) -> ToolObservation[PingData]:
         command = self._build_ping_command(request)
-        completed = self._run_command(command)
+        # The native command already owns the ICMP timeout budget.  Keep a
+        # small process/DNS allowance so the wrapper does not terminate a
+        # valid Windows ping just before it prints its final statistics.
+        completed = self._run_command(
+            command,
+            timeout_seconds=min(self.timeout_seconds + 3.0, 30.0),
+        )
         output = self._combined_output(completed)
         packet_loss = self._parse_packet_loss(output, completed.returncode)
         received = max(0, round(request.count * (100 - packet_loss) / 100))
@@ -210,7 +216,10 @@ class LocalNetworkProvider(NetworkProvider):
                         "HTTP 请求超时",
                         "timeout",
                     )
-                self._assert_public_http_target(current_url, timeout_budget=remaining)
+                resolved_addresses = self._assert_public_http_target(
+                    current_url,
+                    timeout_budget=remaining,
+                ) or []
                 remaining = self.timeout_seconds - (perf_counter() - started)
                 if remaining <= 0:
                     return self._http_negative(
@@ -219,6 +228,7 @@ class LocalNetworkProvider(NetworkProvider):
                         redirected,
                         "HTTP 请求超时",
                         "timeout",
+                        resolved_addresses=resolved_addresses,
                     )
                 try:
                     with client.stream(
@@ -240,6 +250,8 @@ class LocalNetworkProvider(NetworkProvider):
                         redirected,
                         "HTTP 请求超时",
                         "timeout",
+                        request_sent=True,
+                        resolved_addresses=resolved_addresses,
                     )
                 except httpx.RequestError:
                     return self._http_negative(
@@ -248,6 +260,8 @@ class LocalNetworkProvider(NetworkProvider):
                         redirected,
                         "HTTP/TLS 连接失败",
                         "request_error",
+                        request_sent=True,
+                        resolved_addresses=resolved_addresses,
                     )
 
                 if header_size > MAX_HTTP_HEADER_CHARS:
@@ -281,6 +295,8 @@ class LocalNetworkProvider(NetworkProvider):
                         elapsed_ms=elapsed,
                         redirected=redirected,
                         final_url=current_url,
+                        request_sent=True,
+                        resolved_addresses=resolved_addresses,
                     ),
                 )
 
@@ -397,7 +413,7 @@ class LocalNetworkProvider(NetworkProvider):
         url: str,
         *,
         timeout_budget: float | None = None,
-    ) -> None:
+    ) -> list[str]:
         host = urlsplit(url).hostname
         if not host:
             raise ToolExecutionError(ToolErrorCode.INVALID_INPUT, "HTTP URL 缺少目标主机")
@@ -405,11 +421,18 @@ class LocalNetworkProvider(NetworkProvider):
         try:
             direct_address = ipaddress.ip_address(host)
             assert_public_ip(direct_address)
-            return
+            return [str(direct_address)]
         except UnsafeTargetError as exc:
             raise ToolExecutionError(
-                ToolErrorCode.INVALID_INPUT,
+                ToolErrorCode.SECURITY_BLOCKED,
                 "HTTP 目标地址被安全策略阻止",
+                data=HTTPCheckData(
+                    reachable=False,
+                    final_url=url,
+                    failure_reason="non_public_target",
+                    request_sent=False,
+                    resolved_addresses=[str(host)],
+                ),
             ) from exc
         except ValueError:
             pass
@@ -424,15 +447,24 @@ class LocalNetworkProvider(NetworkProvider):
                 assert_public_ip(ipaddress.ip_address(address))
         except (ValueError, UnsafeTargetError) as exc:
             raise ToolExecutionError(
-                ToolErrorCode.INVALID_INPUT,
-                "HTTP 目标解析到非公网地址，已阻止请求",
+                ToolErrorCode.SECURITY_BLOCKED,
+                "HTTP 目标解析到非公网地址，安全策略已在发送请求前阻止",
+                data=HTTPCheckData(
+                    reachable=False,
+                    final_url=url,
+                    failure_reason="non_public_resolution",
+                    request_sent=False,
+                    resolved_addresses=addresses,
+                ),
             ) from exc
+        return addresses
 
     def _run_command(
         self,
         command: list[str],
         *,
         allow_missing: bool = False,
+        timeout_seconds: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
             return self._subprocess_runner(
@@ -442,7 +474,7 @@ class LocalNetworkProvider(NetworkProvider):
                 errors="replace",
                 shell=False,
                 check=False,
-                timeout=min(self.timeout_seconds + 1.0, 10.0),
+                timeout=min(timeout_seconds or self.timeout_seconds + 1.0, 30.0),
             )
         except FileNotFoundError:
             if allow_missing:
@@ -593,6 +625,9 @@ class LocalNetworkProvider(NetworkProvider):
         redirected: bool,
         summary: str,
         reason: str,
+        *,
+        request_sent: bool = False,
+        resolved_addresses: list[str] | None = None,
     ) -> ToolObservation[HTTPCheckData]:
         return ToolObservation(
             summary,
@@ -603,5 +638,7 @@ class LocalNetworkProvider(NetworkProvider):
                 redirected=redirected,
                 final_url=url,
                 failure_reason=reason,
+                request_sent=request_sent,
+                resolved_addresses=resolved_addresses or [],
             ),
         )

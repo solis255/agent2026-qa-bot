@@ -163,11 +163,15 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visi
 .timeline-item { position: relative; padding: 13px 13px 13px 16px; border: 1px solid #dae4ef; border-left: 4px solid #43aa7b; border-radius: 11px; background: #fbfdff; }
 .timeline-item.abnormal { border-left-color: #e49b33; }
 .timeline-item.error { border-left-color: #d55757; }
+.timeline-item.inconclusive { border-left-color: #7b8796; }
+.timeline-item.blocked { border-left-color: #8b5bc2; }
 .timeline-item.reference { border-left-color: #3978cf; }
 .timeline-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .finding-badge { padding: 4px 7px; color: #15714b; background: #e0f7ec; }
 .finding-badge.abnormal { color: #9b5b12; background: #fff0d7; }
 .finding-badge.error { color: #a23f3f; background: #ffe8e8; }
+.finding-badge.inconclusive { color: #56616f; background: #edf0f3; }
+.finding-badge.blocked { color: #684099; background: #f0e7fb; }
 .finding-badge.reference { color: #245fa9; background: #e5f0ff; }
 .timeline-item > small { display: block; margin-top: 4px; color: #8190a2; font-size: .64rem; overflow-wrap: anywhere; }
 .timeline-item p { margin: 8px 0; color: #50647c; font-size: .78rem; line-height: 1.5; }

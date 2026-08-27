@@ -18,6 +18,10 @@ class SessionBusyError(RuntimeError):
     """Raised when a second request targets an active session."""
 
 
+class SessionCapacityError(RuntimeError):
+    """Raised when every bounded session slot is actively in use."""
+
+
 @dataclass
 class SessionState:
     session_id: UUID
@@ -39,10 +43,18 @@ class SessionSnapshot:
 class SessionStore:
     """Keep bounded user/assistant history without persisting credentials."""
 
-    def __init__(self, *, max_history_messages: int = 20) -> None:
+    def __init__(
+        self,
+        *,
+        max_history_messages: int = 20,
+        max_sessions: int = 500,
+    ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be at least 1")
         self.max_history_messages = max_history_messages
+        self.max_sessions = max_sessions
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -50,6 +62,12 @@ class SessionStore:
         now = datetime.now(timezone.utc)
         state = SessionState(session_id=uuid4(), created_at=now, updated_at=now)
         with self._lock:
+            if len(self._sessions) >= self.max_sessions:
+                idle = [item for item in self._sessions.values() if not item.busy]
+                if not idle:
+                    raise SessionCapacityError("all session slots are busy")
+                oldest = min(idle, key=lambda item: item.updated_at)
+                del self._sessions[oldest.session_id]
             self._sessions[state.session_id] = state
         return _snapshot(state)
 

@@ -4,6 +4,7 @@ from netpilot.agent.orchestrator import AgentOrchestrator, MAX_TOOL_ROUNDS_ANSWE
 from netpilot.agent.schemas import AgentResult, AgentStatus, AgentToolStep
 from netpilot.agent.session import (
     SessionBusyError,
+    SessionCapacityError,
     SessionNotFoundError,
     SessionSnapshot,
     SessionStore,
@@ -17,6 +18,7 @@ __all__ = [
     "AgentToolStep",
     "MAX_TOOL_ROUNDS_ANSWER",
     "SessionBusyError",
+    "SessionCapacityError",
     "SessionNotFoundError",
     "SessionSnapshot",
     "SessionStore",

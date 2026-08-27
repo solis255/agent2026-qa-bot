@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
     max_history_messages: int = Field(default=20, ge=1, le=200)
+    max_sessions: int = Field(default=500, ge=1, le=10_000)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     tool_mode: ToolMode = ToolMode.MOCK
     mock_scenario: MockScenario = MockScenario.HEALTHY

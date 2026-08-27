@@ -6,7 +6,12 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from netpilot.agent import SessionBusyError, SessionNotFoundError, SessionStore
+from netpilot.agent import (
+    SessionBusyError,
+    SessionCapacityError,
+    SessionNotFoundError,
+    SessionStore,
+)
 from netpilot.api.presenters import present_chat
 from netpilot.config import MockScenario, Settings, ToolMode
 from netpilot.llm import TJUClient
@@ -19,6 +24,7 @@ from netpilot.models import (
     ScenarioSwitchResponse,
     SessionResponse,
 )
+from netpilot.observability import log_event, reset_session_id, set_session_id
 
 
 logger = logging.getLogger(__name__)
@@ -54,7 +60,13 @@ def health(request: Request) -> HealthResponse:
     tags=["chat"],
 )
 def create_session(request: Request) -> SessionResponse:
-    snapshot = _sessions(request).create()
+    try:
+        snapshot = _sessions(request).create()
+    except SessionCapacityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="会话容量已满，请稍后重试。",
+        ) from exc
     return SessionResponse(
         session_id=snapshot.session_id,
         created_at=snapshot.created_at,
@@ -71,15 +83,18 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
         )
+    session_token = set_session_id(payload.session_id)
     sessions = _sessions(request)
     try:
         history = sessions.begin_turn(payload.session_id)
     except SessionNotFoundError as exc:
+        reset_session_id(session_token)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="会话不存在或已失效，请新建会话。",
         ) from exc
     except SessionBusyError as exc:
+        reset_session_id(session_token)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="当前会话正在诊断，请等待本次请求完成。",
@@ -91,11 +106,27 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         sessions.finish_turn(payload.session_id, payload.message, result.answer)
     except Exception as exc:
         sessions.abort_turn(payload.session_id)
-        logger.warning("Agent chat request failed safely")
+        log_event(
+            logger,
+            "agent_turn",
+            level=logging.WARNING,
+            success=False,
+            error_type=type(exc).__name__,
+        )
+        reset_session_id(session_token)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="诊断请求处理失败，请稍后重试。",
         ) from exc
+    log_event(
+        logger,
+        "agent_turn",
+        success=True,
+        llm_duration=round(result.llm_duration_ms, 2),
+        tool_rounds=result.tool_rounds,
+        status=str(getattr(result.status, "value", result.status)),
+    )
+    reset_session_id(session_token)
     return present_chat(payload.session_id, result)
 
 

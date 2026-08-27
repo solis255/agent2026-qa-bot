@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from netpilot.agent.schemas import RegistryExecution
 from netpilot.rag import KnowledgeSearchData, KnowledgeSearchInput, Retriever
+from netpilot.observability import log_event
 from netpilot.tools.schemas import (
     DNSLookupInput,
     GetNetworkInfoInput,
@@ -122,56 +123,71 @@ class ToolRegistry:
         """Validate and execute one allowlisted function call without raising."""
 
         started = perf_counter()
+        def finish(execution: RegistryExecution) -> RegistryExecution:
+            result = execution.result
+            error_type = None
+            if result.error is not None:
+                error_type = str(getattr(result.error.code, "value", result.error.code))
+            log_event(
+                logger,
+                "tool_execution",
+                tool_name=result.tool,
+                tool_duration=result.duration_ms,
+                tool_success=result.success,
+                error_type=error_type,
+            )
+            return execution
+
         spec = self._specs.get(tool_name)
         if spec is None:
-            return RegistryExecution(
+            return finish(RegistryExecution(
                 result=_failure(
                     tool_name or "unknown",
                     ToolErrorCode.UNSUPPORTED,
                     "模型请求了未注册的工具",
                     started,
                 )
-            )
+            ))
 
         try:
             payload = json.loads(raw_arguments)
         except (json.JSONDecodeError, TypeError):
-            return RegistryExecution(
+            return finish(RegistryExecution(
                 result=_failure(
                     tool_name,
                     ToolErrorCode.INVALID_INPUT,
                     "工具参数不是合法 JSON",
                     started,
                 )
-            )
+            ))
         if not isinstance(payload, dict):
-            return RegistryExecution(
+            return finish(RegistryExecution(
                 result=_failure(
                     tool_name,
                     ToolErrorCode.INVALID_INPUT,
                     "工具参数必须是 JSON 对象",
                     started,
                 )
-            )
+            ))
 
         try:
             request = spec.input_model.model_validate(payload)
         except ValidationError:
-            return RegistryExecution(
+            return finish(RegistryExecution(
                 result=_failure(
                     tool_name,
                     ToolErrorCode.INVALID_INPUT,
                     "工具参数不合法",
                     started,
                 )
-            )
+            ))
 
         arguments = request.model_dump(mode="json")
         try:
             result = spec.handler(**arguments)
         except Exception:
             logger.warning("ToolRegistry handler failed safely: %s", tool_name)
-            return RegistryExecution(
+            return finish(RegistryExecution(
                 arguments=arguments,
                 result=_failure(
                     tool_name,
@@ -179,8 +195,8 @@ class ToolRegistry:
                     "工具执行失败",
                     started,
                 ),
-            )
-        return RegistryExecution(arguments=arguments, result=result)
+            ))
+        return finish(RegistryExecution(arguments=arguments, result=result))
 
 
 def _function_parameters(input_model: type[BaseModel]) -> dict[str, Any]:

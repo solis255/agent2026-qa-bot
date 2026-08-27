@@ -199,10 +199,12 @@ Agent/调用方
 | `src/netpilot/llm/tju_client.py` | 正式 TJU OpenAI-compatible Chat Completions 客户端；支持普通 Chat 和原生 Function Calling，配置 timeout/有限 retry，支持 Mock SDK 注入，校验响应并记录耗时。 |
 | `src/netpilot/agent/prompts.py` | 证据优先、只读、来源区分、RAG Prompt Injection 防护和禁止重复检测的系统提示词。 |
 | `src/netpilot/agent/schemas.py` | `AgentResult`、状态、token、工具证据时间线与结构化知识来源 schema。 |
-| `src/netpilot/agent/tool_registry.py` | 六个网络工具及可选 `knowledge_search` 的严格 schema、白名单分派、参数校验与安全失败转换。 |
-| `src/netpilot/agent/orchestrator.py` | 有界 messages → tool_calls → tool results → answer 循环，支持多调用并安全处理 LLM 错误和最大轮次。 |
-| `src/netpilot/agent/session.py` | 线程安全内存会话、忙碌保护、成对历史裁剪、新会话隔离和场景切换清理。 |
+| `src/netpilot/agent/tool_registry.py` | 六个网络工具及按校园信息意图开放的 `knowledge_search` 的严格 schema、白名单分派、参数校验、安全失败转换和工具审计日志。 |
+| `src/netpilot/agent/orchestrator.py` | 有界 messages → tool_calls → tool results → answer 循环，支持多调用、知识工具门控，并安全处理 LLM 错误、重复调用和最大轮次。 |
+| `src/netpilot/agent/session.py` | 线程安全内存会话、忙碌保护、成对历史裁剪、总会话容量限制、新会话隔离和场景切换清理。 |
 | `src/netpilot/agent/evidence.py` | 统一解释工具执行状态与诊断状态，并生成模型兼容的紧凑证据反馈。 |
+| `src/netpilot/agent/diagnosis.py` | 基于类型化证据的确定性诊断分类；区分异常、超时不确定、安全阻止与参考资料，并生成 Fake-IP 等可执行建议。 |
+| `src/netpilot/observability.py` | 请求/会话上下文、`X-Request-ID`、脱敏 JSON 事件和 HTTP 访问日志；不记录消息、参数或凭据。 |
 | `src/netpilot/tools/schemas.py` | 六个工具的 Pydantic 输入/数据模型、稳定错误码与泛型 `ToolResult`；负面网络观察与工具执行错误分开表达。 |
 | `src/netpilot/tools/validation.py` | Host/Domain/URL 的集中校验以及 HTTP localhost、metadata、内网和非公网地址阻断。 |
 | `src/netpilot/tools/base.py` | Mock/Local 共用的 `NetworkProvider` 接口、耗时统计、参数失败与异常捕获边界。 |
@@ -363,11 +365,12 @@ Agent/调用方
 | `tests/test_netpilot_api.py` | 使用 FastAPI TestClient 验证 health、有/无 Key 启动、Tool Provider 初始化、无 secret 响应、中文首页和静态资源。 |
 | `tests/test_tools.py` | 离线覆盖统一结果、非法参数、Local 接口信息、三平台命令、超时、DNS/TCP/HTTP/traceroute 和异常捕获。 |
 | `tests/test_mock_scenarios.py` | 验证六种场景的关键证据组合、调用耗时、场景切换以及 Mock 不触发 socket/subprocess/httpx。 |
-| `tests/test_sessions.py` | 验证会话唯一性、隔离、成对历史裁剪、busy 防重入和清理。 |
+| `tests/test_sessions.py` | 验证会话唯一性、隔离、成对历史裁剪、busy 防重入、容量淘汰与清理。 |
 | `tests/test_chat_api.py` | 验证结构化聊天响应、历史传递、异常状态、安全失败和 secret 不泄露。 |
 | `tests/test_scenario_api.py` | 验证场景列表、开发开关、Mock/Local 边界以及切换后的会话失效。 |
 | `tests/test_web_demo.py` | 静态验证 Milestone 6 页面区域、同源 API、安全 DOM 渲染、来源链接和响应式样式。 |
 | `tests/test_tool_security.py` | 验证 Shell 注入、非法 Host/URL、SSRF、私网 DNS、恶意重定向、重定向上限、`shell=False` 和输出上限。 |
+| `tests/test_milestone7.py` | 验证 Fake-IP 可执行诊断、超时不误判、知识工具意图门控、结构化日志脱敏、请求 ID、Secret 与消息资源限制。 |
 
 ### 5.16 `bonus/lab-bun-chat/`：Bun Web Chat
 
