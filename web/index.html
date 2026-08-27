@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=m6">
+    <link rel="stylesheet" href="/style.css?v=p1a">
   </head>
   <body>
     <header class="topbar">
@@ -75,6 +75,7 @@
             <div><dt>后端 API</dt><dd id="api-status">检查中</dd></div>
             <div><dt>TJU LLM</dt><dd id="llm-status">检查中</dd></div>
             <div><dt>知识库</dt><dd id="rag-status">检查中</dd></div>
+            <div><dt>诊断历史</dt><dd id="history-status">检查中</dd></div>
           </dl>
           <div class="scenario-control" id="scenario-control" hidden>
             <label for="scenario-select">Mock 故障场景</label>
@@ -92,6 +93,12 @@
             <span class="diagnosis-badge idle" id="diagnosis-status">等待</span>
           </div>
           <p class="diagnosis-summary" id="diagnosis-summary">提交问题后显示本次诊断结论与证据数量。</p>
+          <dl class="metrics-grid" id="metrics-grid">
+            <div><dt>Token</dt><dd id="token-usage">--</dd></div>
+            <div><dt>LLM 耗时</dt><dd id="llm-duration">--</dd></div>
+            <div><dt>Tool 耗时</dt><dd id="tool-duration">--</dd></div>
+            <div><dt>Tool 次数</dt><dd id="tool-count">--</dd></div>
+          </dl>
         </section>
 
         <section class="status-card">
@@ -109,9 +116,25 @@
             <div class="empty-state"><span>KB</span><p>使用知识库后，此处将展示标题、资料类型和原始链接。</p></div>
           </div>
         </section>
+
+        <section class="status-card history-card">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">持久化记录</p>
+              <h2>诊断历史</h2>
+            </div>
+            <button type="button" class="text-button" id="history-refresh">刷新</button>
+          </div>
+          <div id="history-list" aria-live="polite">
+            <div class="empty-state"><span>DB</span><p>正在加载历史诊断记录。</p></div>
+          </div>
+          <button type="button" class="history-more" id="history-load-more" hidden>
+            加载更多
+          </button>
+        </section>
       </aside>
     </main>
 
-    <script src="/app.js?v=m6" defer></script>
+    <script src="/app.js?v=p1a" defer></script>
   </body>
 </html>

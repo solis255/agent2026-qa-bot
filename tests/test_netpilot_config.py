@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -31,6 +33,9 @@ def test_settings_load_valid_operational_values() -> None:
         mock_scenario="partial_connectivity",
         network_timeout_seconds=10,
         app_port=9000,
+        diagnosis_history_enabled=False,
+        diagnosis_db_path="custom/history.db",
+        diagnosis_max_records=250,
     )
 
     assert settings.tju_timeout_seconds == 90
@@ -39,6 +44,9 @@ def test_settings_load_valid_operational_values() -> None:
     assert settings.mock_scenario is MockScenario.PARTIAL_CONNECTIVITY
     assert settings.network_timeout_seconds == 10
     assert settings.app_port == 9000
+    assert settings.diagnosis_history_enabled is False
+    assert settings.diagnosis_db_path == Path("custom/history.db")
+    assert settings.diagnosis_max_records == 250
 
 
 @pytest.mark.parametrize(
@@ -53,6 +61,7 @@ def test_settings_load_valid_operational_values() -> None:
         ("network_timeout_seconds", 31),
         ("max_tool_rounds", 0),
         ("max_history_messages", 0),
+        ("diagnosis_max_records", 0),
         ("rag_top_k", 0),
         ("rag_min_score", 1.1),
         ("rag_chunk_size", 100),

@@ -22,6 +22,7 @@ class HealthResponse(BaseModel):
     llm_configured: bool
     tool_mode: ToolMode
     rag_ready: bool
+    history_ready: bool
 
 
 class SessionResponse(BaseModel):
@@ -93,12 +94,57 @@ class DiagnosisView(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class TokenUsageView(BaseModel):
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+
+
+class ExecutionMetricsView(BaseModel):
+    token_usage: TokenUsageView = Field(default_factory=TokenUsageView)
+    llm_duration_ms: float = Field(default=0, ge=0)
+    tool_duration_ms: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+
+
 class ChatResponse(BaseModel):
     session_id: UUID
+    record_id: UUID | None = None
     answer: str
     diagnosis: DiagnosisView
+    metrics: ExecutionMetricsView = Field(default_factory=ExecutionMetricsView)
     tool_calls: list[ToolCallView] = Field(default_factory=list)
     sources: list[SourceView] = Field(default_factory=list)
+
+
+class DiagnosisRecordView(BaseModel):
+    schema_version: Literal[1] = 1
+    record_id: UUID
+    session_id: UUID
+    created_at: datetime
+    user_message: str = Field(min_length=1, max_length=4000)
+    answer: str
+    diagnosis: DiagnosisView
+    metrics: ExecutionMetricsView
+    tool_calls: list[ToolCallView] = Field(default_factory=list)
+    sources: list[SourceView] = Field(default_factory=list)
+
+
+class DiagnosisRecordSummaryView(BaseModel):
+    record_id: UUID
+    session_id: UUID
+    created_at: datetime
+    user_message: str
+    answer_preview: str
+    status: AgentStatus
+    primary_issue: str
+    confidence: Literal["high", "medium", "low"]
+    metrics: ExecutionMetricsView
+
+
+class DiagnosisHistoryResponse(BaseModel):
+    items: list[DiagnosisRecordSummaryView] = Field(default_factory=list)
+    next_cursor: str | None = None
 
 
 class ScenarioOption(BaseModel):

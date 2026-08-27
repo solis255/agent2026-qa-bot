@@ -43,6 +43,10 @@ env/
 # Logs
 *.log
 
+# Local diagnosis history
+data/*.db
+data/*.db-*
+
 # Locally generated RAG models and vector indexes
 .cache/
 knowledge/index/*

@@ -5,6 +5,7 @@ const state = {
   health: null,
   busy: false,
   scenarios: [],
+  historyCursor: null,
 };
 
 const elements = {
@@ -14,6 +15,7 @@ const elements = {
   apiStatus: document.querySelector("#api-status"),
   llmStatus: document.querySelector("#llm-status"),
   ragStatus: document.querySelector("#rag-status"),
+  historyStatus: document.querySelector("#history-status"),
   toolMode: document.querySelector("#tool-mode"),
   scenarioControl: document.querySelector("#scenario-control"),
   scenarioSelect: document.querySelector("#scenario-select"),
@@ -27,8 +29,15 @@ const elements = {
   interactionNote: document.querySelector("#interaction-note"),
   diagnosisStatus: document.querySelector("#diagnosis-status"),
   diagnosisSummary: document.querySelector("#diagnosis-summary"),
+  tokenUsage: document.querySelector("#token-usage"),
+  llmDuration: document.querySelector("#llm-duration"),
+  toolDuration: document.querySelector("#tool-duration"),
+  toolCount: document.querySelector("#tool-count"),
   toolTimeline: document.querySelector("#tool-timeline"),
   sourceList: document.querySelector("#source-list"),
+  historyList: document.querySelector("#history-list"),
+  historyRefresh: document.querySelector("#history-refresh"),
+  historyLoadMore: document.querySelector("#history-load-more"),
 };
 
 const TOOL_LABELS = {
@@ -50,6 +59,20 @@ const STATUS_LABELS = {
   reference: "参考资料",
 };
 
+const ISSUE_LABELS = {
+  undetermined: "尚未确定",
+  no_issue_observed: "未发现异常",
+  insufficient_evidence: "证据不足",
+  dns_resolution_failure: "DNS 解析故障",
+  local_network_configuration: "本地网络配置",
+  icmp_unreachable: "ICMP 不可达",
+  tcp_connectivity_failure: "TCP 连接故障",
+  http_connectivity_failure: "HTTP 访问故障",
+  proxy_fake_ip_mapping: "代理 Fake-IP",
+};
+
+const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
+
 function setBusy(busy, message = "") {
   state.busy = busy;
   elements.conversation.setAttribute("aria-busy", String(busy));
@@ -58,6 +81,9 @@ function setBusy(busy, message = "") {
   elements.sendButton.disabled = busy || !ready;
   elements.newSession.disabled = busy || !state.health;
   elements.scenarioSelect.disabled = busy || elements.scenarioSelect.dataset.enabled !== "true";
+  elements.historyRefresh.disabled = busy;
+  elements.historyLoadMore.disabled = busy;
+  for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy;
   elements.sendButton.textContent = busy ? "诊断中…" : "开始诊断";
   if (message) elements.interactionNote.textContent = message;
 }
@@ -102,6 +128,7 @@ function renderHealth(health) {
   elements.apiStatus.textContent = health.status === "ok" ? "正常" : "异常";
   elements.llmStatus.textContent = health.llm_configured ? "已配置" : "未配置";
   elements.ragStatus.textContent = health.rag_ready ? "已就绪" : "尚未构建";
+  elements.historyStatus.textContent = health.history_ready ? "已就绪" : "未启用";
   elements.toolMode.textContent = `${String(health.tool_mode).toUpperCase()} 模式`;
   if (!health.llm_configured) {
     elements.interactionNote.textContent = "服务端尚未配置 TJU_API_KEY，聊天暂不可用。";
@@ -115,6 +142,7 @@ function renderHealthError(error) {
   elements.apiStatus.textContent = "不可用";
   elements.llmStatus.textContent = "未知";
   elements.ragStatus.textContent = "未知";
+  elements.historyStatus.textContent = "未知";
   elements.toolMode.textContent = "离线";
   elements.interactionNote.textContent = error.message;
 }
@@ -143,6 +171,7 @@ function resetConversation() {
     "请描述网络现象。我会按需调用只读检测工具或校园网络知识库，并展示完整证据。",
   );
   renderDiagnosis(null);
+  renderMetrics(null);
   renderTools([]);
   renderSources([]);
 }
@@ -184,6 +213,28 @@ function renderDiagnosis(diagnosis) {
   const preview = summary.length > 180 ? `${summary.slice(0, 180)}…` : summary;
   const evidenceMeta = `${diagnosis.tool_rounds} 个工具轮次 · ${evidenceCount} 条结构化证据`;
   elements.diagnosisSummary.textContent = preview ? `${preview}（${evidenceMeta}）` : evidenceMeta;
+}
+
+function renderMetrics(metrics) {
+  if (!metrics) {
+    elements.tokenUsage.textContent = "--";
+    elements.llmDuration.textContent = "--";
+    elements.toolDuration.textContent = "--";
+    elements.toolCount.textContent = "--";
+    return;
+  }
+  const usage = metrics.token_usage || {};
+  elements.tokenUsage.textContent = `${Number(usage.total_tokens || 0)}（输入 ${Number(usage.prompt_tokens || 0)} / 输出 ${Number(usage.completion_tokens || 0)}）`;
+  elements.llmDuration.textContent = formatDuration(metrics.llm_duration_ms);
+  elements.toolDuration.textContent = formatDuration(metrics.tool_duration_ms);
+  elements.toolCount.textContent = String(Number(metrics.tool_calls || 0));
+}
+
+function formatDuration(value) {
+  const milliseconds = Number(value || 0);
+  return milliseconds >= 1000
+    ? `${(milliseconds / 1000).toFixed(2)} s`
+    : `${milliseconds.toFixed(milliseconds % 1 ? 1 : 0)} ms`;
 }
 
 function renderTools(tools) {
@@ -277,6 +328,90 @@ function emptyState(code, message) {
   return container;
 }
 
+function renderHistoryItems(items, { append = false } = {}) {
+  if (!append) elements.historyList.replaceChildren();
+  if (!items?.length && !append) {
+    elements.historyList.append(emptyState("DB", "还没有已保存的诊断记录。"));
+    return;
+  }
+  let list = elements.historyList.querySelector(".history-list");
+  if (!list) {
+    list = document.createElement("ol");
+    list.className = "history-list";
+    elements.historyList.append(list);
+  }
+  for (const item of items || []) {
+    const row = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.recordId = item.record_id;
+    const question = document.createElement("strong");
+    question.textContent = item.user_message;
+    const meta = document.createElement("span");
+    const issue = ISSUE_LABELS[item.primary_issue] || item.primary_issue;
+    const confidence = CONFIDENCE_LABELS[item.confidence] || item.confidence;
+    meta.textContent = `${formatHistoryTime(item.created_at)} · ${issue} · 置信度 ${confidence}`;
+    const metrics = document.createElement("small");
+    metrics.textContent = `${Number(item.metrics?.token_usage?.total_tokens || 0)} Token · ${formatDuration(item.metrics?.llm_duration_ms)}`;
+    button.append(question, meta, metrics);
+    button.addEventListener("click", () => loadDiagnosisRecord(item.record_id));
+    row.append(button);
+    list.append(row);
+  }
+}
+
+function formatHistoryTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "时间未知";
+  return parsed.toLocaleString("zh-CN", { hour12: false });
+}
+
+async function loadHistory({ append = false } = {}) {
+  if (!state.health?.history_ready) {
+    state.historyCursor = null;
+    elements.historyLoadMore.hidden = true;
+    renderHistoryItems([], { append: false });
+    const message = elements.historyList.querySelector(".empty-state p");
+    if (message) message.textContent = "诊断历史未启用或暂时不可用。";
+    return;
+  }
+  const cursor = append ? state.historyCursor : null;
+  const query = cursor
+    ? `/api/diagnoses?limit=10&cursor=${encodeURIComponent(cursor)}`
+    : "/api/diagnoses?limit=10";
+  try {
+    const response = await requestJSON(query);
+    renderHistoryItems(response.items, { append });
+    state.historyCursor = response.next_cursor;
+    elements.historyLoadMore.hidden = !state.historyCursor;
+  } catch (error) {
+    if (!append) {
+      elements.historyList.replaceChildren(emptyState("!", error.message));
+    }
+    elements.historyLoadMore.hidden = true;
+  }
+}
+
+async function loadDiagnosisRecord(recordId) {
+  if (!recordId || state.busy) return;
+  setBusy(true, "正在读取历史诊断…");
+  try {
+    const record = await requestJSON(`/api/diagnoses/${encodeURIComponent(recordId)}`);
+    elements.conversation.replaceChildren();
+    appendMessage("user", record.user_message);
+    appendMessage("assistant", record.answer);
+    renderDiagnosis(record.diagnosis);
+    renderMetrics(record.metrics);
+    renderTools(record.tool_calls);
+    renderSources(record.sources);
+    elements.interactionNote.textContent = `正在查看 ${formatHistoryTime(record.created_at)} 的诊断记录；当前会话仍可继续使用。`;
+  } catch (error) {
+    elements.interactionNote.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function submitChat(event) {
   event.preventDefault();
   const message = elements.messageInput.value.trim();
@@ -295,8 +430,10 @@ async function submitChat(event) {
     );
     appendMessage("assistant", response.answer);
     renderDiagnosis(response.diagnosis);
+    renderMetrics(response.metrics);
     renderTools(response.tool_calls);
     renderSources(response.sources);
+    await loadHistory();
     elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
   } catch (error) {
     appendMessage("error", error.message);
@@ -364,7 +501,11 @@ async function initialize() {
   try {
     const health = await requestJSON("/api/health");
     renderHealth(health);
-    await Promise.all([createSession({ announce: false }), loadScenarios()]);
+    await Promise.all([
+      createSession({ announce: false }),
+      loadScenarios(),
+      loadHistory(),
+    ]);
   } catch (error) {
     renderHealthError(error);
     setBusy(false);
@@ -374,6 +515,8 @@ async function initialize() {
 elements.chatForm.addEventListener("submit", submitChat);
 elements.newSession.addEventListener("click", () => createSession());
 elements.scenarioSelect.addEventListener("change", switchScenario);
+elements.historyRefresh.addEventListener("click", () => loadHistory());
+elements.historyLoadMore.addEventListener("click", () => loadHistory({ append: true }));
 elements.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();

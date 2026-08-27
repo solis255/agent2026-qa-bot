@@ -11,8 +11,10 @@ from netpilot.models import (
     ChatResponse,
     DiagnosisView,
     EvidenceView,
+    ExecutionMetricsView,
     SourceView,
     ToolCallView,
+    TokenUsageView,
 )
 
 
@@ -39,6 +41,12 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             confidence=assessment.confidence,
             recommendations=list(assessment.recommendations),
             limitations=list(assessment.limitations),
+        ),
+        metrics=ExecutionMetricsView(
+            token_usage=TokenUsageView(**result.usage.model_dump()),
+            llm_duration_ms=round(result.llm_duration_ms, 2),
+            tool_duration_ms=sum(item.duration_ms for item in tool_calls),
+            tool_calls=len(tool_calls),
         ),
         tool_calls=tool_calls,
         sources=[SourceView(**source.model_dump(mode="json")) for source in result.sources],

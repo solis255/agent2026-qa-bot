@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, status
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from netpilot.agent import (
     SessionBusyError,
@@ -15,9 +17,17 @@ from netpilot.agent import (
 from netpilot.api.presenters import present_chat
 from netpilot.config import MockScenario, Settings, ToolMode
 from netpilot.llm import TJUClient
+from netpilot.history import (
+    DiagnosisCursorError,
+    DiagnosisRepository,
+    DiagnosisRecordNotFoundError,
+    DiagnosisStorageError,
+)
 from netpilot.models import (
     ChatRequest,
     ChatResponse,
+    DiagnosisHistoryResponse,
+    DiagnosisRecordView,
     HealthResponse,
     ScenarioListResponse,
     ScenarioOption,
@@ -50,6 +60,7 @@ def health(request: Request) -> HealthResponse:
         llm_configured=llm_client.configured,
         tool_mode=settings.tool_mode,
         rag_ready=bool(request.app.state.rag_ready),
+        history_ready=bool(request.app.state.history_ready),
     )
 
 
@@ -118,6 +129,20 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="诊断请求处理失败，请稍后重试。",
         ) from exc
+    response = present_chat(payload.session_id, result)
+    repository = _diagnoses(request)
+    if repository is not None:
+        try:
+            record = repository.save(payload.message, response)
+            response = response.model_copy(update={"record_id": record.record_id})
+        except DiagnosisStorageError:
+            log_event(
+                logger,
+                "diagnosis_history_write",
+                level=logging.WARNING,
+                success=False,
+                error_type="diagnosis_storage_error",
+            )
     log_event(
         logger,
         "agent_turn",
@@ -127,7 +152,58 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         status=str(getattr(result.status, "value", result.status)),
     )
     reset_session_id(session_token)
-    return present_chat(payload.session_id, result)
+    return response
+
+
+@router.get(
+    "/diagnoses",
+    response_model=DiagnosisHistoryResponse,
+    tags=["history"],
+)
+def list_diagnoses(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=512),
+    session_id: UUID | None = None,
+) -> DiagnosisHistoryResponse:
+    repository = _require_diagnoses(request)
+    try:
+        return repository.list(
+            limit=limit,
+            cursor=cursor,
+            session_id=session_id,
+        )
+    except DiagnosisCursorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="历史记录游标不合法。",
+        ) from exc
+    except DiagnosisStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="诊断历史暂时不可用。",
+        ) from exc
+
+
+@router.get(
+    "/diagnoses/{record_id}",
+    response_model=DiagnosisRecordView,
+    tags=["history"],
+)
+def get_diagnosis(record_id: UUID, request: Request) -> DiagnosisRecordView:
+    repository = _require_diagnoses(request)
+    try:
+        return repository.get(record_id)
+    except DiagnosisRecordNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="诊断记录不存在。",
+        ) from exc
+    except DiagnosisStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="诊断历史暂时不可用。",
+        ) from exc
 
 
 @router.get("/scenarios", response_model=ScenarioListResponse, tags=["demo"])
@@ -182,3 +258,17 @@ def switch_scenario(
 
 def _sessions(request: Request) -> SessionStore:
     return request.app.state.sessions
+
+
+def _diagnoses(request: Request) -> DiagnosisRepository | None:
+    return request.app.state.diagnosis_repository
+
+
+def _require_diagnoses(request: Request) -> DiagnosisRepository:
+    repository = _diagnoses(request)
+    if repository is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="诊断历史未启用或暂时不可用。",
+        )
+    return repository

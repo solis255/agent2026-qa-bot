@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     max_sessions: int = Field(default=500, ge=1, le=10_000)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    diagnosis_history_enabled: bool = True
+    diagnosis_db_path: Path = PROJECT_ROOT / "data" / "netpilot.db"
+    diagnosis_max_records: int = Field(default=1000, ge=1, le=100_000)
+
     tool_mode: ToolMode = ToolMode.MOCK
     mock_scenario: MockScenario = MockScenario.HEALTHY
     network_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)

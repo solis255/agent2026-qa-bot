@@ -89,7 +89,8 @@ Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://12
   "status": "ok",
   "llm_configured": true,
   "tool_mode": "mock",
-  "rag_ready": true
+  "rag_ready": true,
+  "history_ready": true
 }
 ```
 
@@ -209,6 +210,24 @@ Run the complete offline acceptance suite from the project environment:
 ```
 
 See [Milestone 7 validation](docs/MILESTONE7_VALIDATION.md) for the automated coverage and Local/Mock manual checks.
+
+### P1-A Diagnosis History and Metrics
+
+Every completed chat now returns a `record_id` and a `metrics` object containing prompt/completion/total token counts, total LLM duration, total Tool duration, and Tool call count. When diagnosis history is ready, the complete structured snapshot is stored in a bounded local SQLite database and remains available after an application restart.
+
+The browser displays current metrics plus a paginated history list. Selecting a record restores its question, answer, diagnosis, Tool Timeline, metrics, and knowledge sources without changing the active chat session. The corresponding read-only endpoints are `GET /api/diagnoses` and `GET /api/diagnoses/{record_id}`.
+
+No separate database server or Python package is required. Python's bundled SQLite is used with WAL, a busy timeout, parameterized SQL, a schema version, cursor pagination, and bounded retention. Defaults can be changed in `.env`:
+
+```text
+DIAGNOSIS_HISTORY_ENABLED=true
+DIAGNOSIS_DB_PATH=data/netpilot.db
+DIAGNOSIS_MAX_RECORDS=1000
+```
+
+The database and its WAL files are ignored by Git. Stored records contain the submitted question and structured diagnostic evidence, so production deployments should choose an appropriate path, access policy, retention limit, and backup policy. If initialization or a later write fails, chat continues and `/api/health` reports `history_ready=false` when the repository is unavailable.
+
+See [P1-A validation](docs/P1A_VALIDATION.md) for automated and browser acceptance checks.
 
 ## Run the Labs
 

@@ -28,6 +28,7 @@ def test_health_reports_milestone_one_readiness() -> None:
         "llm_configured": True,
         "tool_mode": "mock",
         "rag_ready": False,
+        "history_ready": False,
     }
     assert secret not in response.text
     assert "api_key" not in response.text.lower()

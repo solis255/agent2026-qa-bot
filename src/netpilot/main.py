@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 from threading import RLock
 from typing import AsyncIterator
@@ -15,13 +16,19 @@ from netpilot.agent import AgentOrchestrator, SessionStore, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
-from netpilot.observability import configure_observability, request_logging_middleware
+from netpilot.history import DiagnosisStorageError, SQLiteDiagnosisRepository
+from netpilot.observability import (
+    configure_observability,
+    log_event,
+    request_logging_middleware,
+)
 from netpilot.rag import load_configured_retriever
 from netpilot.tools import build_network_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = PROJECT_ROOT / "web"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -61,6 +68,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_tool_rounds=app.state.settings.max_tool_rounds,
     )
     app.state.rag_ready = app.state.retriever is not None
+    app.state.diagnosis_repository = None
+    if app.state.settings.diagnosis_history_enabled:
+        try:
+            app.state.diagnosis_repository = SQLiteDiagnosisRepository(
+                app.state.settings.diagnosis_db_path,
+                max_records=app.state.settings.diagnosis_max_records,
+            )
+        except DiagnosisStorageError:
+            log_event(
+                logger,
+                "diagnosis_history_init",
+                level=logging.WARNING,
+                success=False,
+                error_type="diagnosis_storage_error",
+            )
+    app.state.history_ready = app.state.diagnosis_repository is not None
     app.state.sessions = SessionStore(
         max_history_messages=app.state.settings.max_history_messages,
         max_sessions=app.state.settings.max_sessions,

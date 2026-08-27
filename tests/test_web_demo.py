@@ -17,6 +17,11 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
         "diagnosis-summary",
         "tool-timeline",
         "source-list",
+        "metrics-grid",
+        "token-usage",
+        "history-list",
+        "history-refresh",
+        "history-load-more",
     ):
         assert f'id="{element_id}"' in html
     assert "DNS 故障" in html
@@ -26,7 +31,13 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
 def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     javascript = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
-    for endpoint in ("/api/health", "/api/session", "/api/chat", "/api/scenarios"):
+    for endpoint in (
+        "/api/health",
+        "/api/session",
+        "/api/chat",
+        "/api/scenarios",
+        "/api/diagnoses",
+    ):
         assert endpoint in javascript
     assert "textContent" in javascript
     assert "innerHTML" not in javascript
@@ -34,6 +45,8 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "sessionStorage" not in javascript
     assert 'rel = "noopener noreferrer"' in javascript
     assert "diagnosis.summary" in javascript
+    assert "response.metrics" in javascript
+    assert "record.user_message" in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:
