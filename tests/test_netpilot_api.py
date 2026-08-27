@@ -112,7 +112,9 @@ def test_web_assets_are_served_by_fastapi() -> None:
         favicon = client.get("/favicon.svg")
 
     assert javascript.status_code == 200
-    assert 'fetch("/api/health"' in javascript.text
+    assert 'requestJSON("/api/health"' in javascript.text
+    assert '"/api/session"' in javascript.text
+    assert '"/api/chat"' in javascript.text
     assert stylesheet.status_code == 200
     assert ".workspace" in stylesheet.text
     assert favicon.status_code == 200

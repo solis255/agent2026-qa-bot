@@ -17,7 +17,7 @@ TJU API 基础与结构化解析
   -> 生产安全、审计与后端抽象
 ```
 
-主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供 `/api/health` 和 `web/` 中文页面，并初始化 Milestone 5 `TJUClient`、`ToolRegistry`、`AgentOrchestrator`、本地 FAISS Retriever 以及由 `TOOL_MODE` 选择的统一 Mock/Local 只读网络 Tool 层；应用启动不发起模型下载，RAG 不可用时安全降级。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。
+主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供 Milestone 6 会话、聊天、健康状态和开发场景 API 以及 `web/` 中文页面，并初始化 `TJUClient`、`ToolRegistry`、`AgentOrchestrator`、本地 FAISS Retriever、内存 SessionStore 和统一 Mock/Local 只读网络 Tool 层；应用启动不发起模型下载，RAG 不可用时安全降级。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。
 
 ## 2. 按需求快速定位
 
@@ -25,6 +25,7 @@ TJU API 基础与结构化解析
 |---|---|---|
 | NetPilot 配置、启动或健康状态 | `src/netpilot/config.py`、`src/netpilot/main.py` | `.env.example`、`src/netpilot/api/routes.py`、`tests/test_netpilot_config.py`、`tests/test_netpilot_api.py` |
 | NetPilot API schema 或路由 | `src/netpilot/models/schemas.py`、`src/netpilot/api/routes.py` | `web/app.js`、API 测试、README |
+| NetPilot Session 与历史裁剪 | `src/netpilot/agent/session.py` | `src/netpilot/api/routes.py`、`tests/test_sessions.py`、`tests/test_chat_api.py` |
 | NetPilot 中文 Web 页面 | `web/index.html`、`web/app.js`、`web/style.css` | `src/netpilot/main.py` 的静态目录挂载、API schema |
 | NetPilot Tool contract、参数或结果 | `src/netpilot/tools/schemas.py`、`validation.py` | Provider、Service、三组 Tool 测试、README |
 | NetPilot Mock 故障场景 | `src/netpilot/tools/mock_network.py` | `src/netpilot/config.py` 的 `MockScenario`、`tests/test_mock_scenarios.py` |
@@ -61,7 +62,7 @@ TJU API 基础与结构化解析
   -> Settings / TJUClient / ToolRegistry / AgentOrchestrator / Retriever / NetworkToolService
 ```
 
-`create_app()` 不发起外部请求，允许未配置 API Key 时启动。TJU SDK transport 只在存在 Key 时创建，并在应用 lifespan 结束时关闭；真正的网络请求只由 `TJUClient.chat()` 发起。`/api/health` 仅公开布尔就绪状态、Tool 模式和服务状态；静态页面通过同源 `/api/health` 获取这些字段。
+`create_app()` 不发起外部请求，允许未配置 API Key 时启动。TJU SDK transport 只在存在 Key 时创建，并在应用 lifespan 结束时关闭；真正的网络请求只由 `TJUClient.chat()` 发起。Web 通过同源 `/api/session`、`/api/chat`、`/api/health` 和 Mock 场景接口完成演示；SessionStore 隔离并裁剪每个会话的纯文本历史。健康状态和所有响应均不公开凭据。
 
 ### 3.2 NetPilot Tool 调用链
 
@@ -189,8 +190,9 @@ Agent/调用方
 |---|---|
 | `src/netpilot/config.py` | 使用 Pydantic Settings 读取根 `.env`，校验 TJU、Agent、Tool、RAG、App 配置；API Key 使用 `SecretStr` 且允许缺失启动。 |
 | `src/netpilot/main.py` | FastAPI 应用工厂和正式入口；创建 TJUClient、网络 Tool、可选 Retriever、ToolRegistry 与 AgentOrchestrator，并准确设置 `rag_ready`。 |
-| `src/netpilot/api/routes.py` | 当前提供 `/api/health`，只返回公开的布尔/枚举状态，不返回凭据。复杂 Agent 逻辑不得写入此层。 |
-| `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；当前定义 `HealthResponse`，后续按 Milestone 增加会话和诊断模型。 |
+| `src/netpilot/api/routes.py` | 提供 health、session、chat 与受开发开关保护的 Mock 场景接口；协调会话和 Agent，不泄露异常细节或凭据。 |
+| `src/netpilot/api/presenters.py` | 把 AgentResult 转成稳定 Web API 视图；区分工具执行错误、正常证据、异常证据和知识参考。 |
+| `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；定义健康、会话、聊天、诊断、时间线、来源和场景请求/响应。 |
 | `src/netpilot/llm/base.py` | Agent 依赖的 provider-neutral `LLMClient` Protocol，便于 Fake LLM 测试。 |
 | `src/netpilot/llm/schemas.py` | 普通消息、assistant tool calls、tool result 消息、token 用量与稳定 `ChatResult`，不暴露 SDK 响应对象。 |
 | `src/netpilot/llm/errors.py` | 未配置、请求、认证、限流、超时、连接、服务和异常响应的安全错误层。 |
@@ -199,6 +201,8 @@ Agent/调用方
 | `src/netpilot/agent/schemas.py` | `AgentResult`、状态、token、工具证据时间线与结构化知识来源 schema。 |
 | `src/netpilot/agent/tool_registry.py` | 六个网络工具及可选 `knowledge_search` 的严格 schema、白名单分派、参数校验与安全失败转换。 |
 | `src/netpilot/agent/orchestrator.py` | 有界 messages → tool_calls → tool results → answer 循环，支持多调用并安全处理 LLM 错误和最大轮次。 |
+| `src/netpilot/agent/session.py` | 线程安全内存会话、忙碌保护、成对历史裁剪、新会话隔离和场景切换清理。 |
+| `src/netpilot/agent/evidence.py` | 统一解释工具执行状态与诊断状态，并生成模型兼容的紧凑证据反馈。 |
 | `src/netpilot/tools/schemas.py` | 六个工具的 Pydantic 输入/数据模型、稳定错误码与泛型 `ToolResult`；负面网络观察与工具执行错误分开表达。 |
 | `src/netpilot/tools/validation.py` | Host/Domain/URL 的集中校验以及 HTTP localhost、metadata、内网和非公网地址阻断。 |
 | `src/netpilot/tools/base.py` | Mock/Local 共用的 `NetworkProvider` 接口、耗时统计、参数失败与异常捕获边界。 |
@@ -215,9 +219,9 @@ Agent/调用方
 
 | 文件 | 作用与修改提示 |
 |---|---|
-| `web/index.html` | 中文单页结构，包含聊天、服务概览、Tool Timeline 和知识来源占位区；不保存 Key。 |
-| `web/app.js` | 同源读取 `/api/health` 并渲染后端、LLM、RAG 和 Tool 模式状态。 |
-| `web/style.css` | 桌面优先且支持窄屏的页面样式。 |
+| `web/index.html` | Milestone 6 中文单页：聊天、新建会话、快速样例、服务概览、诊断结论、Tool Timeline、来源和 Mock 场景。 |
+| `web/app.js` | 同源调用 Session/Chat/Health/Scenario API；用安全 DOM 文本渲染回答、证据和来源，不持久化 Key 或对话。 |
+| `web/style.css` | 桌面双栏、状态时间线以及 920/560px 响应式单栏和键盘焦点样式。 |
 | `web/favicon.svg` | NetPilot 本地矢量页签图标，避免页面依赖外部图片资源。 |
 
 ### 5.4 `examples/`：共享模拟数据与小型示例
@@ -359,6 +363,10 @@ Agent/调用方
 | `tests/test_netpilot_api.py` | 使用 FastAPI TestClient 验证 health、有/无 Key 启动、Tool Provider 初始化、无 secret 响应、中文首页和静态资源。 |
 | `tests/test_tools.py` | 离线覆盖统一结果、非法参数、Local 接口信息、三平台命令、超时、DNS/TCP/HTTP/traceroute 和异常捕获。 |
 | `tests/test_mock_scenarios.py` | 验证六种场景的关键证据组合、调用耗时、场景切换以及 Mock 不触发 socket/subprocess/httpx。 |
+| `tests/test_sessions.py` | 验证会话唯一性、隔离、成对历史裁剪、busy 防重入和清理。 |
+| `tests/test_chat_api.py` | 验证结构化聊天响应、历史传递、异常状态、安全失败和 secret 不泄露。 |
+| `tests/test_scenario_api.py` | 验证场景列表、开发开关、Mock/Local 边界以及切换后的会话失效。 |
+| `tests/test_web_demo.py` | 静态验证 Milestone 6 页面区域、同源 API、安全 DOM 渲染、来源链接和响应式样式。 |
 | `tests/test_tool_security.py` | 验证 Shell 注入、非法 Host/URL、SSRF、私网 DNS、恶意重定向、重定向上限、`shell=False` 和输出上限。 |
 
 ### 5.16 `bonus/lab-bun-chat/`：Bun Web Chat

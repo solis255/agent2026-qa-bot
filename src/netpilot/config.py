@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     tool_mode: ToolMode = ToolMode.MOCK
     mock_scenario: MockScenario = MockScenario.HEALTHY
     network_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    scenario_switch_enabled: bool = False
 
     rag_enabled: bool = True
     embedding_model: str = "BAAI/bge-small-zh-v1.5"

@@ -74,7 +74,7 @@ This avoids accidentally running the project with another system or Anaconda Pyt
 
 ## TJU NetPilot Application
 
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, static Chinese Web UI, public health endpoint, the read-only network Tool layer, the production TJU client, the native Function Calling Agent loop, and the Milestone 5 source-preserving local RAG layer.
+`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, Milestone 6 Chinese Web demo, server-side sessions, structured diagnostic API, the read-only network Tool layer, the production TJU client, the native Function Calling Agent loop, and the source-preserving local RAG layer.
 
 Start the application from the repository root:
 
@@ -174,6 +174,27 @@ python scripts/test_netpilot_rag.py
 ```
 
 The Agent treats retrieved text as untrusted reference material, distinguishes community and official sources, cites original URLs, and states that the knowledge base has insufficient evidence when no result clears `RAG_MIN_SCORE`. Generated model files and indexes are local artifacts and are not committed.
+
+### Milestone 6 Web Demo
+
+The same-origin browser demo creates server-side sessions, sends chat turns to the Agent, and renders the final answer separately from the structured Tool Call timeline and attributed RAG sources. Session history is bounded by `MAX_HISTORY_MESSAGES`; creating a new session clears the visible diagnosis without storing messages or credentials in browser storage.
+
+For a controlled Mock demonstration, explicitly enable scenario switching before startup. It is disabled by default and is unavailable in Local mode:
+
+```powershell
+$env:SCENARIO_SWITCH_ENABLED="true"
+python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
+```
+
+Open <http://127.0.0.1:8001/>. The page supports chat, follow-up questions, new sessions, all six Mock scenarios, diagnostic status, expandable typed evidence, and clickable source URLs. The stable JSON endpoints are `POST /api/session`, `POST /api/chat`, `GET /api/health`, `GET /api/scenarios`, and development-only `POST /api/scenarios/{name}`.
+
+Run the Milestone 6 offline tests and use the prepared manual cases:
+
+```powershell
+python -m pytest tests\test_sessions.py tests\test_chat_api.py tests\test_scenario_api.py tests\test_web_demo.py -q
+```
+
+See [Milestone 6 manual test cases](docs/MILESTONE6_MANUAL_TEST_CASES.md). If Windows rejects port 8000 with `WinError 10013`, keep port 8001 as shown above or choose another unreserved local port.
 
 ## Run the Labs
 

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import RLock
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from netpilot import __version__
-from netpilot.agent import AgentOrchestrator, ToolRegistry
+from netpilot.agent import AgentOrchestrator, SessionStore, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
@@ -57,6 +58,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_tool_rounds=app.state.settings.max_tool_rounds,
     )
     app.state.rag_ready = app.state.retriever is not None
+    app.state.sessions = SessionStore(
+        max_history_messages=app.state.settings.max_history_messages
+    )
+    # The Mock provider is shared mutable demo state. Serialize Agent runs with
+    # scenario changes so a diagnostic turn cannot observe two scenarios.
+    app.state.runtime_lock = RLock()
 
     app.include_router(api_router, prefix="/api")
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

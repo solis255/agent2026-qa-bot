@@ -120,3 +120,23 @@ python scripts\test_netpilot_rag.py
 ```
 
 `/api/health` reports `rag_ready: true` only when the index and locally cached embedding model are usable. Use `RAG_ENABLED=false` to disable knowledge search without affecting the network tools.
+
+## 6. Run and Verify the Milestone 6 Web Demo
+
+Enable the development-only Mock scenario selector for this PowerShell process, then start NetPilot on port 8001:
+
+```powershell
+$env:SCENARIO_SWITCH_ENABLED="true"
+python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
+```
+
+Open `http://127.0.0.1:8001/`, switch to **DNS 故障**, and submit the DNS sample shown on the page. The expected result is a completed conversation with Ping marked normal, DNS marked abnormal, and both calls shown in the structured timeline. Use **新建会话** before testing VPN knowledge retrieval.
+
+Run the offline acceptance suite in another PowerShell window:
+
+```powershell
+python -m pytest tests\test_sessions.py tests\test_chat_api.py tests\test_scenario_api.py tests\test_web_demo.py -q
+python -m pytest -q
+```
+
+Mock switching is intentionally disabled unless `SCENARIO_SWITCH_ENABLED=true`, and it is never available when `TOOL_MODE=local`. Detailed prompts and expected evidence are in `docs\MILESTONE6_MANUAL_TEST_CASES.md`.
