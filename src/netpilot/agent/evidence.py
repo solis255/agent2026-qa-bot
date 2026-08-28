@@ -45,6 +45,13 @@ def finding_status(
     if tool_name == "get_network_info":
         configured = data.get("ipv4") and data.get("default_gateway")
         return "normal" if configured else "abnormal"
+    if tool_name == "http_check":
+        if data.get("reachable") is False:
+            return "abnormal"
+        status_code = data.get("status_code")
+        if isinstance(status_code, int) and status_code >= 400:
+            return "abnormal"
+        return "normal"
     field = NEGATIVE_FIELDS.get(tool_name)
     if field is not None and data.get(field) is False:
         return "abnormal"

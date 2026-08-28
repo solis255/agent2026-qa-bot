@@ -37,6 +37,7 @@ def test_settings_load_valid_operational_values() -> None:
         diagnosis_db_path="custom/history.db",
         diagnosis_max_records=250,
         diagnosis_report_max_bytes=250_000,
+        custom_scenario_max_count=12,
     )
 
     assert settings.tju_timeout_seconds == 90
@@ -49,6 +50,7 @@ def test_settings_load_valid_operational_values() -> None:
     assert settings.diagnosis_db_path == Path("custom/history.db")
     assert settings.diagnosis_max_records == 250
     assert settings.diagnosis_report_max_bytes == 250_000
+    assert settings.custom_scenario_max_count == 12
 
 
 @pytest.mark.parametrize(
@@ -65,6 +67,7 @@ def test_settings_load_valid_operational_values() -> None:
         ("max_history_messages", 0),
         ("diagnosis_max_records", 0),
         ("diagnosis_report_max_bytes", 1000),
+        ("custom_scenario_max_count", 0),
         ("rag_top_k", 0),
         ("rag_min_score", 1.1),
         ("rag_chunk_size", 100),

@@ -17,7 +17,7 @@ body {
     #edf2f8;
 }
 
-button, textarea, select { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button, select { cursor: pointer; }
 
 .topbar {
@@ -93,7 +93,7 @@ h1 { margin-bottom: 0; font-size: clamp(1.6rem, 3vw, 2.25rem); letter-spacing: -
 h2 { margin-bottom: 15px; font-size: 1.04rem; }
 .session-label { margin: 7px 0 0; color: #718196; font-size: .77rem; }
 
-.secondary-button, .composer button, .text-button, .history-more, .report-actions button, .report-close {
+.secondary-button, .composer button, .text-button, .history-more, .report-actions button, .report-close, .scenario-actions button, .scenario-form-actions button {
   border: 0;
   border-radius: 10px;
   padding: 10px 16px;
@@ -101,8 +101,8 @@ h2 { margin-bottom: 15px; font-size: 1.04rem; }
 }
 .secondary-button { color: #31547d; background: #edf3fa; }
 .text-button { padding: 7px 10px; color: #285f9d; background: #e9f2fc; }
-button:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacity: .58; }
-button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacity: .58; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
   outline: 3px solid rgba(32,105,205,.35);
   outline-offset: 2px;
 }
@@ -161,6 +161,11 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visi
 .scenario-control label { display: block; margin-bottom: 6px; font-size: .74rem; font-weight: 750; }
 .scenario-control select { width: 100%; border: 1px solid #d1dce8; border-radius: 9px; padding: 9px; color: #203b5e; background: #fff; }
 .scenario-control p { margin: 7px 0 0; color: #718197; font-size: .7rem; line-height: 1.5; }
+.scenario-control .scenario-capacity { color: #536c88; }
+.scenario-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+.scenario-actions button { padding: 8px; color: #285f9d; font-size: .7rem; background: #e9f2fc; }
+.scenario-actions .danger-button { color: #a23f3f; background: #ffe8e8; }
+.scenario-actions button[hidden] { display: none; }
 
 .empty-state { display: flex; gap: 10px; align-items: center; padding: 13px; border: 1px dashed #ccd8e6; border-radius: 11px; color: #75869a; background: #f9fbfd; }
 .empty-state span { display: grid; width: 31px; height: 31px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: #3169a8; font-size: .68rem; font-weight: 800; background: #e9f2fc; }
@@ -198,12 +203,26 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .history-list strong { max-width: 100%; overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
 .history-list span, .history-list small { color: #718197; font-size: .66rem; line-height: 1.45; }
 .history-more { width: 100%; margin-top: 10px; color: #31547d; background: #edf3fa; }
-.report-dialog { width: min(760px, calc(100% - 32px)); max-height: min(82vh, 860px); border: 1px solid #cbd9e8; border-radius: 18px; padding: 0; color: #13233b; background: #fff; box-shadow: 0 24px 80px rgba(7,32,68,.28); }
-.report-dialog::backdrop { background: rgba(8,25,50,.56); backdrop-filter: blur(3px); }
+.report-dialog, .scenario-dialog { width: min(760px, calc(100% - 32px)); max-height: min(82vh, 860px); border: 1px solid #cbd9e8; border-radius: 18px; padding: 0; color: #13233b; background: #fff; box-shadow: 0 24px 80px rgba(7,32,68,.28); }
+.report-dialog::backdrop, .scenario-dialog::backdrop { background: rgba(8,25,50,.56); backdrop-filter: blur(3px); }
 .report-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px 14px; border-bottom: 1px solid #e0e8f1; }
 .report-dialog-heading h2 { margin: 0; }
 .report-close { color: #31547d; background: #edf3fa; }
 .report-content { max-height: calc(82vh - 90px); overflow: auto; margin: 0; padding: 22px; color: #233b59; background: #f8fafc; font: .78rem/1.75 ui-monospace, Consolas, "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scenario-form-body { display: grid; gap: 15px; max-height: calc(82vh - 90px); overflow-y: auto; padding: 20px 22px 22px; }
+.form-help { margin: 0; padding: 10px 12px; border-radius: 9px; color: #526b87; font-size: .72rem; line-height: 1.55; background: #edf4fc; }
+.scenario-form-body label { display: grid; gap: 6px; color: #304b6c; font-size: .74rem; font-weight: 750; }
+.scenario-form-body input[type="text"], .scenario-form-body input:not([type]), .scenario-form-body input[type="number"], .scenario-form-body textarea { width: 100%; border: 1px solid #cbd8e6; border-radius: 9px; padding: 9px 10px; color: #183452; background: #fff; }
+.scenario-form-body textarea { resize: vertical; }
+.scenario-identity-grid, .behavior-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.behavior-grid { display: grid; gap: 11px; margin: 0; border: 1px solid #dbe5f0; border-radius: 12px; padding: 14px; background: #fbfdff; }
+.behavior-grid legend { padding: 0 6px; color: #285f9d; font-size: .74rem; font-weight: 800; }
+.scenario-form-body .toggle-row { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.toggle-row input { width: 17px; height: 17px; accent-color: #1458b4; }
+.form-status { min-height: 1.2em; margin: 0; color: #a23f3f; font-size: .72rem; }
+.scenario-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.scenario-form-actions button { min-width: 100px; }
+.scenario-form-actions button[type="submit"] { color: #fff; background: #1458b4; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 @media (max-width: 920px) {
@@ -233,4 +252,6 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
   .health-grid { grid-template-columns: 1fr; }
   .report-actions { grid-template-columns: 1fr; }
   .report-dialog-heading, .report-content { padding-left: 16px; padding-right: 16px; }
+  .scenario-actions, .scenario-identity-grid, .behavior-row { grid-template-columns: 1fr; }
+  .scenario-form-body { padding-left: 16px; padding-right: 16px; }
 }

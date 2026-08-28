@@ -21,6 +21,26 @@ const elements = {
   scenarioControl: document.querySelector("#scenario-control"),
   scenarioSelect: document.querySelector("#scenario-select"),
   scenarioDescription: document.querySelector("#scenario-description"),
+  scenarioCapacity: document.querySelector("#scenario-capacity"),
+  customScenarioNew: document.querySelector("#custom-scenario-new"),
+  customScenarioDelete: document.querySelector("#custom-scenario-delete"),
+  scenarioDialog: document.querySelector("#scenario-dialog"),
+  scenarioDialogClose: document.querySelector("#scenario-dialog-close"),
+  scenarioForm: document.querySelector("#custom-scenario-form"),
+  scenarioFormCancel: document.querySelector("#scenario-form-cancel"),
+  scenarioFormSubmit: document.querySelector("#scenario-form-submit"),
+  scenarioFormStatus: document.querySelector("#scenario-form-status"),
+  customScenarioName: document.querySelector("#custom-scenario-name"),
+  customScenarioLabel: document.querySelector("#custom-scenario-label"),
+  customScenarioDescription: document.querySelector("#custom-scenario-description"),
+  scenarioNetworkConfigured: document.querySelector("#scenario-network-configured"),
+  scenarioPingReachable: document.querySelector("#scenario-ping-reachable"),
+  scenarioPingLoss: document.querySelector("#scenario-ping-loss"),
+  scenarioDnsResolved: document.querySelector("#scenario-dns-resolved"),
+  scenarioTcpConnected: document.querySelector("#scenario-tcp-connected"),
+  scenarioHttpReachable: document.querySelector("#scenario-http-reachable"),
+  scenarioHttpStatus: document.querySelector("#scenario-http-status"),
+  scenarioTracerouteReached: document.querySelector("#scenario-traceroute-reached"),
   conversation: document.querySelector("#conversation"),
   chatForm: document.querySelector("#chat-form"),
   messageInput: document.querySelector("#message-input"),
@@ -89,6 +109,9 @@ function setBusy(busy, message = "") {
   elements.sendButton.disabled = busy || !ready;
   elements.newSession.disabled = busy || !state.health;
   elements.scenarioSelect.disabled = busy || elements.scenarioSelect.dataset.enabled !== "true";
+  elements.customScenarioNew.disabled = busy || elements.customScenarioNew.dataset.available !== "true";
+  elements.customScenarioDelete.disabled = busy;
+  elements.scenarioFormSubmit.disabled = busy;
   elements.historyRefresh.disabled = busy;
   elements.historyLoadMore.disabled = busy;
   elements.reportPreview.disabled = busy || !state.activeRecordId;
@@ -575,13 +598,20 @@ async function loadScenarios() {
     for (const scenario of response.scenarios) {
       const option = document.createElement("option");
       option.value = scenario.name;
-      option.textContent = scenario.label;
+      option.textContent = scenario.kind === "custom" ? `自定义 · ${scenario.label}` : scenario.label;
       elements.scenarioSelect.append(option);
     }
     elements.scenarioSelect.value = response.current;
     elements.scenarioSelect.dataset.enabled = String(response.switch_enabled);
     elements.scenarioSelect.disabled = state.busy || !response.switch_enabled;
     elements.scenarioControl.hidden = false;
+    const atCapacity = response.custom_count >= response.custom_limit;
+    elements.customScenarioNew.hidden = !response.switch_enabled;
+    elements.customScenarioNew.dataset.available = String(response.switch_enabled && !atCapacity);
+    elements.customScenarioNew.disabled = state.busy || !response.switch_enabled || atCapacity;
+    elements.scenarioCapacity.textContent = response.switch_enabled
+      ? `自定义场景 ${response.custom_count} / ${response.custom_limit}，服务重启后自动清空。`
+      : "自定义场景功能随场景切换开关关闭。";
     renderScenarioDescription(response.current, response.switch_enabled);
   } catch (error) {
     elements.scenarioControl.hidden = false;
@@ -593,16 +623,13 @@ function renderScenarioDescription(name, enabled) {
   const scenario = state.scenarios.find((item) => item.name === name);
   const suffix = enabled ? "" : "（切换功能未启用）";
   elements.scenarioDescription.textContent = `${scenario?.description || "未知场景"}${suffix}`;
+  elements.customScenarioDelete.hidden = scenario?.kind !== "custom" || !enabled;
 }
 
-async function switchScenario() {
-  const scenario = elements.scenarioSelect.value;
-  if (!scenario || state.busy || elements.scenarioSelect.dataset.enabled !== "true") return;
-  setBusy(true, "正在切换 Mock 场景并重置会话…");
-  try {
-    const response = await requestJSON(`/api/scenarios/${encodeURIComponent(scenario)}`, {
-      method: "POST",
-    });
+async function activateScenario(scenario) {
+  const response = await requestJSON(`/api/scenarios/${encodeURIComponent(scenario)}`, {
+    method: "POST",
+  });
     state.sessionId = response.session_id;
     elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
     elements.scenarioSelect.value = response.current;
@@ -610,8 +637,106 @@ async function switchScenario() {
     resetConversation();
     appendMessage("assistant", `已切换到“${elements.scenarioSelect.selectedOptions[0].textContent}”测试场景。`);
     elements.interactionNote.textContent = "场景切换完成，旧会话已清理。";
+}
+
+async function switchScenario() {
+  const scenario = elements.scenarioSelect.value;
+  if (!scenario || state.busy || elements.scenarioSelect.dataset.enabled !== "true") return;
+  setBusy(true, "正在切换 Mock 场景并重置会话…");
+  try {
+    await activateScenario(scenario);
   } catch (error) {
     appendMessage("error", error.message);
+    elements.interactionNote.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function syncCustomBehaviorFields() {
+  if (elements.scenarioPingReachable.checked) {
+    elements.scenarioPingLoss.disabled = false;
+    if (Number(elements.scenarioPingLoss.value) >= 100) elements.scenarioPingLoss.value = "0";
+    elements.scenarioPingLoss.max = "99";
+  } else {
+    elements.scenarioPingLoss.value = "100";
+    elements.scenarioPingLoss.disabled = true;
+  }
+  if (elements.scenarioHttpReachable.checked) {
+    elements.scenarioHttpStatus.disabled = false;
+    if (!elements.scenarioHttpStatus.value) elements.scenarioHttpStatus.value = "200";
+  } else {
+    elements.scenarioHttpStatus.value = "";
+    elements.scenarioHttpStatus.disabled = true;
+  }
+}
+
+function openCustomScenarioDialog() {
+  if (state.busy || elements.customScenarioNew.dataset.available !== "true") return;
+  elements.scenarioForm.reset();
+  elements.scenarioFormStatus.textContent = "";
+  syncCustomBehaviorFields();
+  elements.scenarioDialog.showModal();
+  elements.customScenarioName.focus();
+}
+
+async function createCustomScenario(event) {
+  event.preventDefault();
+  if (state.busy || !elements.scenarioForm.reportValidity()) return;
+  const pingReachable = elements.scenarioPingReachable.checked;
+  const httpReachable = elements.scenarioHttpReachable.checked;
+  const payload = {
+    name: elements.customScenarioName.value.trim(),
+    label: elements.customScenarioLabel.value.trim(),
+    description: elements.customScenarioDescription.value.trim(),
+    behavior: {
+      network_configured: elements.scenarioNetworkConfigured.checked,
+      ping_reachable: pingReachable,
+      ping_packet_loss_percent: pingReachable ? Number(elements.scenarioPingLoss.value) : 100,
+      dns_resolved: elements.scenarioDnsResolved.checked,
+      tcp_connected: elements.scenarioTcpConnected.checked,
+      http_reachable: httpReachable,
+      http_status_code: httpReachable ? Number(elements.scenarioHttpStatus.value) : null,
+      traceroute_reached: elements.scenarioTracerouteReached.checked,
+    },
+  };
+  setBusy(true, "正在创建并切换自定义 Mock 场景…");
+  elements.scenarioFormStatus.textContent = "正在校验场景…";
+  try {
+    const created = await requestJSON("/api/scenarios/custom", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    await loadScenarios();
+    elements.scenarioSelect.value = created.name;
+    await activateScenario(created.name);
+    elements.scenarioDialog.close();
+  } catch (error) {
+    elements.scenarioFormStatus.textContent = error.message;
+    elements.interactionNote.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteCurrentCustomScenario() {
+  const scenario = state.scenarios.find((item) => item.name === elements.scenarioSelect.value);
+  if (!scenario || scenario.kind !== "custom" || state.busy) return;
+  setBusy(true, "正在删除自定义 Mock 场景…");
+  try {
+    const response = await requestJSON(
+      `/api/scenarios/custom/${encodeURIComponent(scenario.name)}`,
+      { method: "DELETE" },
+    );
+    if (response.session_id) {
+      state.sessionId = response.session_id;
+      elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
+      resetConversation();
+    }
+    await loadScenarios();
+    appendMessage("assistant", `已删除自定义场景“${scenario.label}”，当前恢复为内置健康场景。`);
+    elements.interactionNote.textContent = "自定义场景已删除，旧会话已清理。";
+  } catch (error) {
     elements.interactionNote.textContent = error.message;
   } finally {
     setBusy(false);
@@ -636,6 +761,13 @@ async function initialize() {
 elements.chatForm.addEventListener("submit", submitChat);
 elements.newSession.addEventListener("click", () => createSession());
 elements.scenarioSelect.addEventListener("change", switchScenario);
+elements.customScenarioNew.addEventListener("click", openCustomScenarioDialog);
+elements.customScenarioDelete.addEventListener("click", deleteCurrentCustomScenario);
+elements.scenarioForm.addEventListener("submit", createCustomScenario);
+elements.scenarioDialogClose.addEventListener("click", () => elements.scenarioDialog.close());
+elements.scenarioFormCancel.addEventListener("click", () => elements.scenarioDialog.close());
+elements.scenarioPingReachable.addEventListener("change", syncCustomBehaviorFields);
+elements.scenarioHttpReachable.addEventListener("change", syncCustomBehaviorFields);
 elements.historyRefresh.addEventListener("click", () => loadHistory());
 elements.historyLoadMore.addEventListener("click", () => loadHistory({ append: true }));
 elements.reportPreview.addEventListener("click", previewReport);

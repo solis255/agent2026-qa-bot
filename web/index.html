@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=p1b">
+    <link rel="stylesheet" href="/style.css?v=p1c">
   </head>
   <body>
     <header class="topbar">
@@ -81,6 +81,11 @@
             <label for="scenario-select">Mock 故障场景</label>
             <select id="scenario-select" disabled></select>
             <p id="scenario-description">加载场景中…</p>
+            <p class="scenario-capacity" id="scenario-capacity"></p>
+            <div class="scenario-actions">
+              <button type="button" id="custom-scenario-new" hidden>新建自定义场景</button>
+              <button type="button" class="danger-button" id="custom-scenario-delete" hidden>删除当前场景</button>
+            </div>
           </div>
         </section>
 
@@ -140,6 +145,52 @@
       </aside>
     </main>
 
+    <dialog class="scenario-dialog" id="scenario-dialog" aria-labelledby="scenario-dialog-title">
+      <form id="custom-scenario-form">
+        <div class="report-dialog-heading">
+          <div>
+            <p class="eyebrow">P1-C 自定义 Mock</p>
+            <h2 id="scenario-dialog-title">创建测试场景</h2>
+          </div>
+          <button type="button" class="report-close" id="scenario-dialog-close" aria-label="关闭自定义场景表单">关闭</button>
+        </div>
+        <div class="scenario-form-body">
+          <p class="form-help">场景仅保存在当前服务进程中。所有结果均为离线模拟，不会执行网络请求或系统命令。</p>
+          <div class="scenario-identity-grid">
+            <label>场景名称
+              <input id="custom-scenario-name" name="name" required minlength="3" maxlength="32" pattern="[a-z][a-z0-9_-]+" placeholder="例如 dns_lab">
+            </label>
+            <label>显示名称
+              <input id="custom-scenario-label" name="label" required maxlength="40" placeholder="例如 宿舍 DNS 故障">
+            </label>
+          </div>
+          <label>场景说明
+            <textarea id="custom-scenario-description" name="description" required maxlength="200" rows="2" placeholder="说明希望模拟的网络现象"></textarea>
+          </label>
+          <fieldset class="behavior-grid" id="scenario-behavior-fields">
+            <legend>六类工具的模拟结果</legend>
+            <label class="toggle-row"><input type="checkbox" id="scenario-network-configured" checked> 本机网络配置完整</label>
+            <div class="behavior-row">
+              <label class="toggle-row"><input type="checkbox" id="scenario-ping-reachable" checked> Ping 目标可达</label>
+              <label>丢包率（%）<input type="number" id="scenario-ping-loss" min="0" max="99" step="1" value="0"></label>
+            </div>
+            <label class="toggle-row"><input type="checkbox" id="scenario-dns-resolved" checked> DNS 解析成功</label>
+            <label class="toggle-row"><input type="checkbox" id="scenario-tcp-connected" checked> TCP 连接成功</label>
+            <div class="behavior-row">
+              <label class="toggle-row"><input type="checkbox" id="scenario-http-reachable" checked> HTTP 请求可达</label>
+              <label>HTTP 状态码<input type="number" id="scenario-http-status" min="100" max="599" step="1" value="200"></label>
+            </div>
+            <label class="toggle-row"><input type="checkbox" id="scenario-traceroute-reached" checked> 路由追踪到达目标</label>
+          </fieldset>
+          <p class="form-status" id="scenario-form-status" role="status" aria-live="polite"></p>
+          <div class="scenario-form-actions">
+            <button type="button" class="secondary-button" id="scenario-form-cancel">取消</button>
+            <button type="submit" id="scenario-form-submit">创建并切换</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="report-dialog" id="report-dialog" aria-labelledby="report-title">
       <div class="report-dialog-heading">
         <div>
@@ -151,6 +202,6 @@
       <pre class="report-content" id="report-content" tabindex="0">正在加载报告…</pre>
     </dialog>
 
-    <script src="/app.js?v=p1b" defer></script>
+    <script src="/app.js?v=p1c" defer></script>
   </body>
 </html>

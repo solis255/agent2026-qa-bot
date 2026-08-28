@@ -28,6 +28,16 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
         "export-json",
         "report-dialog",
         "report-content",
+        "custom-scenario-new",
+        "custom-scenario-delete",
+        "scenario-dialog",
+        "custom-scenario-form",
+        "custom-scenario-name",
+        "scenario-ping-reachable",
+        "scenario-dns-resolved",
+        "scenario-tcp-connected",
+        "scenario-http-reachable",
+        "scenario-traceroute-reached",
     ):
         assert f'id="{element_id}"' in html
     assert "DNS 故障" in html
@@ -45,6 +55,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
         "/api/diagnoses",
         "/report",
         "/export?format=",
+        "/api/scenarios/custom",
     ):
         assert endpoint in javascript
     assert "textContent" in javascript
@@ -58,6 +69,8 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "response.record_id" in javascript
     assert "response.body?.cancel()" in javascript
     assert "link.download" in javascript
+    assert "ping_packet_loss_percent" in javascript
+    assert "http_status_code" in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:
@@ -70,3 +83,5 @@ def test_web_styles_include_mobile_and_accessible_states() -> None:
     assert ".source-type.community" in stylesheet
     assert ".report-dialog::backdrop" in stylesheet
     assert ".report-actions" in stylesheet
+    assert ".scenario-form-body" in stylesheet
+    assert ".behavior-grid" in stylesheet

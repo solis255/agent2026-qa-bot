@@ -119,7 +119,7 @@ def assess_diagnosis(steps: list[AgentToolStep]) -> DiagnosticAssessment:
         return DiagnosticAssessment(
             primary_issue="http_connectivity_failure",
             confidence="medium",
-            summary="HTTP 检测已实际发送请求，但没有成功获得响应。",
+            summary="HTTP 检测已实际发送请求，但没有获得成功响应或状态码。",
             recommendations=(
                 "检查系统代理、TLS 证书和目标 URL，并用浏览器与 curl 对比错误信息。",
                 "若 TCP 443 正常而 HTTPS 失败，重点检查代理、TLS 握手和应用层策略。",

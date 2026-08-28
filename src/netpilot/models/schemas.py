@@ -9,8 +9,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from netpilot.agent.schemas import AgentStatus
-from netpilot.config import MockScenario, ToolMode
+from netpilot.config import ToolMode
 from netpilot.rag import SourceType
+from netpilot.tools.custom_scenarios import CustomMockScenario, CustomScenarioBehavior
 
 
 class HealthResponse(BaseModel):
@@ -163,18 +164,33 @@ class DiagnosisReportView(BaseModel):
 
 
 class ScenarioOption(BaseModel):
-    name: MockScenario
+    name: str
     label: str
     description: str
+    kind: Literal["built_in", "custom"] = "built_in"
+    behavior: CustomScenarioBehavior | None = None
 
 
 class ScenarioListResponse(BaseModel):
-    current: MockScenario
+    current: str
     switch_enabled: bool
+    custom_count: int = Field(default=0, ge=0)
+    custom_limit: int = Field(default=20, ge=1)
     scenarios: list[ScenarioOption]
 
 
 class ScenarioSwitchResponse(BaseModel):
-    current: MockScenario
+    current: str
     session_id: UUID
     sessions_cleared: int = Field(ge=0)
+
+
+class CustomScenarioCreateRequest(CustomMockScenario):
+    """Public request body with the same strict immutable definition."""
+
+
+class CustomScenarioDeleteResponse(BaseModel):
+    deleted: str
+    current: str
+    session_id: UUID | None = None
+    sessions_cleared: int = Field(default=0, ge=0)

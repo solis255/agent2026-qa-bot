@@ -3,6 +3,8 @@
 from netpilot.models.schemas import (
     ChatRequest,
     ChatResponse,
+    CustomScenarioCreateRequest,
+    CustomScenarioDeleteResponse,
     DiagnosisView,
     DiagnosisHistoryResponse,
     DiagnosisRecordSummaryView,
@@ -23,6 +25,8 @@ from netpilot.models.schemas import (
 __all__ = [
     "ChatRequest",
     "ChatResponse",
+    "CustomScenarioCreateRequest",
+    "CustomScenarioDeleteResponse",
     "DiagnosisView",
     "DiagnosisHistoryResponse",
     "DiagnosisRecordSummaryView",

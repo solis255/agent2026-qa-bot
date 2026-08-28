@@ -249,6 +249,27 @@ DIAGNOSIS_REPORT_MAX_BYTES=1000000
 
 P1-B reuses the P1-A SQLite snapshot and therefore needs no additional database or service. See [P1-B validation](docs/P1B_VALIDATION.md) for automated and browser acceptance checks.
 
+### P1-C Custom Mock Test Scenarios
+
+When `TOOL_MODE=mock` and `SCENARIO_SWITCH_ENABLED=true`, operators can create bounded custom test scenarios from the browser or API. A scenario independently controls the simulated outcomes for network configuration, Ping and packet loss, DNS, TCP, HTTP and status code, and traceroute. Creating a scenario does not execute user input, shell commands, subprocesses, sockets, or HTTP requests.
+
+Custom scenarios can be listed, switched, and deleted through the existing scenario selector and these APIs:
+
+```text
+POST   /api/scenarios/custom
+GET    /api/scenarios
+POST   /api/scenarios/{name}
+DELETE /api/scenarios/custom/{name}
+```
+
+Names and text lengths are strictly validated, request models reject extra fields, built-in scenarios cannot be replaced or deleted, and the registry has a configurable bound:
+
+```text
+CUSTOM_SCENARIO_MAX_COUNT=20
+```
+
+Definitions are intentionally process-local and disappear when the service restarts. Switching scenarios clears existing sessions; deleting the active custom scenario atomically restores the built-in `healthy` scenario and creates a fresh session. Local mode rejects all custom-scenario mutations. See [P1-C validation](docs/P1C_VALIDATION.md) for the request example and acceptance checks.
+
 ## Run the Labs
 
 Run commands from the repo root unless a lab README says otherwise.

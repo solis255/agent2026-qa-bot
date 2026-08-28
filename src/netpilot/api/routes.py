@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -26,6 +27,8 @@ from netpilot.history import (
 from netpilot.models import (
     ChatRequest,
     ChatResponse,
+    CustomScenarioCreateRequest,
+    CustomScenarioDeleteResponse,
     DiagnosisHistoryResponse,
     DiagnosisReportView,
     DiagnosisRecordView,
@@ -40,6 +43,11 @@ from netpilot.reports import (
     DiagnosisReportTooLargeError,
     build_diagnosis_report,
     export_diagnosis_report,
+)
+from netpilot.tools.custom_scenarios import (
+    CustomScenarioExistsError,
+    CustomScenarioLimitError,
+    CustomScenarioNotFoundError,
 )
 
 
@@ -263,14 +271,99 @@ def list_scenarios(request: Request) -> ScenarioListResponse:
             status_code=status.HTTP_409_CONFLICT,
             detail="Local 模式不支持 Mock 场景。",
         )
-    current = request.app.state.network_tools.provider.scenario
+    provider = request.app.state.network_tools.provider
+    current = provider.scenario_name
+    custom_scenarios = request.app.state.network_tools.list_custom_scenarios()
     return ScenarioListResponse(
         current=current,
         switch_enabled=settings.scenario_switch_enabled,
+        custom_count=len(custom_scenarios),
+        custom_limit=provider.max_custom_scenarios,
         scenarios=[
-            ScenarioOption(name=name, label=label, description=description)
+            ScenarioOption(
+                name=name.value,
+                label=label,
+                description=description,
+                kind="built_in",
+            )
             for name, (label, description) in SCENARIO_DETAILS.items()
+        ]
+        + [
+            ScenarioOption(
+                name=scenario.name,
+                label=scenario.label,
+                description=scenario.description,
+                kind="custom",
+                behavior=scenario.behavior,
+            )
+            for scenario in custom_scenarios
         ],
+    )
+
+
+@router.post(
+    "/scenarios/custom",
+    response_model=ScenarioOption,
+    status_code=status.HTTP_201_CREATED,
+    tags=["demo"],
+)
+def create_custom_scenario(
+    payload: CustomScenarioCreateRequest,
+    request: Request,
+) -> ScenarioOption:
+    _require_custom_scenario_write(request)
+    try:
+        with request.app.state.runtime_lock:
+            created = request.app.state.network_tools.add_custom_scenario(payload)
+    except CustomScenarioExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except CustomScenarioLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    return ScenarioOption(
+        name=created.name,
+        label=created.label,
+        description=created.description,
+        kind="custom",
+        behavior=created.behavior,
+    )
+
+
+@router.delete(
+    "/scenarios/custom/{scenario}",
+    response_model=CustomScenarioDeleteResponse,
+    tags=["demo"],
+)
+def delete_custom_scenario(
+    scenario: str,
+    request: Request,
+) -> CustomScenarioDeleteResponse:
+    _require_custom_scenario_write(request)
+    _validate_scenario_name(scenario)
+    try:
+        with request.app.state.runtime_lock:
+            was_active = request.app.state.network_tools.delete_custom_scenario(scenario)
+            cleared = 0
+            session_id = None
+            if was_active:
+                cleared = _sessions(request).clear()
+                session_id = _sessions(request).create().session_id
+            current = request.app.state.network_tools.provider.scenario_name
+    except CustomScenarioNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="自定义 Mock 场景不存在。",
+        ) from exc
+    return CustomScenarioDeleteResponse(
+        deleted=scenario,
+        current=current,
+        session_id=session_id,
+        sessions_cleared=cleared,
     )
 
 
@@ -280,7 +373,7 @@ def list_scenarios(request: Request) -> ScenarioListResponse:
     tags=["demo"],
 )
 def switch_scenario(
-    scenario: MockScenario,
+    scenario: str,
     request: Request,
 ) -> ScenarioSwitchResponse:
     settings: Settings = request.app.state.settings
@@ -289,20 +382,59 @@ def switch_scenario(
             status_code=status.HTTP_409_CONFLICT,
             detail="Local 模式不支持 Mock 场景切换。",
         )
+    _validate_scenario_name(scenario)
+    known_scenarios = {item.value for item in MockScenario}
+    known_scenarios.update(
+        item.name for item in request.app.state.network_tools.list_custom_scenarios()
+    )
+    if scenario not in known_scenarios:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Mock 场景不存在。",
+        )
     if not settings.scenario_switch_enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Mock 场景切换未启用。",
         )
-    with request.app.state.runtime_lock:
-        current = request.app.state.network_tools.set_mock_scenario(scenario)
-        cleared = _sessions(request).clear()
-        snapshot = _sessions(request).create()
+    try:
+        with request.app.state.runtime_lock:
+            current = request.app.state.network_tools.set_mock_scenario(scenario)
+            cleared = _sessions(request).clear()
+            snapshot = _sessions(request).create()
+    except CustomScenarioNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Mock 场景不存在。",
+        ) from exc
+    current_name = current.value if isinstance(current, MockScenario) else current
     return ScenarioSwitchResponse(
-        current=current,
+        current=current_name,
         session_id=snapshot.session_id,
         sessions_cleared=cleared,
     )
+
+
+def _require_custom_scenario_write(request: Request) -> None:
+    settings: Settings = request.app.state.settings
+    if settings.tool_mode is not ToolMode.MOCK:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Local 模式不支持自定义 Mock 场景。",
+        )
+    if not settings.scenario_switch_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Mock 场景切换未启用。",
+        )
+
+
+def _validate_scenario_name(value: str) -> None:
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{2,31}", value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Mock 场景名称不合法。",
+        )
 
 
 def _sessions(request: Request) -> SessionStore:
