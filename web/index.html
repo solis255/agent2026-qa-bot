@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=p1a">
+    <link rel="stylesheet" href="/style.css?v=p1b">
   </head>
   <body>
     <header class="topbar">
@@ -99,6 +99,11 @@
             <div><dt>Tool 耗时</dt><dd id="tool-duration">--</dd></div>
             <div><dt>Tool 次数</dt><dd id="tool-count">--</dd></div>
           </dl>
+          <div class="report-actions" id="report-actions" hidden>
+            <button type="button" id="report-preview">预览故障报告</button>
+            <button type="button" id="export-markdown">下载 Markdown</button>
+            <button type="button" id="export-json">下载 JSON</button>
+          </div>
         </section>
 
         <section class="status-card">
@@ -135,6 +140,17 @@
       </aside>
     </main>
 
-    <script src="/app.js?v=p1a" defer></script>
+    <dialog class="report-dialog" id="report-dialog" aria-labelledby="report-title">
+      <div class="report-dialog-heading">
+        <div>
+          <p class="eyebrow">自动故障报告</p>
+          <h2 id="report-title">诊断报告预览</h2>
+        </div>
+        <button type="button" class="report-close" id="report-close" aria-label="关闭报告预览">关闭</button>
+      </div>
+      <pre class="report-content" id="report-content" tabindex="0">正在加载报告…</pre>
+    </dialog>
+
+    <script src="/app.js?v=p1b" defer></script>
   </body>
 </html>

@@ -22,6 +22,12 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
         "history-list",
         "history-refresh",
         "history-load-more",
+        "report-actions",
+        "report-preview",
+        "export-markdown",
+        "export-json",
+        "report-dialog",
+        "report-content",
     ):
         assert f'id="{element_id}"' in html
     assert "DNS 故障" in html
@@ -37,6 +43,8 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
         "/api/chat",
         "/api/scenarios",
         "/api/diagnoses",
+        "/report",
+        "/export?format=",
     ):
         assert endpoint in javascript
     assert "textContent" in javascript
@@ -47,6 +55,9 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "diagnosis.summary" in javascript
     assert "response.metrics" in javascript
     assert "record.user_message" in javascript
+    assert "response.record_id" in javascript
+    assert "response.body?.cancel()" in javascript
+    assert "link.download" in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:
@@ -57,3 +68,5 @@ def test_web_styles_include_mobile_and_accessible_states() -> None:
     assert ":focus-visible" in stylesheet
     assert ".timeline-item.abnormal" in stylesheet
     assert ".source-type.community" in stylesheet
+    assert ".report-dialog::backdrop" in stylesheet
+    assert ".report-actions" in stylesheet

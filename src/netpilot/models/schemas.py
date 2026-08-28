@@ -147,6 +147,21 @@ class DiagnosisHistoryResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class DiagnosisReportView(BaseModel):
+    schema_version: Literal[1] = 1
+    report_id: UUID
+    record_id: UUID
+    session_id: UUID
+    generated_at: datetime
+    title: str = "TJU NetPilot 故障诊断报告"
+    question: str = Field(min_length=1, max_length=4000)
+    conclusion: str
+    diagnosis: DiagnosisView
+    metrics: ExecutionMetricsView
+    tool_calls: list[ToolCallView] = Field(default_factory=list)
+    sources: list[SourceView] = Field(default_factory=list)
+
+
 class ScenarioOption(BaseModel):
     name: MockScenario
     label: str

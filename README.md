@@ -229,6 +229,26 @@ The database and its WAL files are ignored by Git. Stored records contain the su
 
 See [P1-A validation](docs/P1A_VALIDATION.md) for automated and browser acceptance checks.
 
+### P1-B Automatic Reports and Markdown/JSON Export
+
+Every saved diagnosis can now be converted into a deterministic fault report without a second LLM request. The report preserves the original question and conclusion together with diagnosis classification, confidence, recommendations, limitations, execution metrics, Tool evidence, and knowledge sources. Repeated generation from the same immutable record produces the same report identifier and export content.
+
+The browser exposes report preview, Markdown download, and JSON download after a diagnosis completes or a history record is opened. The corresponding read-only endpoints are:
+
+```text
+GET /api/diagnoses/{record_id}/report
+GET /api/diagnoses/{record_id}/export?format=markdown
+GET /api/diagnoses/{record_id}/export?format=json
+```
+
+Exports use deterministic ASCII filenames, disable shared caching, request MIME sniffing protection, escape untrusted Markdown text, and reject unsupported formats or artifacts above the configured bound. The default limit can be changed in `.env`:
+
+```text
+DIAGNOSIS_REPORT_MAX_BYTES=1000000
+```
+
+P1-B reuses the P1-A SQLite snapshot and therefore needs no additional database or service. See [P1-B validation](docs/P1B_VALIDATION.md) for automated and browser acceptance checks.
+
 ## Run the Labs
 
 Run commands from the repo root unless a lab README says otherwise.

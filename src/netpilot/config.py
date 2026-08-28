@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     diagnosis_history_enabled: bool = True
     diagnosis_db_path: Path = PROJECT_ROOT / "data" / "netpilot.db"
     diagnosis_max_records: int = Field(default=1000, ge=1, le=100_000)
+    diagnosis_report_max_bytes: int = Field(
+        default=1_000_000,
+        ge=1024,
+        le=5_000_000,
+    )
 
     tool_mode: ToolMode = ToolMode.MOCK
     mock_scenario: MockScenario = MockScenario.HEALTHY

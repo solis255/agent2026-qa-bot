@@ -93,7 +93,7 @@ h1 { margin-bottom: 0; font-size: clamp(1.6rem, 3vw, 2.25rem); letter-spacing: -
 h2 { margin-bottom: 15px; font-size: 1.04rem; }
 .session-label { margin: 7px 0 0; color: #718196; font-size: .77rem; }
 
-.secondary-button, .composer button, .text-button, .history-more {
+.secondary-button, .composer button, .text-button, .history-more, .report-actions button, .report-close {
   border: 0;
   border-radius: 10px;
   padding: 10px 16px;
@@ -153,6 +153,10 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visi
 .health-grid dd, .metrics-grid dd { margin: 4px 0 0; font-size: .82rem; font-weight: 800; overflow-wrap: anywhere; }
 .metrics-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3eaf2; }
 .metrics-grid div { padding: 9px; border-radius: 9px; background: #f7fafd; }
+.report-actions { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 7px; margin-top: 12px; }
+.report-actions[hidden] { display: none; }
+.report-actions button { padding: 9px 8px; color: #285f9d; font-size: .7rem; background: #e9f2fc; }
+.report-actions button:first-child { color: #fff; background: #1458b4; }
 .scenario-control { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3eaf2; }
 .scenario-control label { display: block; margin-bottom: 6px; font-size: .74rem; font-weight: 750; }
 .scenario-control select { width: 100%; border: 1px solid #d1dce8; border-radius: 9px; padding: 9px; color: #203b5e; background: #fff; }
@@ -194,6 +198,12 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .history-list strong { max-width: 100%; overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
 .history-list span, .history-list small { color: #718197; font-size: .66rem; line-height: 1.45; }
 .history-more { width: 100%; margin-top: 10px; color: #31547d; background: #edf3fa; }
+.report-dialog { width: min(760px, calc(100% - 32px)); max-height: min(82vh, 860px); border: 1px solid #cbd9e8; border-radius: 18px; padding: 0; color: #13233b; background: #fff; box-shadow: 0 24px 80px rgba(7,32,68,.28); }
+.report-dialog::backdrop { background: rgba(8,25,50,.56); backdrop-filter: blur(3px); }
+.report-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px 14px; border-bottom: 1px solid #e0e8f1; }
+.report-dialog-heading h2 { margin: 0; }
+.report-close { color: #31547d; background: #edf3fa; }
+.report-content { max-height: calc(82vh - 90px); overflow: auto; margin: 0; padding: 22px; color: #233b59; background: #f8fafc; font: .78rem/1.75 ui-monospace, Consolas, "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 @media (max-width: 920px) {
@@ -221,4 +231,6 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
   .quick-prompts { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
   .quick-prompts button { flex: 0 0 auto; }
   .health-grid { grid-template-columns: 1fr; }
+  .report-actions { grid-template-columns: 1fr; }
+  .report-dialog-heading, .report-content { padding-left: 16px; padding-right: 16px; }
 }

@@ -6,6 +6,7 @@ const state = {
   busy: false,
   scenarios: [],
   historyCursor: null,
+  activeRecordId: null,
 };
 
 const elements = {
@@ -38,6 +39,13 @@ const elements = {
   historyList: document.querySelector("#history-list"),
   historyRefresh: document.querySelector("#history-refresh"),
   historyLoadMore: document.querySelector("#history-load-more"),
+  reportActions: document.querySelector("#report-actions"),
+  reportPreview: document.querySelector("#report-preview"),
+  exportMarkdown: document.querySelector("#export-markdown"),
+  exportJson: document.querySelector("#export-json"),
+  reportDialog: document.querySelector("#report-dialog"),
+  reportContent: document.querySelector("#report-content"),
+  reportClose: document.querySelector("#report-close"),
 };
 
 const TOOL_LABELS = {
@@ -83,6 +91,9 @@ function setBusy(busy, message = "") {
   elements.scenarioSelect.disabled = busy || elements.scenarioSelect.dataset.enabled !== "true";
   elements.historyRefresh.disabled = busy;
   elements.historyLoadMore.disabled = busy;
+  elements.reportPreview.disabled = busy || !state.activeRecordId;
+  elements.exportMarkdown.disabled = busy || !state.activeRecordId;
+  elements.exportJson.disabled = busy || !state.activeRecordId;
   for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy;
   elements.sendButton.textContent = busy ? "诊断中…" : "开始诊断";
   if (message) elements.interactionNote.textContent = message;
@@ -174,6 +185,16 @@ function resetConversation() {
   renderMetrics(null);
   renderTools([]);
   renderSources([]);
+  setReportRecord(null);
+}
+
+function setReportRecord(recordId) {
+  state.activeRecordId = recordId || null;
+  elements.reportActions.hidden = !state.activeRecordId;
+  elements.reportPreview.disabled = state.busy || !state.activeRecordId;
+  elements.exportMarkdown.disabled = state.busy || !state.activeRecordId;
+  elements.exportJson.disabled = state.busy || !state.activeRecordId;
+  if (!state.activeRecordId && elements.reportDialog.open) elements.reportDialog.close();
 }
 
 async function createSession({ announce = true } = {}) {
@@ -404,6 +425,7 @@ async function loadDiagnosisRecord(recordId) {
     renderMetrics(record.metrics);
     renderTools(record.tool_calls);
     renderSources(record.sources);
+    setReportRecord(record.record_id);
     elements.interactionNote.textContent = `正在查看 ${formatHistoryTime(record.created_at)} 的诊断记录；当前会话仍可继续使用。`;
   } catch (error) {
     elements.interactionNote.textContent = error.message;
@@ -433,6 +455,7 @@ async function submitChat(event) {
     renderMetrics(response.metrics);
     renderTools(response.tool_calls);
     renderSources(response.sources);
+    setReportRecord(response.record_id);
     await loadHistory();
     elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
   } catch (error) {
@@ -442,6 +465,104 @@ async function submitChat(event) {
   } finally {
     setBusy(false);
     elements.messageInput.focus();
+  }
+}
+
+function formatReportPreview(report) {
+  const diagnosis = report.diagnosis || {};
+  const metrics = report.metrics || {};
+  const usage = metrics.token_usage || {};
+  const lines = [
+    report.title || "TJU NetPilot 故障诊断报告",
+    "",
+    `报告 ID：${report.report_id}`,
+    `生成时间：${formatHistoryTime(report.generated_at)}`,
+    `主要问题：${ISSUE_LABELS[diagnosis.primary_issue] || diagnosis.primary_issue || "尚未确定"}`,
+    `置信度：${CONFIDENCE_LABELS[diagnosis.confidence] || diagnosis.confidence || "未知"}`,
+    "",
+    "用户问题",
+    String(report.question || ""),
+    "",
+    "诊断结论",
+    String(report.conclusion || ""),
+    "",
+    "执行指标",
+    `Token：${Number(usage.total_tokens || 0)}（输入 ${Number(usage.prompt_tokens || 0)} / 输出 ${Number(usage.completion_tokens || 0)}）`,
+    `LLM 耗时：${formatDuration(metrics.llm_duration_ms)}`,
+    `Tool 耗时：${formatDuration(metrics.tool_duration_ms)}`,
+    `Tool 调用：${Number(metrics.tool_calls || 0)} 次`,
+    "",
+    "检测证据",
+  ];
+  if (!report.tool_calls?.length) lines.push("- 本次诊断没有调用工具。");
+  for (const tool of report.tool_calls || []) {
+    const label = TOOL_LABELS[tool.tool_name] || tool.tool_name;
+    const status = STATUS_LABELS[tool.finding_status] || tool.finding_status;
+    lines.push(`- ${label}［${status}］：${tool.summary}`);
+  }
+  lines.push("", "建议操作");
+  const recommendations = diagnosis.recommendations || [];
+  lines.push(...(recommendations.length ? recommendations.map((item) => `- ${item}`) : ["- 无额外建议。"]));
+  lines.push("", "结论限制");
+  const limitations = diagnosis.limitations || [];
+  lines.push(...(limitations.length ? limitations.map((item) => `- ${item}`) : ["- 无额外限制。"]));
+  lines.push("", "参考知识");
+  const sources = report.sources || [];
+  lines.push(...(sources.length ? sources.map((source) => `- ${source.title}：${source.source}`) : ["- 本次报告没有使用知识库来源。"]));
+  return lines.join("\n");
+}
+
+async function previewReport() {
+  if (!state.activeRecordId || state.busy) return;
+  setBusy(true, "正在生成故障报告预览…");
+  try {
+    const recordId = encodeURIComponent(state.activeRecordId);
+    const report = await requestJSON(`/api/diagnoses/${recordId}/report`);
+    elements.reportContent.textContent = formatReportPreview(report);
+    elements.reportDialog.showModal();
+    elements.interactionNote.textContent = "报告已根据保存的诊断证据生成，未额外调用模型。";
+  } catch (error) {
+    elements.interactionNote.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function downloadReport(format) {
+  if (!state.activeRecordId || state.busy) return;
+  setBusy(true, `正在准备 ${format === "markdown" ? "Markdown" : "JSON"} 报告…`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
+  try {
+    const recordId = encodeURIComponent(state.activeRecordId);
+    const exportUrl = `/api/diagnoses/${recordId}/export?format=${format}`;
+    const response = await fetch(exportUrl, {
+      headers: { Accept: format === "markdown" ? "text/markdown" : "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      let detail = `报告导出失败（HTTP ${response.status}）`;
+      try {
+        const body = await response.json();
+        if (body?.detail) detail = body.detail;
+      } catch (_error) {
+        // Keep the bounded generic error when the server did not return JSON.
+      }
+      throw new Error(detail);
+    }
+    await response.body?.cancel();
+    const link = document.createElement("a");
+    link.href = exportUrl;
+    link.download = `netpilot-diagnosis-${state.activeRecordId}.${format === "markdown" ? "md" : "json"}`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    elements.interactionNote.textContent = `${format === "markdown" ? "Markdown" : "JSON"} 报告已开始下载。`;
+  } catch (error) {
+    elements.interactionNote.textContent = error.name === "AbortError" ? "报告导出超时，请稍后重试。" : error.message;
+  } finally {
+    window.clearTimeout(timeout);
+    setBusy(false);
   }
 }
 
@@ -517,6 +638,13 @@ elements.newSession.addEventListener("click", () => createSession());
 elements.scenarioSelect.addEventListener("change", switchScenario);
 elements.historyRefresh.addEventListener("click", () => loadHistory());
 elements.historyLoadMore.addEventListener("click", () => loadHistory({ append: true }));
+elements.reportPreview.addEventListener("click", previewReport);
+elements.exportMarkdown.addEventListener("click", () => downloadReport("markdown"));
+elements.exportJson.addEventListener("click", () => downloadReport("json"));
+elements.reportClose.addEventListener("click", () => elements.reportDialog.close());
+elements.reportDialog.addEventListener("click", (event) => {
+  if (event.target === elements.reportDialog) elements.reportDialog.close();
+});
 elements.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();

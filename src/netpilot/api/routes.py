@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from netpilot.agent import (
     SessionBusyError,
@@ -27,6 +27,7 @@ from netpilot.models import (
     ChatRequest,
     ChatResponse,
     DiagnosisHistoryResponse,
+    DiagnosisReportView,
     DiagnosisRecordView,
     HealthResponse,
     ScenarioListResponse,
@@ -35,6 +36,11 @@ from netpilot.models import (
     SessionResponse,
 )
 from netpilot.observability import log_event, reset_session_id, set_session_id
+from netpilot.reports import (
+    DiagnosisReportTooLargeError,
+    build_diagnosis_report,
+    export_diagnosis_report,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -191,19 +197,62 @@ def list_diagnoses(
     tags=["history"],
 )
 def get_diagnosis(record_id: UUID, request: Request) -> DiagnosisRecordView:
-    repository = _require_diagnoses(request)
+    return _get_diagnosis_record(request, record_id)
+
+
+@router.get(
+    "/diagnoses/{record_id}/report",
+    response_model=DiagnosisReportView,
+    tags=["reports"],
+)
+def get_diagnosis_report(
+    record_id: UUID,
+    request: Request,
+) -> DiagnosisReportView:
+    record = _get_diagnosis_record(request, record_id)
+    return build_diagnosis_report(record)
+
+
+@router.get(
+    "/diagnoses/{record_id}/export",
+    response_class=Response,
+    tags=["reports"],
+)
+def export_diagnosis(
+    record_id: UUID,
+    request: Request,
+    report_format: Literal["markdown", "json"] = Query(alias="format"),
+) -> Response:
+    record = _get_diagnosis_record(request, record_id)
+    report = build_diagnosis_report(record)
     try:
-        return repository.get(record_id)
-    except DiagnosisRecordNotFoundError as exc:
+        artifact = export_diagnosis_report(
+            report,
+            report_format,
+            max_bytes=request.app.state.settings.diagnosis_report_max_bytes,
+        )
+    except DiagnosisReportTooLargeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="诊断记录不存在。",
+            status_code=413,
+            detail="诊断报告超过允许的导出大小。",
         ) from exc
-    except DiagnosisStorageError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="诊断历史暂时不可用。",
-        ) from exc
+    log_event(
+        logger,
+        "diagnosis_report_export",
+        record_id=str(record_id),
+        report_format=report_format,
+        report_bytes=len(artifact.content),
+        success=True,
+    )
+    return Response(
+        content=artifact.content,
+        media_type=artifact.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact.filename}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/scenarios", response_model=ScenarioListResponse, tags=["demo"])
@@ -272,3 +321,22 @@ def _require_diagnoses(request: Request) -> DiagnosisRepository:
             detail="诊断历史未启用或暂时不可用。",
         )
     return repository
+
+
+def _get_diagnosis_record(
+    request: Request,
+    record_id: UUID,
+) -> DiagnosisRecordView:
+    repository = _require_diagnoses(request)
+    try:
+        return repository.get(record_id)
+    except DiagnosisRecordNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="诊断记录不存在。",
+        ) from exc
+    except DiagnosisStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="诊断历史暂时不可用。",
+        ) from exc

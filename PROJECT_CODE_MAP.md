@@ -17,7 +17,7 @@ TJU API 基础与结构化解析
   -> 生产安全、审计与后端抽象
 ```
 
-主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供会话、聊天、诊断历史、健康状态和开发场景 API 以及 `web/` 中文页面，并初始化 `TJUClient`、`ToolRegistry`、`AgentOrchestrator`、本地 FAISS Retriever、SQLiteDiagnosisRepository、内存 SessionStore 和统一 Mock/Local 只读网络 Tool 层；应用启动不发起模型下载，RAG 或历史不可用时安全降级。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。
+主要运行时是 Python 3.10+ 与学校提供的 TJU 比赛 API，模型标识为 `tju-llm`。正式产品位于 `src/netpilot/`，通过 FastAPI 同源提供会话、聊天、诊断历史、自动报告与导出、健康状态和开发场景 API 以及 `web/` 中文页面，并初始化 `TJUClient`、`ToolRegistry`、`AgentOrchestrator`、本地 FAISS Retriever、SQLiteDiagnosisRepository、内存 SessionStore 和统一 Mock/Local 只读网络 Tool 层；应用启动不发起模型下载，RAG 或历史不可用时安全降级。Lab 1～4 仍共用 `examples/tju_llm_client.py`；Lab 5～6 不直接调用 LLM。大多数示例默认使用模拟设备；真实设备示例使用 Netmiko。
 
 ## 2. 按需求快速定位
 
@@ -27,6 +27,7 @@ TJU API 基础与结构化解析
 | NetPilot API schema 或路由 | `src/netpilot/models/schemas.py`、`src/netpilot/api/routes.py` | `web/app.js`、API 测试、README |
 | NetPilot Session 与历史裁剪 | `src/netpilot/agent/session.py` | `src/netpilot/api/routes.py`、`tests/test_sessions.py`、`tests/test_chat_api.py` |
 | NetPilot 持久化诊断历史与指标 | `src/netpilot/history.py`、`src/netpilot/models/schemas.py` | `src/netpilot/api/routes.py`、`web/app.js`、`tests/test_diagnosis_history.py` |
+| NetPilot 自动报告与 Markdown/JSON 导出 | `src/netpilot/reports.py`、`src/netpilot/models/schemas.py` | `src/netpilot/api/routes.py`、`web/app.js`、`tests/test_diagnosis_reports.py` |
 | NetPilot 中文 Web 页面 | `web/index.html`、`web/app.js`、`web/style.css` | `src/netpilot/main.py` 的静态目录挂载、API schema |
 | NetPilot Tool contract、参数或结果 | `src/netpilot/tools/schemas.py`、`validation.py` | Provider、Service、三组 Tool 测试、README |
 | NetPilot Mock 故障场景 | `src/netpilot/tools/mock_network.py` | `src/netpilot/config.py` 的 `MockScenario`、`tests/test_mock_scenarios.py` |
@@ -189,11 +190,11 @@ Agent/调用方
 
 | 文件 | 作用与修改提示 |
 |---|---|
-| `src/netpilot/config.py` | 使用 Pydantic Settings 读取根 `.env`，校验 TJU、Agent、Tool、RAG、SQLite 历史和 App 配置；API Key 使用 `SecretStr` 且允许缺失启动。 |
+| `src/netpilot/config.py` | 使用 Pydantic Settings 读取根 `.env`，校验 TJU、Agent、Tool、RAG、SQLite 历史、报告大小和 App 配置；API Key 使用 `SecretStr` 且允许缺失启动。 |
 | `src/netpilot/main.py` | FastAPI 应用工厂和正式入口；创建 TJUClient、网络 Tool、可选 Retriever、SQLite 历史仓储、ToolRegistry 与 AgentOrchestrator，并设置组件就绪状态。 |
-| `src/netpilot/api/routes.py` | 提供 health、session、chat、只读诊断历史与受开发开关保护的 Mock 场景接口；历史写入失败时安全降级，不泄露异常细节或凭据。 |
+| `src/netpilot/api/routes.py` | 提供 health、session、chat、只读诊断历史、报告预览、Markdown/JSON 导出与受开发开关保护的 Mock 场景接口；历史写入失败时安全降级，不泄露异常细节或凭据。 |
 | `src/netpilot/api/presenters.py` | 把 AgentResult 转成稳定 Web API 视图；区分工具执行错误、正常证据、异常证据和知识参考。 |
-| `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；定义健康、会话、聊天、诊断、时间线、来源和场景请求/响应。 |
+| `src/netpilot/models/schemas.py` | 正式 API Pydantic schema；定义健康、会话、聊天、诊断、报告、时间线、来源和场景请求/响应。 |
 | `src/netpilot/llm/base.py` | Agent 依赖的 provider-neutral `LLMClient` Protocol，便于 Fake LLM 测试。 |
 | `src/netpilot/llm/schemas.py` | 普通消息、assistant tool calls、tool result 消息、token 用量与稳定 `ChatResult`，不暴露 SDK 响应对象。 |
 | `src/netpilot/llm/errors.py` | 未配置、请求、认证、限流、超时、连接、服务和异常响应的安全错误层。 |
@@ -207,6 +208,7 @@ Agent/调用方
 | `src/netpilot/agent/diagnosis.py` | 基于类型化证据的确定性诊断分类；区分异常、超时不确定、安全阻止与参考资料，并生成 Fake-IP 等可执行建议。 |
 | `src/netpilot/observability.py` | 请求/会话上下文、`X-Request-ID`、脱敏 JSON 事件和 HTTP 访问日志；不记录消息、参数或凭据。 |
 | `src/netpilot/history.py` | 版本化 SQLite 诊断快照仓储；包含 WAL、参数化 SQL、并发锁、游标分页、会话筛选、有界淘汰和安全错误层。 |
+| `src/netpilot/reports.py` | 从不可变诊断快照确定性构建故障报告，并生成有大小上限、Markdown 转义和安全来源链接的 Markdown/JSON 文件；不额外调用 LLM。 |
 | `src/netpilot/tools/schemas.py` | 六个工具的 Pydantic 输入/数据模型、稳定错误码与泛型 `ToolResult`；负面网络观察与工具执行错误分开表达。 |
 | `src/netpilot/tools/validation.py` | Host/Domain/URL 的集中校验以及 HTTP localhost、metadata、内网和非公网地址阻断。 |
 | `src/netpilot/tools/base.py` | Mock/Local 共用的 `NetworkProvider` 接口、耗时统计、参数失败与异常捕获边界。 |
@@ -374,6 +376,7 @@ Agent/调用方
 | `tests/test_tool_security.py` | 验证 Shell 注入、非法 Host/URL、SSRF、私网 DNS、恶意重定向、重定向上限、`shell=False` 和输出上限。 |
 | `tests/test_milestone7.py` | 验证 Fake-IP 可执行诊断、超时不误判、知识工具意图门控、结构化日志脱敏、请求 ID、Secret 与消息资源限制。 |
 | `tests/test_diagnosis_history.py` | 验证 SQLite 重启持久化、完整快照、Token/耗时、保留上限、游标分页、会话过滤、并发写入、历史 API、Secret 与故障降级。 |
+| `tests/test_diagnosis_reports.py` | 验证自动报告完整性与确定性、Markdown/JSON 内容、文件名/MIME/缓存安全、大小上限、非法格式、缺失记录、历史关闭和无额外 LLM 调用。 |
 
 ### 5.16 `bonus/lab-bun-chat/`：Bun Web Chat
 
