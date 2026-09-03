@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import copy_context
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from netpilot.agent import (
     SessionBusyError,
@@ -16,6 +18,7 @@ from netpilot.agent import (
     SessionStore,
 )
 from netpilot.api.presenters import present_chat
+from netpilot.api.sse import iter_chat_sse
 from netpilot.config import MockScenario, Settings, ToolMode
 from netpilot.llm import TJUClient
 from netpilot.history import (
@@ -167,6 +170,95 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     )
     reset_session_id(session_token)
     return response
+
+
+@router.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    tags=["chat"],
+)
+def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
+    """Run one Agent turn and emit a versioned JSON SSE event sequence."""
+
+    llm_client: TJUClient = request.app.state.llm_client
+    if not llm_client.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
+        )
+    sessions = _sessions(request)
+    try:
+        history = sessions.begin_turn(payload.session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或已失效，请新建会话。",
+        ) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="当前会话正在诊断，请等待本次请求完成。",
+        ) from exc
+
+    session_token = set_session_id(payload.session_id)
+    stream_context = copy_context()
+    reset_session_id(session_token)
+
+    def run_turn() -> ChatResponse:
+        try:
+            with request.app.state.runtime_lock:
+                result = request.app.state.agent.run(payload.message, history=history)
+            sessions.finish_turn(payload.session_id, payload.message, result.answer)
+            response = present_chat(payload.session_id, result)
+            repository = _diagnoses(request)
+            if repository is not None:
+                try:
+                    record = repository.save(payload.message, response)
+                    response = response.model_copy(update={"record_id": record.record_id})
+                except DiagnosisStorageError:
+                    log_event(
+                        logger,
+                        "diagnosis_history_write",
+                        level=logging.WARNING,
+                        success=False,
+                        error_type="diagnosis_storage_error",
+                    )
+            log_event(
+                logger,
+                "agent_turn_stream",
+                success=True,
+                llm_duration=round(result.llm_duration_ms, 2),
+                tool_rounds=result.tool_rounds,
+                status=str(getattr(result.status, "value", result.status)),
+            )
+            return response
+        except Exception as exc:
+            sessions.abort_turn(payload.session_id)
+            log_event(
+                logger,
+                "agent_turn_stream",
+                level=logging.WARNING,
+                success=False,
+                error_type=type(exc).__name__,
+            )
+            raise
+
+    settings: Settings = request.app.state.settings
+    return StreamingResponse(
+        iter_chat_sse(
+            payload.session_id,
+            run_turn,
+            chunk_chars=settings.sse_chunk_chars,
+            heartbeat_seconds=settings.sse_heartbeat_seconds,
+            context=stream_context,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get(

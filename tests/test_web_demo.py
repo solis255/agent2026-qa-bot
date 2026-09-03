@@ -51,6 +51,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
         "/api/health",
         "/api/session",
         "/api/chat",
+        "/api/chat/stream",
         "/api/scenarios",
         "/api/diagnoses",
         "/report",
@@ -71,6 +72,10 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "link.download" in javascript
     assert "ping_packet_loss_percent" in javascript
     assert "http_status_code" in javascript
+    assert "response.body.getReader()" in javascript
+    assert 'eventName === "delta"' in javascript
+    assert 'eventName === "complete"' in javascript
+    assert "TextDecoder" in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:

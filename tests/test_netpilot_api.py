@@ -115,7 +115,7 @@ def test_web_assets_are_served_by_fastapi() -> None:
     assert javascript.status_code == 200
     assert 'requestJSON("/api/health"' in javascript.text
     assert '"/api/session"' in javascript.text
-    assert '"/api/chat"' in javascript.text
+    assert '"/api/chat/stream"' in javascript.text
     assert stylesheet.status_code == 200
     assert ".workspace" in stylesheet.text
     assert favicon.status_code == 200

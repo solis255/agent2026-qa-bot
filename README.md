@@ -270,6 +270,30 @@ CUSTOM_SCENARIO_MAX_COUNT=20
 
 Definitions are intentionally process-local and disappear when the service restarts. Switching scenarios clears existing sessions; deleting the active custom scenario atomically restores the built-in `healthy` scenario and creates a fresh session. Local mode rejects all custom-scenario mutations. See [P1-C validation](docs/P1C_VALIDATION.md) for the request example and acceptance checks.
 
+### P1-D SSE Streaming Answers
+
+The browser now sends chat turns to `POST /api/chat/stream` and incrementally renders UTF-8 answer chunks from a versioned Server-Sent Events protocol. `POST /api/chat` remains available for existing non-streaming clients.
+
+The stream uses JSON-only events in this order:
+
+```text
+start → zero or more keep-alive comments → delta... → complete
+                                                └──→ error
+```
+
+`start` is emitted as soon as the turn worker starts. The existing bounded Agent and Tool loop then produces one authoritative result; `delta` events transport its answer in order, and `complete` carries the full `ChatResponse`, including metrics, Tool Timeline, sources, confidence, and optional history `record_id`. This transport-level design preserves exact token accounting and never performs a second LLM request. It does not claim upstream model-token streaming: answer deltas begin after the bounded Agent/Tool result is complete.
+
+SSE responses disable proxy buffering and transformation, emit periodic heartbeats, encode all untrusted text inside JSON, and return a safe `error` event after response headers have been sent. Session acquisition and validation still happen before streaming, so unknown, busy, and unconfigured requests retain normal HTTP `404`, `409`, and `503` responses. If a client disconnects, the worker continues to finalization so the session cannot remain permanently busy.
+
+Defaults can be changed in `.env`:
+
+```text
+SSE_CHUNK_CHARS=32
+SSE_HEARTBEAT_SECONDS=15
+```
+
+See [P1-D validation](docs/P1D_VALIDATION.md) for the event contract and acceptance checks.
+
 ## Run the Labs
 
 Run commands from the repo root unless a lab README says otherwise.

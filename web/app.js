@@ -153,6 +153,83 @@ async function requestJSON(url, options = {}, timeoutMs = 15000) {
   }
 }
 
+async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let completed = false;
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      let detail = `流式请求失败（HTTP ${response.status}）`;
+      try {
+        const body = await response.json();
+        if (body?.detail) detail = body.detail;
+      } catch (_error) {
+        // Keep the bounded generic message when the server response is not JSON.
+      }
+      throw new Error(detail);
+    }
+    if (!response.headers.get("content-type")?.startsWith("text/event-stream")) {
+      throw new Error("服务端没有返回有效的 SSE 响应。");
+    }
+    if (!response.body) throw new Error("当前浏览器无法读取流式响应。");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    const dispatchBlock = async (block) => {
+      if (!block || block.startsWith(":")) return;
+      let eventName = "message";
+      const dataLines = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      if (!dataLines.length) return;
+      let data;
+      try {
+        data = JSON.parse(dataLines.join("\n"));
+      } catch (_error) {
+        throw new Error("服务端返回了无法解析的流式事件。");
+      }
+      if (eventName === "error") {
+        throw new Error(data?.message || "流式诊断失败，请稍后重试。");
+      }
+      await onEvent(eventName, data);
+      if (eventName === "complete") completed = true;
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      buffer = buffer.replace(/\r\n/g, "\n");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        await dispatchBlock(block);
+        boundary = buffer.indexOf("\n\n");
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) await dispatchBlock(buffer.trim());
+    if (!completed) throw new Error("流式响应在完成事件前中断，请稍后重试。");
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("流式诊断超时，请稍后重试。");
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function renderHealth(health) {
   state.health = health;
   elements.serviceState.classList.remove("offline");
@@ -196,6 +273,7 @@ function appendMessage(role, text) {
   article.append(avatar, content);
   elements.conversation.append(article);
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
+  return paragraph;
 }
 
 function resetConversation() {
@@ -462,18 +540,30 @@ async function submitChat(event) {
   const message = elements.messageInput.value.trim();
   if (!message || !state.sessionId || state.busy) return;
   appendMessage("user", message);
+  const streamedAnswer = appendMessage("assistant", "");
   elements.messageInput.value = "";
-  setBusy(true, "Agent 正在收集证据，请勿重复提交…");
+  setBusy(true, "已连接流式诊断，Agent 正在收集证据…");
   try {
-    const response = await requestJSON(
-      "/api/chat",
+    let response = null;
+    await requestSSE(
+      "/api/chat/stream",
       {
         method: "POST",
         body: JSON.stringify({ session_id: state.sessionId, message }),
       },
-      120000,
+      async (eventName, data) => {
+        if (eventName === "start") {
+          elements.interactionNote.textContent = "流式连接已建立，正在执行诊断。";
+        } else if (eventName === "delta") {
+          streamedAnswer.textContent += String(data.text || "");
+          elements.conversation.scrollTop = elements.conversation.scrollHeight;
+        } else if (eventName === "complete") {
+          response = data.response;
+        }
+      },
     );
-    appendMessage("assistant", response.answer);
+    if (!response) throw new Error("流式响应缺少完整诊断结果。");
+    streamedAnswer.textContent = response.answer;
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     renderTools(response.tool_calls);
@@ -482,6 +572,7 @@ async function submitChat(event) {
     await loadHistory();
     elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
   } catch (error) {
+    if (!streamedAnswer.textContent) streamedAnswer.textContent = "本次回答未能完成。";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;
     if (error.message.includes("会话不存在")) state.sessionId = null;
