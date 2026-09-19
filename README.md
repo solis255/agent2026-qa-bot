@@ -1,532 +1,244 @@
-# Building AI Agents for Network Operations
+# TJU NetPilot
+
+> 天津大学校园网络智能诊断与服务 Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![TJU API](https://img.shields.io/badge/LLM-TJU_API-brightgreen.svg)](https://agent2026.tju.edu.cn/)
+[![Model: tju-llm](https://img.shields.io/badge/model-tju--llm-brightgreen.svg)](https://ai.tju.edu.cn/)
 
-Hands-on labs for building AI-powered network operations tools: LLM prompts, prompt engineering, chatbots with memory, agentic tool calling, MCP tools, and production-readiness patterns.
+TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只给出通用建议的 Chatbot：面对实时网络问题时，Agent 会按需调用受控、只读的网络 Tool 获取证据，再给出带结论、置信度、建议和限制的诊断；面对 VPN、eduroam 等知识问题时，可从带来源标记的本地知识库检索参考资料。
 
-Labs 1–4 use the school's OpenAI-compatible TJU competition API. Labs 5–6 do not call an LLM directly. Most labs use included mock network devices, so no live network is required.
+正式产品代码位于 [`src/netpilot/`](src/netpilot/)。仓库中的 `labs/`、`lab/`、`examples/`、`bonus/` 等目录是保留的上游教学资源，不参与 TJU NetPilot 的正式运行时，详见[上游来源与教学资源](docs/upstream.md)。
 
+## 产品能力
 
-## Book chapter and lab map
-
-The following table shows where each chapter connects to the repository files. Some chapters are conceptual, while others use hands-on lab folders or reusable templates.
-
-| Chapter | Main repository files |
+| 能力 | 当前实现 |
 |---|---|
-| Chapter 1: Understanding AI Agents for Network Operations | Conceptual chapter; no lab required |
-| Chapter 2: LLM Fundamentals and Local Setup | `QUICKSTART.md`, `examples/temperature.py`, `labs/lab1-ollama/` |
-| Chapter 3: Prompt Engineering for Network Automation | `labs/lab2-prompts/`, `prompts/` |
-| Chapter 4: Parsing Network Outputs into Structured Data | `labs/lab1-ollama/challenge_*.py`, `examples/interface_output.json`, `examples/bgp_output.json` |
-| Chapter 5: Building a Network Chatbot with Memory | `labs/lab3-chatbot/` |
-| Chapter 6: Designing Tools and Agentic Workflows | `labs/lab4-agentic/agentic_network_bot_ollama.py`, `examples/mock_network_devices.py` |
-| Chapter 7: Building the Main Network Troubleshooting Agent | `labs/lab4-agentic/agentic_network_bot_ollama.py`, `examples/mock_network_devices.py` |
-| Chapter 8: From Lab Agents to Reusable Tools with MCP | `labs/lab5-mcp/` |
-| Chapter 9: Moving Toward Production-Ready Network Agents | `labs/lab6-production-readiness/` |
-| Appendix A: AI Network Agent Design Toolkit | `docs/design-toolkit/` |
+| 模型 | `tju-llm`，通过 OpenAI-compatible Chat Completions 接口进行原生 Function Calling |
+| Agent | 单 Agent、有界 Tool loop、支持一轮多个 Tool Call、按 `tool_call_id` 回填结果 |
+| 网络检测 | 六个 allowlisted、只读 Tool；严格参数校验与统一结构化证据 |
+| Provider | 确定性离线 `MockNetworkProvider`；检测运行 NetPilot 主机的 `LocalNetworkProvider` |
+| RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
+| Web/API | 中文 Web、会话、结构化 Tool Timeline、来源、健康检查、Mock 场景控制 |
+| 历史与报告 | SQLite 诊断快照、游标分页、确定性报告、Markdown/JSON 导出 |
+| 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
+| 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
-Ready-to-copy versions of the Appendix A worksheets and templates are available in `docs/design-toolkit/`.
+### 普通 Chatbot 与 TJU NetPilot
 
-## Quick Start
+| 对比项 | 普通 Chatbot | TJU NetPilot |
+|---|---|---|
+| 实时网络状态 | 只能依据用户描述推测 | 先通过只读 Tool 取证，再依据结构化结果判断 |
+| 工具边界 | 可能没有明确执行边界 | LLM 只能调用 `ToolRegistry` 中的 allowlisted tools |
+| 诊断过程 | 通常只有自然语言答案 | 展示 Tool 参数、轮次、耗时、结果和证据状态 |
+| 知识来源 | 可能不展示来源 | RAG 结果保留标题、URL、类型、文件、chunk 和相关度 |
+| 可复现性 | 依赖现场网络与模型措辞 | Mock 场景可离线、确定性复现；Local 用于本机实测 |
+| 留痕 | 通常只保留聊天文本 | 可持久化结构化诊断快照并导出报告 |
 
-### Prerequisites
+### 六个网络 Tool
+
+| Tool | 用途 | 关键结果 |
+|---|---|---|
+| `get_network_info` | 检查运行 NetPilot 主机的网卡、IPv4、默认网关和 DNS | 本地接入配置 |
+| `ping_host` | 有界 ICMP 探测 | 可达性、丢包、平均时延 |
+| `dns_lookup` | 有界域名解析 | 是否解析、地址列表 |
+| `tcp_check` | 检查指定 TCP 端口 | 是否连接、失败原因 |
+| `http_check` | 只读检查公开 HTTP(S) URL | 请求是否发送、状态码、重定向与解析地址 |
+| `traceroute` | 有界路由追踪 | 跳点与是否到达目标 |
+
+当本地 RAG 索引就绪时，`ToolRegistry` 还会注册可选的 `knowledge_search`。它是知识检索 Tool，不属于上述六个网络检测 Tool。
+
+`success=true` 表示 Tool 成功产生了诊断证据，并不表示网络一定健康。例如 `reachable=false` 是一次执行成功的异常观察；超时、执行错误与安全阻止会被单独分类。
+
+## 比赛 Demo
+
+以下 Demo 建议使用 `TOOL_MODE=mock` 与 `SCENARIO_SWITCH_ENABLED=true`，以获得稳定、可复现的结构化结果。模型措辞可能变化，验收以 Tool Timeline、诊断分类和来源字段为准。
+
+### Demo 1：DNS 故障
+
+切换到 `dns_failure`，输入：
+
+> 我可以访问公网 IP，但打不开 github.com。请至少使用 ping_host 检查 1.1.1.1，并使用 dns_lookup 检查 github.com，最后根据证据简洁给出诊断。
+
+预期：Ping 为正常证据，DNS 为异常证据，结论优先指向 DNS 解析阶段，而不是把 `resolved=false` 误报成 Tool 执行失败。
+
+### Demo 2：SSH 端口受阻
+
+切换到 `tcp_ssh_blocked`，输入：
+
+> 网页可以打开，但 SSH 连接 ssh.example.com 的 22 端口失败。请使用 tcp_check 检查该主机的 22 端口，并依据结果判断。
+
+预期：`tcp_check` 返回 `connected=false` 与安全失败原因；结论定位到 TCP 22/SSH，不扩大为整个网络中断。
+
+### Demo 3：VPN / RAG
+
+确认 `/api/health` 的 `rag_ready=true`，输入：
+
+> 天津大学 VPN 怎么使用？请先调用 knowledge_search，只依据知识库回答，并标出资料类型、标题和原始 URL。
+
+预期：时间线显示知识参考，来源区展示 `community`、标题、相关度与原始 URL；回答明确社区资料不等于学校当前官方规定。
+
+更多统一验收场景见[比赛测试用例矩阵](docs/test-cases.md)。截图目录目前只提供[真实截图采集清单](screenshots/README.md)，未提交伪造占位图。
+
+## 架构
+
+```text
+Browser / API Client
+        |
+        v
+ FastAPI routes + Web static files
+        |
+        +--> SessionStore (有界内存对话上下文)
+        |
+        v
+ AgentOrchestrator <----> TJUClient <----> tju-llm
+        |
+        v
+ ToolRegistry (allowlist + strict schemas)
+        |
+        +--> NetworkToolService --> MockNetworkProvider
+        |                      \--> LocalNetworkProvider（仅本机）
+        |
+        \--> knowledge_search --> FaissRetriever --> 本地知识索引
+        |
+        v
+ Diagnosis / Evidence --> ChatResponse --> SQLite history --> Report export
+```
+
+`AgentOrchestrator` 将对话和 allowlisted function schemas 发送给 `tju-llm`。模型返回原生 `tool_calls` 后，服务端按名称查找、校验参数并执行 Tool，再把每个结构化结果按对应的 `tool_call_id` 作为 `tool` 消息回填。循环由 `MAX_TOOL_ROUNDS` 限制，并会避免重复执行相同目标。
+
+完整类名、请求流、错误边界与扩展点见[架构说明](docs/architecture.md)，设计取舍见[设计文档](DESIGN.md)。
+
+## 运行
+
+### 环境要求
 
 - Python 3.10+
 - Git
-- TJU competition API Key and exclusive base address
-- Optional for live network labs: Docker, Containerlab, Arista cEOS image
+- 比赛平台分配的 TJU API Key 与专属 base URL
+- 可选：构建 RAG 索引时需要首次下载 Embedding 模型
 
-### Setup
+### Quick Start
 
 ```bash
-git clone https://github.com/PacktPublishing/Building-AI-Agents-for-Network-Operations.git
-cd Building-AI-Agents-for-Network-Operations
+git clone https://github.com/solis255/agent2026-qa-bot.git
+cd agent2026-qa-bot
 
-python3 -m venv .venv
+python -m venv .venv
+```
+
+Linux/macOS：
+
+```bash
 source .venv/bin/activate
-
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 python -m pip install -e .
-
 cp .env.example .env
-# Edit .env and fill TJU_API_KEY plus the competition platform's exclusive TJU_API_BASE.
-python examples/test_setup.py
-python scripts/test_tju_api.py
 ```
 
-The configured model name is `tju-llm`. The old `lab1-ollama` directory and `agentic_network_bot_ollama.py` filename remain only to preserve existing course links; their implementations now call the TJU API. Windows users should follow [QUICKSTART.md](QUICKSTART.md).
-
-Keep the virtual environment active while running the labs. If you open a new terminal, run:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows PowerShell users should activate the repository environment explicitly:
+Windows PowerShell：
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+Copy-Item .env.example .env
 ```
 
-This avoids accidentally running the project with another system or Anaconda Python installation.
-
-## TJU NetPilot Application
-
-`src/netpilot/` is the formal product entry point for TJU NetPilot. It is separate from the preserved teaching labs and provides the validated application shell, Chinese Web demo, bounded server-side sessions, structured evidence diagnosis, the read-only network Tool layer, the production TJU client, native Function Calling, local RAG, and Milestone 7 safety/observability controls.
-
-Start the application from the repository root:
-
-```bash
-python -m uvicorn netpilot.main:app --reload
-```
-
-Then open <http://127.0.0.1:8000/>. Service readiness is available at <http://127.0.0.1:8000/api/health>:
-
-```json
-{
-  "status": "ok",
-  "llm_configured": true,
-  "tool_mode": "mock",
-  "rag_ready": true,
-  "history_ready": true
-}
-```
-
-The application deliberately starts when `TJU_API_KEY` is absent and reports `llm_configured: false`. Creating the configured `TJUClient` does not send a network request; the isolated live check below performs the first call. `rag_ready` is true only when RAG is enabled, all index files are valid, the configured model matches the index manifest, and the embedding model is available in the local cache. Missing RAG artifacts never prevent the application or the six network tools from starting. No health response exposes credentials.
-
-### Network Tool Providers
-
-NetPilot creates one provider from `TOOL_MODE` when the FastAPI application starts. Provider construction performs no network request.
-
-- `TOOL_MODE=mock` is deterministic and fully offline. It supports `healthy`, `dns_failure`, `gateway_unreachable`, `tcp_ssh_blocked`, `http_failure`, and `partial_connectivity`.
-- `TOOL_MODE=local` runs bounded, read-only checks against the machine hosting NetPilot. It supports Windows, Linux, and macOS with graceful degradation when a system traceroute command is unavailable.
-
-Both providers expose the same six network tools:
+在私有 `.env` 中填写：
 
 ```text
-get_network_info
-ping_host
-dns_lookup
-tcp_check
-http_check
-traceroute
+TJU_API_KEY=你的比赛 API Key
+TJU_API_BASE=比赛平台分配的专属 SDK base URL
+TJU_MODEL=tju-llm
 ```
 
-When the local knowledge index is ready, `ToolRegistry` additionally exposes `knowledge_search`.
+不要把 `/chat/completions` 附加到 `TJU_API_BASE`；SDK 会自动补充该路径。`.env` 已被 Git 忽略，禁止提交或通过浏览器传递 API Key。
 
-Every call returns a structured `ToolResult` containing `success`, `tool`, `summary`, `data`, `error`, and `duration_ms`. `success` means that the tool produced diagnostic evidence; a valid negative observation such as `reachable=false` remains successful evidence. Invalid input, unavailable executables, and unexpected execution failures return `success=false` with a stable error code.
-
-The HTTP tool accepts only HTTP(S), validates each redirect, blocks localhost, metadata, internal, private, loopback, and link-local targets, limits redirects and response headers, and streams only response metadata instead of downloading content. System tools always use fixed argument lists, `shell=False`, output caps, and timeouts.
-
-Milestone 2 tests are fully offline by default:
+启动正式应用：
 
 ```bash
-python -m pytest tests/test_tools.py -q
-python -m pytest tests/test_mock_scenarios.py -q
-python -m pytest tests/test_tool_security.py -q
-python -m pytest -q
+python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Milestone 4 Agent Tool Calling
+打开 <http://127.0.0.1:8000/>，健康检查位于 <http://127.0.0.1:8000/api/health>。没有 `TJU_API_KEY` 时应用仍会启动并返回 `llm_configured=false`，但聊天接口不可用；Tool Provider 构造阶段不会发出网络请求。
 
-`AgentOrchestrator` sends the conversation and six allowlisted function schemas to `tju-llm`, executes every returned native `tool_call`, correlates each structured tool result by `tool_call_id`, and asks the model for the evidence-based answer. `ToolRegistry` validates model-generated JSON with strict Pydantic input models and never exposes the internal Mock scenario switch or arbitrary command execution.
-
-The loop accepts multiple tool calls in one model response, preserves the complete assistant/tool message sequence, reports model errors safely, and stops before a seventh tool-execution round by default. The limit can be changed with `MAX_TOOL_ROUNDS`.
-
-Run the fully offline Milestone 4 acceptance suite:
-
-```bash
-python -m pytest tests/test_tool_registry.py -q
-python -m pytest tests/test_agent_orchestrator.py -q
-python -m pytest tests/test_agent_dns_scenario.py -q
-```
-
-With a configured `TJU_API_KEY`, run the real-model acceptance check. The model call is online, while all network evidence comes from the deterministic `dns_failure` Mock provider:
-
-```bash
-python scripts/test_netpilot_agent.py
-```
-
-### Milestone 5 Local RAG
-
-The knowledge pipeline loads attributed UTF-8 Markdown/TXT files from `knowledge/raw/`, validates their front matter, creates deterministic source-preserving chunks, embeds them with configurable `BAAI/bge-small-zh-v1.5`, and stores cosine-search vectors in FAISS. Every result retains `title`, `source`, `source_type`, `file`, `chunk_id`, and `score`.
-
-The included seed documents are concise test summaries of the [TJU Wiki campus network page](https://wiki.tjubot.cn/e-life/network), its [VPN page](https://wiki.tjubot.cn/e-life/vpn), and its [eduroam page](https://wiki.tjubot.cn/e-life/eduroam). They are explicitly marked as community material, not current Tianjin University official policy. Replace or supplement them with reviewed official documents before production use.
-
-Build the local index (the first run downloads the configured embedding model):
-
-```bash
-python scripts/build_knowledge_index.py
-```
-
-Subsequent offline rebuilds can require the existing cache:
-
-```bash
-python scripts/build_knowledge_index.py --offline
-```
-
-Run the offline RAG suite and the isolated real-model acceptance check:
-
-```bash
-python -m pytest tests/test_rag_loader.py tests/test_rag_index.py tests/test_agent_rag_scenario.py -q
-python scripts/test_netpilot_rag.py
-```
-
-The Agent treats retrieved text as untrusted reference material, distinguishes community and official sources, cites original URLs, and states that the knowledge base has insufficient evidence when no result clears `RAG_MIN_SCORE`. Generated model files and indexes are local artifacts and are not committed.
-
-### Milestone 6 Web Demo
-
-The same-origin browser demo creates server-side sessions, sends chat turns to the Agent, and renders the final answer separately from the structured Tool Call timeline and attributed RAG sources. Session history is bounded by `MAX_HISTORY_MESSAGES`; creating a new session clears the visible diagnosis without storing messages or credentials in browser storage.
-
-For a controlled Mock demonstration, explicitly enable scenario switching before startup. It is disabled by default and is unavailable in Local mode:
+### Mock 比赛演示
 
 ```powershell
+$env:TOOL_MODE="mock"
 $env:SCENARIO_SWITCH_ENABLED="true"
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001/>. The page supports chat, follow-up questions, new sessions, all six Mock scenarios, diagnostic status, expandable typed evidence, and clickable source URLs. The stable JSON endpoints are `POST /api/session`, `POST /api/chat`, `GET /api/health`, `GET /api/scenarios`, and development-only `POST /api/scenarios/{name}`.
+内置场景：`healthy`、`dns_failure`、`gateway_unreachable`、`tcp_ssh_blocked`、`http_failure`、`partial_connectivity`。Mock Provider 不执行系统命令、Socket 或 HTTP 请求。
 
-Run the Milestone 6 offline tests and use the prepared manual cases:
+### Local 本机检测
 
-```powershell
-python -m pytest tests\test_sessions.py tests\test_chat_api.py tests\test_scenario_api.py tests\test_web_demo.py -q
-```
+将 `TOOL_MODE=local` 后启动同一应用。Local Provider 只检测运行 TJU NetPilot 的主机及该主机到用户指定目标的连通性；它不登录校园网络设备，不访问天津大学内部运维平台，也不能修改任何网络配置。系统缺少 traceroute 等能力时会安全降级并返回结构化不确定结果。
 
-See [Milestone 6 manual test cases](docs/MILESTONE6_MANUAL_TEST_CASES.md). If Windows rejects port 8000 with `WinError 10013`, keep port 8001 as shown above or choose another unreserved local port.
-
-### Milestone 7 Safety and Testing
-
-Milestone 7 distinguishes real negative observations from tool errors, inconclusive timeouts, and requests blocked before execution. Local HTTP evidence records whether a request was sent and which addresses were resolved. A domain in the proxy-reserved `198.18.0.0/15` range now produces specific Fake-IP/TUN/DNS recovery steps instead of being reported as a generic website failure. `knowledge_search` is offered only for explicit campus information intent, so generic public-connectivity diagnosis does not collect unrelated references.
-
-The service enforces strict Pydantic inputs, SSRF and redirect checks, bounded command/HTTP output, per-tool timeouts, `MAX_TOOL_ROUNDS`, `MAX_HISTORY_MESSAGES`, and `MAX_SESSIONS`. JSON logs correlate requests, sessions, tools, LLM duration, HTTP status, and safe error types; API keys, authorization headers, messages, and tool arguments are not logged. Every response includes an `X-Request-ID` header.
-
-Run the complete offline acceptance suite from the project environment:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-See [Milestone 7 validation](docs/MILESTONE7_VALIDATION.md) for the automated coverage and Local/Mock manual checks.
-
-### P1-A Diagnosis History and Metrics
-
-Every completed chat now returns a `record_id` and a `metrics` object containing prompt/completion/total token counts, total LLM duration, total Tool duration, and Tool call count. When diagnosis history is ready, the complete structured snapshot is stored in a bounded local SQLite database and remains available after an application restart.
-
-The browser displays current metrics plus a paginated history list. Selecting a record restores its question, answer, diagnosis, Tool Timeline, metrics, and knowledge sources without changing the active chat session. The corresponding read-only endpoints are `GET /api/diagnoses` and `GET /api/diagnoses/{record_id}`.
-
-No separate database server or Python package is required. Python's bundled SQLite is used with WAL, a busy timeout, parameterized SQL, a schema version, cursor pagination, and bounded retention. Defaults can be changed in `.env`:
-
-```text
-DIAGNOSIS_HISTORY_ENABLED=true
-DIAGNOSIS_DB_PATH=data/netpilot.db
-DIAGNOSIS_MAX_RECORDS=1000
-```
-
-The database and its WAL files are ignored by Git. Stored records contain the submitted question and structured diagnostic evidence, so production deployments should choose an appropriate path, access policy, retention limit, and backup policy. If initialization or a later write fails, chat continues and `/api/health` reports `history_ready=false` when the repository is unavailable.
-
-See [P1-A validation](docs/P1A_VALIDATION.md) for automated and browser acceptance checks.
-
-### P1-B Automatic Reports and Markdown/JSON Export
-
-Every saved diagnosis can now be converted into a deterministic fault report without a second LLM request. The report preserves the original question and conclusion together with diagnosis classification, confidence, recommendations, limitations, execution metrics, Tool evidence, and knowledge sources. Repeated generation from the same immutable record produces the same report identifier and export content.
-
-The browser exposes report preview, Markdown download, and JSON download after a diagnosis completes or a history record is opened. The corresponding read-only endpoints are:
-
-```text
-GET /api/diagnoses/{record_id}/report
-GET /api/diagnoses/{record_id}/export?format=markdown
-GET /api/diagnoses/{record_id}/export?format=json
-```
-
-Exports use deterministic ASCII filenames, disable shared caching, request MIME sniffing protection, escape untrusted Markdown text, and reject unsupported formats or artifacts above the configured bound. The default limit can be changed in `.env`:
-
-```text
-DIAGNOSIS_REPORT_MAX_BYTES=1000000
-```
-
-P1-B reuses the P1-A SQLite snapshot and therefore needs no additional database or service. See [P1-B validation](docs/P1B_VALIDATION.md) for automated and browser acceptance checks.
-
-### P1-C Custom Mock Test Scenarios
-
-When `TOOL_MODE=mock` and `SCENARIO_SWITCH_ENABLED=true`, operators can create bounded custom test scenarios from the browser or API. A scenario independently controls the simulated outcomes for network configuration, Ping and packet loss, DNS, TCP, HTTP and status code, and traceroute. Creating a scenario does not execute user input, shell commands, subprocesses, sockets, or HTTP requests.
-
-Custom scenarios can be listed, switched, and deleted through the existing scenario selector and these APIs:
-
-```text
-POST   /api/scenarios/custom
-GET    /api/scenarios
-POST   /api/scenarios/{name}
-DELETE /api/scenarios/custom/{name}
-```
-
-Names and text lengths are strictly validated, request models reject extra fields, built-in scenarios cannot be replaced or deleted, and the registry has a configurable bound:
-
-```text
-CUSTOM_SCENARIO_MAX_COUNT=20
-```
-
-Definitions are intentionally process-local and disappear when the service restarts. Switching scenarios clears existing sessions; deleting the active custom scenario atomically restores the built-in `healthy` scenario and creates a fresh session. Local mode rejects all custom-scenario mutations. See [P1-C validation](docs/P1C_VALIDATION.md) for the request example and acceptance checks.
-
-### P1-D SSE Streaming Answers
-
-The browser now sends chat turns to `POST /api/chat/stream` and incrementally renders UTF-8 answer chunks from a versioned Server-Sent Events protocol. `POST /api/chat` remains available for existing non-streaming clients.
-
-The stream uses JSON-only events in this order:
-
-```text
-start → zero or more keep-alive comments → delta... → complete
-                                                └──→ error
-```
-
-`start` is emitted as soon as the turn worker starts. The existing bounded Agent and Tool loop then produces one authoritative result; `delta` events transport its answer in order, and `complete` carries the full `ChatResponse`, including metrics, Tool Timeline, sources, confidence, and optional history `record_id`. This transport-level design preserves exact token accounting and never performs a second LLM request. It does not claim upstream model-token streaming: answer deltas begin after the bounded Agent/Tool result is complete.
-
-SSE responses disable proxy buffering and transformation, emit periodic heartbeats, encode all untrusted text inside JSON, and return a safe `error` event after response headers have been sent. Session acquisition and validation still happen before streaming, so unknown, busy, and unconfigured requests retain normal HTTP `404`, `409`, and `503` responses. If a client disconnects, the worker continues to finalization so the session cannot remain permanently busy.
-
-Defaults can be changed in `.env`:
-
-```text
-SSE_CHUNK_CHARS=32
-SSE_HEARTBEAT_SECONDS=15
-```
-
-See [P1-D validation](docs/P1D_VALIDATION.md) for the event contract and acceptance checks.
-
-## Run the Labs
-
-Run commands from the repo root unless a lab README says otherwise.
+### RAG 索引
 
 ```bash
-# Lab 1: TJU API basics and structured output
-python labs/lab1-ollama/simple_ollama_test.py
-python labs/lab1-ollama/json_output_challenge.py
-
-# Lab 2: Prompt engineering with the RACE framework
-python labs/lab2-prompts/prompt_engineering_race.py
-python labs/lab2-prompts/netmiko_config_parser.py
-
-# Lab 3: Chatbot patterns
-python labs/lab3-chatbot/chatbot_v1_stateless.py
-python labs/lab3-chatbot/chatbot_v2_with_memory.py
-
-# Lab 4: Agentic network bot
-python labs/lab4-agentic/agentic_network_bot_ollama.py
-
-# Lab 5: MCP server and client examples
-# First, test the tool layer
-python labs/lab5-mcp/client_test.py
-
-# Terminal 1: start the MCP server in SSE mode
-python labs/lab5-mcp/mcp_server.py --sse
-
-# Terminal 2: start the HTTP bridge
-python labs/lab5-mcp/http_bridge.py
-
-# Browser: open the UI
-open labs/lab5-mcp/ui.html
-
-# Lab 6: Production-readiness patterns
-python labs/lab6-production-readiness/production_agent_skeleton.py
+python scripts/build_knowledge_index.py
+# 已有模型缓存时可离线重建
+python scripts/build_knowledge_index.py --offline
 ```
 
-## Lab Structure
+流水线从 `knowledge/raw/` 读取带 YAML front matter 的 UTF-8 Markdown/TXT，确定性分块，使用配置的 Embedding 模型生成向量并写入 FAISS。当前仓库内置的校园网、VPN、eduroam 摘要均来自 TJUBOT Wiki，并明确标记为 `community`；当前没有把这些材料宣称为天津大学官方资料。Schema 支持 `official`、`community`、`maintainer`，新增正式资料时必须据实标记并保留原始 URL。检索文本始终作为 untrusted reference data，不能覆盖系统指令或触发任意 Tool。
 
-### Lab 1: TJU API and Network Prompts
+索引缺失、损坏、模型不匹配或本地模型缓存不可用时，`rag_ready=false`，`knowledge_search` 不注册；网络诊断与应用启动继续可用。
 
-- Call the configured competition model from Python
-- Control generation parameters
-- Parse JSON output
-- Practice error handling and model comparison
+### API 与 SSE
 
-### Lab 2: Prompt Engineering
-
-- Apply the RACE framework
-- Build network analysis prompts
-- Parse network configuration examples
-- Reuse prompt templates from `labs/lab2-prompts/PROMPT_TEMPLATES.md`
-
-### Lab 3: Network Chatbot
-
-- Compare stateless and stateful chatbot behavior
-- Add conversation memory
-- Manage context for network troubleshooting
-- Optional live SSH chatbot example
-
-### Lab 4: Agentic Network Bot
-
-- Define network inspection tools
-- Let the agent call tools for device status, BGP, interfaces, topology, and safe show commands
-- Troubleshoot the included mock spine-leaf network
-- Optional Netmiko-backed live SSH version
-
-### Lab 5: MCP
-
-- Expose network tools through an MCP server
-- Test the MCP client flow
-- Use the simple HTTP bridge and browser UI examples
-
-### Lab 6: Production Readiness
-
-- Add safer tool boundaries
-- Use production-oriented agent skeletons
-- Review operational checklist items before real deployment
-
-## Mock Network Topology
-
-The mock network data lives in `examples/mock_network_devices.py`.
+主要接口：
 
 ```text
-spine1 (192.168.0.11) --+-- leaf1 (192.168.0.21)
-                        +-- leaf2 (192.168.0.22)
-spine2 (192.168.0.12) --+
+GET  /api/health
+POST /api/session
+POST /api/chat
+POST /api/chat/stream
+GET  /api/diagnoses
+GET  /api/diagnoses/{record_id}
+GET  /api/diagnoses/{record_id}/report
+GET  /api/diagnoses/{record_id}/export?format=markdown|json
+GET  /api/scenarios
 ```
 
-Built-in scenarios:
+`POST /api/chat/stream` 当前是 transport-level SSE：后台先完成一次权威的、非流式 `tju-llm` + Tool loop，再把最终答案按字符块发出 `delta`，最后发送完整 `ChatResponse`。它不是模型 token streaming，也不会为流式显示发起第二次模型请求。
 
-- `spine1`, `spine2`, and `leaf1` have all BGP peers established.
-- `leaf2` has one BGP neighbor in `Idle`.
-- `leaf2` has `Ethernet3` down.
+### 测试
 
-These scenarios are used by the chatbot and agent labs to demonstrate autonomous troubleshooting.
+在已激活的项目虚拟环境中运行：
 
-## Optional Live Network Lab
+```bash
+python -m pytest -q
+```
 
-The `lab/` folder contains Containerlab assets:
+本次 Milestone 8 修改前的实际基线为：
 
 ```text
-lab/
-├── topology.clab.yml
-└── configs/
-    ├── leaf1.cfg
-    ├── leaf2.cfg
-    └── spine1.cfg
+214 passed in 8.80s
 ```
 
-Deploy the lab when Docker, Containerlab, and the cEOS image are available:
+测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
 
-```bash
-containerlab deploy -t lab/topology.clab.yml
-```
+## 安全与限制
 
-Destroy it when finished:
+- LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
+- 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。
+- 所有网络 Tool 只读；系统命令使用固定参数列表、`shell=False`、超时和输出上限。
+- `http_check` 仅允许 HTTP(S)，校验初始目标及每次重定向，阻止 localhost、metadata、私网、回环和链路本地地址。
+- RAG 文本是不可信参考数据；来源类型必须据实展示，社区材料不能写成官方政策。
+- `SessionStore` 是有界进程内上下文；SQLite 历史会保存用户问题和诊断证据，部署者需设置访问与保留策略。
+- SSE 只是最终答案的分块传输，不代表上游模型 token streaming。
+- 产品不访问天津大学内部网络运维平台，不执行配置变更，也不能替代学校官方服务通知或人工运维结论。
+- Local 模式只反映运行服务的主机；浏览器所在设备若不同，检测结果不代表浏览器设备自身网络。
 
-```bash
-containerlab destroy -t lab/topology.clab.yml --cleanup
-```
+## 上游来源与许可证
 
-Live SSH examples include:
+本仓库由 Packt 项目 *Building AI Agents for Network Operations* 演进而来，并保留书籍 Chapter/Lab、Mock spine/leaf、Containerlab 和教学模板。TJU NetPilot 在此基础上形成独立的 `src/netpilot/` 正式产品路径与比赛功能。详细的复用边界、Lab Map 和上游链接见 [`docs/upstream.md`](docs/upstream.md)。
 
-```bash
-python scripts/03_connect_to_device.py leaf1
-python scripts/04_get_interfaces.py leaf1
-python labs/lab3-chatbot/chatbot_v3_live_ssh.py
-python labs/lab4-agentic/lab4b_agentic_network_bot_netmiko.py
-```
+上游版权与 MIT 许可声明保留在 [`LICENSE`](LICENSE) 中：Copyright (c) 2026 Sif Baksh；Copyright (c) 2026 Packt。使用、修改和分发时须继续保留 MIT attribution。
 
-## Repository Layout
-
-```text
-Building-AI-Agents-for-Network-Operations/
-├── README.md
-├── QUICKSTART.md
-├── requirements.txt
-├── pyproject.toml
-├── Makefile
-├── .env.example
-├── src/
-│   └── netpilot/
-│       ├── api/
-│       ├── models/
-│       ├── tools/
-│       ├── config.py
-│       └── main.py
-├── web/
-│   ├── index.html
-│   ├── app.js
-│   ├── style.css
-│   └── favicon.svg
-├── examples/
-│   ├── mock_network_devices.py
-│   ├── test_setup.py
-│   ├── bgp_output.json
-│   ├── interface_output.json
-│   ├── temperature.py
-│   └── tokens_test.py
-├── lab/
-│   ├── topology.clab.yml
-│   └── configs/
-├── labs/
-│   ├── lab1-ollama/
-│   ├── lab2-prompts/
-│   ├── lab3-chatbot/
-│   ├── lab4-agentic/
-│   ├── lab5-mcp/
-│   └── lab6-production-readiness/
-├── prompts/
-├── docs/
-│   └── design-toolkit/
-├── scripts/
-├── tests/
-└── bonus/
-```
-
-## Environment Variables
-
-Create the private environment file before running Labs 1–4:
-
-```bash
-cp .env.example .env
-```
-
-Fill `TJU_API_KEY`, `TJU_API_BASE`, and `TJU_MODEL=tju-llm`. Do not append `/chat/completions` to the base address. `TJU_TIMEOUT_SECONDS` defaults to 60 and `TJU_MAX_RETRIES` defaults to 2 bounded SDK retries. NetPilot also reads the Agent, Tool, RAG, and App variables documented in `.env.example`. `.env` is ignored by Git and the API Key must never be committed or returned by an API.
-
-## Safety Boundary
-
-The network examples are intentionally read-only by default. Safe command examples include:
-
-```text
-show version
-show interfaces status
-show ip route
-show ip bgp summary
-```
-
-Unsafe configuration or destructive commands should remain blocked in production tool wrappers:
-
-```text
-configure terminal
-reload
-copy
-delete
-write memory
-bash
-```
-
-## Troubleshooting
-
-If imports fail, make sure the virtual environment is active and dependencies are installed:
-
-```bash
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pip install -e .
-```
-
-If an API call fails, validate configuration and then make one live test request:
-
-```bash
-python examples/test_setup.py
-python scripts/test_tju_api.py
-```
-
-HTTP 401 indicates an API Key problem; HTTP 429 indicates rate limiting. See [QUICKSTART.md](QUICKSTART.md) for Windows-specific commands.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-
-## License
-
-MIT License. See [LICENSE](LICENSE).
+贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
