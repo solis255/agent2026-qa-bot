@@ -25,6 +25,7 @@ class SessionCapacityError(RuntimeError):
 @dataclass
 class SessionState:
     session_id: UUID
+    owner_user_id: UUID
     created_at: datetime
     updated_at: datetime
     messages: list[ChatMessage] = field(default_factory=list)
@@ -34,6 +35,7 @@ class SessionState:
 @dataclass(frozen=True)
 class SessionSnapshot:
     session_id: UUID
+    owner_user_id: UUID
     created_at: datetime
     updated_at: datetime
     message_count: int
@@ -58,9 +60,12 @@ class SessionStore:
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
-    def create(self) -> SessionSnapshot:
+    def create(self, owner_user_id: UUID) -> SessionSnapshot:
         now = datetime.now(timezone.utc)
-        state = SessionState(session_id=uuid4(), created_at=now, updated_at=now)
+        state = SessionState(
+            session_id=uuid4(), owner_user_id=owner_user_id,
+            created_at=now, updated_at=now,
+        )
         with self._lock:
             if len(self._sessions) >= self.max_sessions:
                 idle = [item for item in self._sessions.values() if not item.busy]
@@ -71,15 +76,15 @@ class SessionStore:
             self._sessions[state.session_id] = state
         return _snapshot(state)
 
-    def get(self, session_id: UUID) -> SessionSnapshot:
+    def get(self, session_id: UUID, owner_user_id: UUID) -> SessionSnapshot:
         with self._lock:
-            return _snapshot(self._require(session_id))
+            return _snapshot(self._require(session_id, owner_user_id))
 
-    def begin_turn(self, session_id: UUID) -> list[ChatMessage]:
+    def begin_turn(self, session_id: UUID, owner_user_id: UUID) -> list[ChatMessage]:
         """Mark one session busy and return a defensive history copy."""
 
         with self._lock:
-            state = self._require(session_id)
+            state = self._require(session_id, owner_user_id)
             if state.busy:
                 raise SessionBusyError(str(session_id))
             state.busy = True
@@ -88,7 +93,9 @@ class SessionStore:
 
     def finish_turn(self, session_id: UUID, user_message: str, answer: str) -> None:
         with self._lock:
-            state = self._require(session_id)
+            state = self._sessions.get(session_id)
+            if state is None:
+                raise SessionNotFoundError(str(session_id))
             state.messages.extend(
                 [
                     ChatMessage(role=ChatRole.USER, content=user_message),
@@ -106,9 +113,9 @@ class SessionStore:
                 state.busy = False
                 state.updated_at = datetime.now(timezone.utc)
 
-    def history(self, session_id: UUID) -> list[ChatMessage]:
+    def history(self, session_id: UUID, owner_user_id: UUID) -> list[ChatMessage]:
         with self._lock:
-            state = self._require(session_id)
+            state = self._require(session_id, owner_user_id)
             return [message.model_copy(deep=True) for message in state.messages]
 
     def clear(self) -> int:
@@ -117,9 +124,9 @@ class SessionStore:
             self._sessions.clear()
             return count
 
-    def _require(self, session_id: UUID) -> SessionState:
+    def _require(self, session_id: UUID, owner_user_id: UUID) -> SessionState:
         state = self._sessions.get(session_id)
-        if state is None:
+        if state is None or state.owner_user_id != owner_user_id:
             raise SessionNotFoundError(str(session_id))
         return state
 
@@ -131,6 +138,7 @@ class SessionStore:
 def _snapshot(state: SessionState) -> SessionSnapshot:
     return SessionSnapshot(
         session_id=state.session_id,
+        owner_user_id=state.owner_user_id,
         created_at=state.created_at,
         updated_at=state.updated_at,
         message_count=len(state.messages),

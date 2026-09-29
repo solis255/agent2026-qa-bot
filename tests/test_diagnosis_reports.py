@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 
 from netpilot.agent import AgentResult, AgentStatus, AgentToolStep
 from netpilot.api.presenters import present_chat
@@ -66,7 +67,7 @@ def _result(answer: str = "问题判断：DNS 解析异常。") -> AgentResult:
 def _record(tmp_path: Path, question: str = "github.com 为什么打不开？"):
     repository = SQLiteDiagnosisRepository(tmp_path / "report.db")
     response = present_chat(uuid4(), _result())
-    return repository.save(question, response)
+    return repository.save(uuid4(), question, response)
 
 
 def test_report_generation_is_deterministic_complete_and_markdown_safe(
@@ -162,6 +163,7 @@ def _report_app(
 
 
 def _create_report_record(client: TestClient, question: str = "请诊断 DNS") -> str:
+    register_test_user(client)
     session_id = client.post("/api/session").json()["session_id"]
     response = client.post(
         "/api/chat",
@@ -236,6 +238,7 @@ def test_report_api_rejects_missing_invalid_oversized_and_disabled_exports(
         )
     )
     with TestClient(disabled) as client:
+        register_test_user(client)
         unavailable = client.get(
             f"/api/diagnoses/{UUID(int=0)}/export?format=json"
         )

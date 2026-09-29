@@ -111,8 +111,8 @@ RAG 文档是 **untrusted reference data**。检索文本不得覆盖系统指�
 
 `SessionStore` 与 SQLite Diagnosis History 解决不同问题：
 
-- `SessionStore` 是进程内、有界、线程安全的对话上下文，只保存 user/assistant 文本；重启或场景清理后消失；同一会话一次只允许一个 active turn。
-- `SQLiteDiagnosisRepository` 保存完成诊断的不可变结构化快照，包括问题、回答、诊断、指标、Tool Timeline 和来源；支持重启后读取、保留上限、游标分页和会话筛选。
+- `SessionStore` 是进程内、有界、线程安全的对话上下文，绑定 `owner_user_id`，只保存 user/assistant 文本；重启或场景清理后消失；同一会话一次只允许一个 active turn，跨用户访问返回 404。
+- `SQLiteDiagnosisRepository` 保存带 `user_id` 的不可变结构化快照，包括问题、回答、诊断、指标、Tool Timeline 和来源；查询、分页、会话筛选与报告导出均按当前用户授权。旧记录迁移为 `user_id=NULL`，保留但对普通用户不可见。
 
 历史写入失败不会回滚已经完成的聊天。持久化内容可能包含用户问题和网络证据，部署者必须设置路径权限、保留策略与备份策略。
 
@@ -130,6 +130,7 @@ RAG 文档是 **untrusted reference data**。检索文本不得覆盖系统指�
 - HTTP 仅允许 HTTP(S)，初始请求和每次重定向都检查解析地址，阻止 localhost、metadata、私网、回环与链路本地目标；
 - API Key 使用 `SecretStr`，不进入健康响应、浏览器、诊断快照或结构化日志；
 - Web 使用同源 API 与文本渲染，SSE 将不可信内容封装在 JSON data 中；
+- 业务 API 通过服务端 Auth Session 和 `require_current_user` 确认身份；Chat Session、历史详情与报告在服务端按 owner 校验，不能仅凭 UUID 访问；
 - 场景写操作仅在 Mock + 显式开关下开放，Local 模式拒绝；
 - 日志记录请求/会话关联和安全错误类型，不记录聊天原文、Authorization 或 Tool 参数。
 
@@ -162,11 +163,12 @@ TJU NetPilot 的正式比赛产品位于 `src/netpilot/`，并配套 `web/`、`k
 - 当前内置 RAG 种子均为 community 摘要，不代表最新官方政策；
 - SSE 不是模型 token streaming；
 - SessionStore 不跨进程共享，SQLite History 也不是多节点协调服务；
+- Web 已提供 9C 认证界面，但完整浏览器/LAN Demo 人工验收仍需完成；Mock 场景仍是应用级共享状态；
 - 诊断依赖用户提供足够目标信息，模糊问题主动澄清尚缺可靠自动验收；
 - Mock 场景用于演示与测试，不能代表真实校园网络状态。
 
 ## 21. 后续演进
 
-后续可按真实需求逐步加入：经审核的官方知识源及更新流程；更明确的澄清问题策略与自动测试；可选的真正模型 token streaming；带认证和权限隔离的部署；跨进程 Session/任务状态；更丰富但仍只读的数据源；OpenTelemetry 等标准观测；以及在确有并行或审批需求时评估图式编排或 Multi-Agent。
+后续可按真实需求逐步加入：9D 真实浏览器/LAN 人工验收与截图；经审核的官方知识源及更新流程；更明确的澄清问题策略与自动测试；可选的真正模型 token streaming；跨进程 Session/任务状态；更丰富但仍只读的数据源；OpenTelemetry 等标准观测；以及在确有并行或审批需求时评估图式编排或 Multi-Agent。
 
 任何演进都应保持 allowlist、只读、来源诚实、实时问题 evidence-first 和 Mock/Local 共用 Tool Contract 这些基本边界。

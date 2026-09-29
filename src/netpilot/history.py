@@ -24,7 +24,7 @@ from netpilot.models import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -42,12 +42,15 @@ class DiagnosisCursorError(DiagnosisStorageError):
 class DiagnosisRepository(Protocol):
     """Persistence boundary used by the API and replaceable in tests."""
 
-    def save(self, user_message: str, response: ChatResponse) -> DiagnosisRecordView: ...
+    def save(
+        self, user_id: UUID, user_message: str, response: ChatResponse
+    ) -> DiagnosisRecordView: ...
 
-    def get(self, record_id: UUID) -> DiagnosisRecordView: ...
+    def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView: ...
 
     def list(
         self,
+        user_id: UUID,
         *,
         limit: int = 20,
         cursor: str | None = None,
@@ -66,11 +69,14 @@ class SQLiteDiagnosisRepository:
         self._lock = RLock()
         self._initialize()
 
-    def save(self, user_message: str, response: ChatResponse) -> DiagnosisRecordView:
+    def save(
+        self, user_id: UUID, user_message: str, response: ChatResponse
+    ) -> DiagnosisRecordView:
         record_id = uuid4()
         created_at = datetime.now(timezone.utc)
         record = DiagnosisRecordView(
             record_id=record_id,
+            user_id=user_id,
             session_id=response.session_id,
             created_at=created_at,
             user_message=user_message,
@@ -86,14 +92,15 @@ class SQLiteDiagnosisRepository:
                 connection.execute(
                     """
                     INSERT INTO diagnosis_records (
-                        record_id, schema_version, session_id, created_at,
+                        record_id, schema_version, user_id, session_id, created_at,
                         user_message, answer_preview, status, primary_issue,
                         confidence, snapshot_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(record_id),
-                        SCHEMA_VERSION,
+                        record.schema_version,
+                        str(user_id),
                         str(response.session_id),
                         created_at.isoformat(),
                         user_message,
@@ -115,6 +122,7 @@ class SQLiteDiagnosisRepository:
                     DELETE FROM diagnosis_records
                     WHERE record_id IN (
                         SELECT record_id FROM diagnosis_records
+                        WHERE user_id IS NOT NULL
                         ORDER BY created_at DESC, record_id DESC
                         LIMIT -1 OFFSET ?
                     )
@@ -125,24 +133,29 @@ class SQLiteDiagnosisRepository:
             raise DiagnosisStorageError("诊断历史写入失败") from exc
         return record
 
-    def get(self, record_id: UUID) -> DiagnosisRecordView:
+    def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView:
         try:
             with self._lock, self._connection() as connection:
                 row = connection.execute(
-                    "SELECT snapshot_json FROM diagnosis_records WHERE record_id = ?",
-                    (str(record_id),),
+                    "SELECT snapshot_json FROM diagnosis_records "
+                    "WHERE record_id = ? AND user_id = ?",
+                    (str(record_id), str(user_id)),
                 ).fetchone()
         except sqlite3.Error as exc:
             raise DiagnosisStorageError("诊断历史读取失败") from exc
         if row is None:
             raise DiagnosisRecordNotFoundError(str(record_id))
         try:
-            return DiagnosisRecordView.model_validate_json(row["snapshot_json"])
+            record = DiagnosisRecordView.model_validate_json(row["snapshot_json"])
+            if record.user_id != user_id:
+                raise DiagnosisStorageError("诊断历史数据损坏")
+            return record
         except ValidationError as exc:
             raise DiagnosisStorageError("诊断历史数据损坏") from exc
 
     def list(
         self,
+        user_id: UUID,
         *,
         limit: int = 20,
         cursor: str | None = None,
@@ -151,8 +164,8 @@ class SQLiteDiagnosisRepository:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         cursor_value = _decode_cursor(cursor) if cursor else None
-        clauses: list[str] = []
-        parameters: list[object] = []
+        clauses: list[str] = ["user_id = ?"]
+        parameters: list[object] = [str(user_id)]
         if session_id is not None:
             clauses.append("session_id = ?")
             parameters.append(str(session_id))
@@ -185,6 +198,8 @@ class SQLiteDiagnosisRepository:
         try:
             for row in visible_rows:
                 snapshot = DiagnosisRecordView.model_validate_json(row["snapshot_json"])
+                if snapshot.user_id != user_id:
+                    raise DiagnosisStorageError("诊断历史数据损坏")
                 items.append(
                     DiagnosisRecordSummaryView(
                         record_id=UUID(row["record_id"]),
@@ -207,11 +222,12 @@ class SQLiteDiagnosisRepository:
             next_cursor = _encode_cursor(last["created_at"], last["record_id"])
         return DiagnosisHistoryResponse(items=items, next_cursor=next_cursor)
 
-    def count(self) -> int:
+    def count(self, user_id: UUID) -> int:
         try:
             with self._lock, self._connection() as connection:
                 row = connection.execute(
-                    "SELECT COUNT(*) AS count FROM diagnosis_records"
+                    "SELECT COUNT(*) AS count FROM diagnosis_records WHERE user_id = ?",
+                    (str(user_id),),
                 ).fetchone()
         except sqlite3.Error as exc:
             raise DiagnosisStorageError("诊断历史读取失败") from exc
@@ -222,6 +238,7 @@ class SQLiteDiagnosisRepository:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self._lock, self._connection() as connection:
                 connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS netpilot_metadata (
@@ -235,6 +252,7 @@ class SQLiteDiagnosisRepository:
                     CREATE TABLE IF NOT EXISTS diagnosis_records (
                         record_id TEXT PRIMARY KEY,
                         schema_version INTEGER NOT NULL,
+                        user_id TEXT,
                         session_id TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         user_message TEXT NOT NULL,
@@ -246,6 +264,26 @@ class SQLiteDiagnosisRepository:
                     )
                     """
                 )
+                row = connection.execute(
+                    "SELECT value FROM netpilot_metadata WHERE key = 'schema_version'"
+                ).fetchone()
+                if row is not None and int(row["value"]) not in {1, SCHEMA_VERSION}:
+                    raise DiagnosisStorageError("不支持的诊断历史数据库版本")
+                columns = {
+                    item["name"]
+                    for item in connection.execute("PRAGMA table_info(diagnosis_records)")
+                }
+                required_columns = {
+                    "record_id", "schema_version", "session_id", "created_at",
+                    "user_message", "answer_preview", "status", "primary_issue",
+                    "confidence", "snapshot_json",
+                }
+                if not required_columns <= columns:
+                    raise DiagnosisStorageError("诊断历史数据库表结构不兼容")
+                if "user_id" not in columns:
+                    connection.execute(
+                        "ALTER TABLE diagnosis_records ADD COLUMN user_id TEXT"
+                    )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_diagnosis_records_created
@@ -258,16 +296,22 @@ class SQLiteDiagnosisRepository:
                     ON diagnosis_records(session_id, created_at DESC)
                     """
                 )
-                row = connection.execute(
-                    "SELECT value FROM netpilot_metadata WHERE key = 'schema_version'"
-                ).fetchone()
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_diagnosis_records_user_created
+                    ON diagnosis_records(user_id, created_at DESC, record_id DESC)
+                    """
+                )
                 if row is None:
                     connection.execute(
                         "INSERT INTO netpilot_metadata(key, value) VALUES (?, ?)",
                         ("schema_version", str(SCHEMA_VERSION)),
                     )
-                elif int(row["value"]) != SCHEMA_VERSION:
-                    raise DiagnosisStorageError("不支持的诊断历史数据库版本")
+                elif int(row["value"]) == 1:
+                    connection.execute(
+                        "UPDATE netpilot_metadata SET value = ? WHERE key = 'schema_version'",
+                        (str(SCHEMA_VERSION),),
+                    )
         except (OSError, sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("诊断历史数据库初始化失败") from exc
 

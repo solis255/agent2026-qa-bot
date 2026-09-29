@@ -6,6 +6,7 @@ import subprocess
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 from pydantic import ValidationError
 
 from netpilot.agent.evidence import finding_status
@@ -147,6 +148,7 @@ def test_custom_http_error_status_is_classified_as_abnormal_evidence() -> None:
 def test_custom_scenario_api_create_list_switch_and_delete_active() -> None:
     application = custom_app()
     with TestClient(application) as client:
+        register_test_user(client)
         old_session = client.post("/api/session").json()["session_id"]
         created = client.post("/api/scenarios/custom", json=custom_payload())
         listed = client.get("/api/scenarios")
@@ -180,6 +182,7 @@ def test_custom_scenario_api_create_list_switch_and_delete_active() -> None:
 
 def test_custom_scenario_api_rejects_duplicates_limits_and_bad_payloads() -> None:
     with TestClient(custom_app(limit=1)) as client:
+        register_test_user(client)
         first = client.post("/api/scenarios/custom", json=custom_payload("first_lab"))
         duplicate = client.post("/api/scenarios/custom", json=custom_payload("first_lab"))
         full = client.post("/api/scenarios/custom", json=custom_payload("second_lab"))
@@ -208,6 +211,7 @@ def test_custom_scenario_mutations_require_mock_mode_and_switch_flag(
     expected: int,
 ) -> None:
     with TestClient(custom_app(mode, enabled=enabled)) as client:
+        register_test_user(client)
         created = client.post("/api/scenarios/custom", json=custom_payload())
         deleted = client.delete("/api/scenarios/custom/dns_lab")
 

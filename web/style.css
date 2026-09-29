@@ -59,6 +59,13 @@ button, select { cursor: pointer; }
   font-size: .82rem;
   background: rgba(0,0,0,.12);
 }
+.account-menu { position: relative; margin-left: 12px; }
+.account-menu summary { border: 1px solid rgba(255,255,255,.26); border-radius: 10px; padding: 9px 13px; color: #fff; font-size: .8rem; font-weight: 750; cursor: pointer; list-style: none; background: rgba(255,255,255,.1); }
+.account-menu summary::-webkit-details-marker { display: none; }
+.account-menu summary::after { content: " ▾"; }
+.account-actions { position: absolute; z-index: 5; top: calc(100% + 7px); right: 0; display: grid; min-width: 180px; gap: 3px; border: 1px solid #dbe4ef; border-radius: 12px; padding: 7px; background: #fff; box-shadow: 0 12px 28px rgba(5,30,70,.2); }
+.account-actions button { border: 0; border-radius: 7px; padding: 10px; text-align: left; color: #193a62; background: #fff; }
+.account-actions button:hover { background: #edf4fc; }
 .state-dot { width: 8px; height: 8px; border-radius: 50%; background: #f3b84b; }
 .state-dot.online { background: #49d391; box-shadow: 0 0 0 4px rgba(73,211,145,.14); }
 .state-dot.offline { background: #ff7979; box-shadow: 0 0 0 4px rgba(255,121,121,.14); }
@@ -70,6 +77,26 @@ button, select { cursor: pointer; }
   width: min(1440px, calc(100% - 40px));
   margin: 28px auto;
 }
+.workspace[hidden], .auth-gate[hidden], .account-menu[hidden], .register-only[hidden] { display: none; }
+
+.auth-gate { display: grid; min-height: calc(100vh - 72px); place-items: center; padding: 24px; }
+.auth-card { width: min(440px, 100%); border: 1px solid #dbe4ef; border-radius: 18px; padding: clamp(22px, 4vw, 36px); background: #fff; box-shadow: 0 18px 48px rgba(22,50,84,.12); }
+.auth-card h1 { font-size: 1.75rem; }
+.auth-intro, .auth-safety { color: #5b6d82; font-size: .82rem; line-height: 1.6; }
+.auth-intro { margin: 12px 0 20px; }
+.auth-safety { margin: 16px 0 0; padding: 11px; border-radius: 9px; background: #f3f7fc; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 18px; }
+.auth-tabs button { border: 1px solid #d5e1ee; border-radius: 9px; padding: 9px; color: #31547d; background: #f7fafd; }
+.auth-tabs button[aria-pressed="true"] { border-color: #1458b4; color: #fff; background: #1458b4; }
+.auth-form, .password-form-body { display: grid; gap: 9px; }
+.auth-form label, .password-form-body label { color: #304b6c; font-size: .78rem; font-weight: 750; }
+.auth-form input, .password-form-body input { width: 100%; border: 1px solid #cbd8e6; border-radius: 9px; padding: 11px; color: #183452; background: #fff; }
+.auth-form button[type="submit"] { margin-top: 9px; border: 0; border-radius: 10px; padding: 11px; color: #fff; font-weight: 750; background: #1458b4; }
+.auth-card .form-status { margin-top: 12px; }
+.password-dialog { width: min(480px, calc(100% - 32px)); border: 1px solid #cbd9e8; border-radius: 18px; padding: 0; color: #13233b; background: #fff; box-shadow: 0 24px 80px rgba(7,32,68,.28); }
+.password-dialog::backdrop { background: rgba(8,25,50,.56); }
+.password-form-body { padding: 20px 22px 22px; }
+.password-form-body .scenario-form-actions { margin-top: 6px; }
 
 .chat-panel, .status-card {
   border: 1px solid #dbe4ef;
@@ -102,7 +129,7 @@ h2 { margin-bottom: 15px; font-size: 1.04rem; }
 .secondary-button { color: #31547d; background: #edf3fa; }
 .text-button { padding: 7px 10px; color: #285f9d; background: #e9f2fc; }
 button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacity: .58; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible {
   outline: 3px solid rgba(32,105,205,.35);
   outline-offset: 2px;
 }
@@ -234,9 +261,11 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 }
 
 @media (max-width: 560px) {
-  .topbar { align-items: flex-start; padding: 12px 14px; }
+  .topbar { align-items: flex-start; flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
   .brand small { display: none; }
   .service-state { max-width: 150px; border-radius: 12px; font-size: .7rem; }
+  .account-menu { width: 100%; margin: 0; }
+  .account-actions { left: 0; right: auto; }
   .workspace { width: calc(100% - 16px); }
   .chat-panel, .status-card { border-radius: 14px; }
   .chat-panel { padding: 17px 14px; }

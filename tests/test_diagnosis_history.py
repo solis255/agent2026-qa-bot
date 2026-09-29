@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 
 from netpilot.agent import AgentResult, AgentStatus, AgentToolStep
 from netpilot.api.presenters import present_chat
@@ -20,6 +21,9 @@ from netpilot.history import (
 from netpilot.llm import TokenUsage
 from netpilot.main import create_app
 from netpilot.tools.schemas import DNSLookupData, ToolResult
+
+
+OWNER = uuid4()
 
 
 def _agent_result(index: int = 1) -> AgentResult:
@@ -56,10 +60,11 @@ def _save(
     *,
     index: int,
     session_id: UUID | None = None,
+    user_id: UUID = OWNER,
 ):
     resolved_session = session_id or uuid4()
     response = present_chat(resolved_session, _agent_result(index))
-    return repository.save(f"第 {index} 个问题", response)
+    return repository.save(user_id, f"第 {index} 个问题", response)
 
 
 def test_sqlite_history_persists_complete_snapshot_across_instances(
@@ -70,9 +75,9 @@ def test_sqlite_history_persists_complete_snapshot_across_instances(
     saved = _save(first, index=1)
 
     reopened = SQLiteDiagnosisRepository(database)
-    loaded = reopened.get(saved.record_id)
+    loaded = reopened.get(OWNER, saved.record_id)
 
-    assert reopened.count() == 1
+    assert reopened.count(OWNER) == 1
     assert loaded == saved
     assert loaded.metrics.token_usage.total_tokens == 16
     assert loaded.metrics.llm_duration_ms == 21.5
@@ -87,12 +92,12 @@ def test_sqlite_history_enforces_retention_and_cursor_pagination(
     repository = SQLiteDiagnosisRepository(tmp_path / "history.db", max_records=3)
     records = [_save(repository, index=index) for index in range(1, 5)]
 
-    first_page = repository.list(limit=2)
-    second_page = repository.list(limit=2, cursor=first_page.next_cursor)
+    first_page = repository.list(OWNER, limit=2)
+    second_page = repository.list(OWNER, limit=2, cursor=first_page.next_cursor)
 
-    assert repository.count() == 3
+    assert repository.count(OWNER) == 3
     with pytest.raises(DiagnosisRecordNotFoundError):
-        repository.get(records[0].record_id)
+        repository.get(OWNER, records[0].record_id)
     assert len(first_page.items) == 2
     assert first_page.next_cursor is not None
     assert len(second_page.items) == 1
@@ -108,11 +113,11 @@ def test_sqlite_history_filters_sessions_and_rejects_bad_cursor(tmp_path: Path) 
     expected = _save(repository, index=1, session_id=selected_session)
     _save(repository, index=2)
 
-    filtered = repository.list(session_id=selected_session)
+    filtered = repository.list(OWNER, session_id=selected_session)
 
     assert [item.record_id for item in filtered.items] == [expected.record_id]
     with pytest.raises(DiagnosisCursorError):
-        repository.list(cursor="not a valid cursor")
+        repository.list(OWNER, cursor="not a valid cursor")
 
 
 def test_sqlite_history_serializes_concurrent_writes(tmp_path: Path) -> None:
@@ -126,7 +131,7 @@ def test_sqlite_history_serializes_concurrent_writes(tmp_path: Path) -> None:
             )
         )
 
-    assert repository.count() == 20
+    assert repository.count(OWNER) == 20
     assert len({record.record_id for record in records}) == 20
 
 
@@ -157,6 +162,8 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
     first_app = _history_app(database)
     with TestClient(first_app) as client:
         assert client.get("/api/health").json()["history_ready"] is True
+        register_test_user(client)
+        username = client.get("/api/auth/me").json()["username"]
         session_id = client.post("/api/session").json()["session_id"]
         chat = client.post(
             "/api/chat",
@@ -181,6 +188,11 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
 
     second_app = _history_app(database)
     with TestClient(second_app) as client:
+        login = client.post(
+            "/api/auth/login",
+            json={"username": username, "password": "test-password-123"},
+        )
+        assert login.status_code == 200
         detail = client.get(f"/api/diagnoses/{body['record_id']}")
 
     assert detail.status_code == 200
@@ -200,10 +212,12 @@ def test_history_api_handles_disabled_missing_and_invalid_requests(tmp_path: Pat
         )
     )
     with TestClient(disabled) as client:
+        register_test_user(client)
         unavailable = client.get("/api/diagnoses")
 
     enabled = _history_app(tmp_path / "history.db")
     with TestClient(enabled) as client:
+        register_test_user(client)
         missing = client.get(f"/api/diagnoses/{uuid4()}")
         invalid_cursor = client.get("/api/diagnoses?cursor=invalid")
         invalid_limit = client.get("/api/diagnoses?limit=101")
@@ -247,6 +261,7 @@ def test_history_write_failure_does_not_fail_chat(tmp_path: Path) -> None:
     app = _history_app(tmp_path / "history.db")
     app.state.diagnosis_repository = BrokenRepository()
     with TestClient(app) as client:
+        register_test_user(client)
         session_id = client.post("/api/session").json()["session_id"]
         response = client.post(
             "/api/chat",

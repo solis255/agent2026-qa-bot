@@ -1,6 +1,10 @@
 "use strict";
 
 const state = {
+  user: null,
+  authMode: "login",
+  authBusy: false,
+  authEpoch: 0,
   sessionId: null,
   health: null,
   busy: false,
@@ -10,6 +14,33 @@ const state = {
 };
 
 const elements = {
+  authGate: document.querySelector("#auth-gate"),
+  authTitle: document.querySelector("#auth-title"),
+  authForm: document.querySelector("#auth-form"),
+  authLoginTab: document.querySelector("#auth-login-tab"),
+  authRegisterTab: document.querySelector("#auth-register-tab"),
+  authUsername: document.querySelector("#auth-username"),
+  authNickname: document.querySelector("#auth-nickname"),
+  authPassword: document.querySelector("#auth-password"),
+  authConfirm: document.querySelector("#auth-confirm"),
+  authSubmit: document.querySelector("#auth-submit"),
+  authStatus: document.querySelector("#auth-status"),
+  workspace: document.querySelector("#workspace"),
+  accountMenu: document.querySelector("#account-menu"),
+  accountName: document.querySelector("#account-name"),
+  myHistory: document.querySelector("#my-history"),
+  myHistoryCard: document.querySelector("#my-history-card"),
+  changePasswordOpen: document.querySelector("#change-password-open"),
+  logoutButton: document.querySelector("#logout-button"),
+  passwordDialog: document.querySelector("#password-dialog"),
+  passwordForm: document.querySelector("#password-form"),
+  oldPassword: document.querySelector("#old-password"),
+  newPassword: document.querySelector("#new-password"),
+  confirmNewPassword: document.querySelector("#confirm-new-password"),
+  passwordStatus: document.querySelector("#password-status"),
+  passwordSubmit: document.querySelector("#password-submit"),
+  passwordCancel: document.querySelector("#password-cancel"),
+  passwordDialogClose: document.querySelector("#password-dialog-close"),
   serviceState: document.querySelector("#service-state"),
   stateDot: document.querySelector(".state-dot"),
   stateText: document.querySelector(".state-text"),
@@ -104,30 +135,50 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 function setBusy(busy, message = "") {
   state.busy = busy;
   elements.conversation.setAttribute("aria-busy", String(busy));
-  const ready = Boolean(state.sessionId && state.health?.llm_configured);
+  const ready = Boolean(state.user && state.sessionId && state.health?.llm_configured);
   elements.messageInput.disabled = busy || !ready;
   elements.sendButton.disabled = busy || !ready;
-  elements.newSession.disabled = busy || !state.health;
-  elements.scenarioSelect.disabled = busy || elements.scenarioSelect.dataset.enabled !== "true";
-  elements.customScenarioNew.disabled = busy || elements.customScenarioNew.dataset.available !== "true";
-  elements.customScenarioDelete.disabled = busy;
-  elements.scenarioFormSubmit.disabled = busy;
-  elements.historyRefresh.disabled = busy;
-  elements.historyLoadMore.disabled = busy;
-  elements.reportPreview.disabled = busy || !state.activeRecordId;
-  elements.exportMarkdown.disabled = busy || !state.activeRecordId;
-  elements.exportJson.disabled = busy || !state.activeRecordId;
-  for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy;
+  elements.newSession.disabled = busy || !state.user || !state.health;
+  elements.scenarioSelect.disabled = busy || !state.user || elements.scenarioSelect.dataset.enabled !== "true";
+  elements.customScenarioNew.disabled = busy || !state.user || elements.customScenarioNew.dataset.available !== "true";
+  elements.customScenarioDelete.disabled = busy || !state.user;
+  elements.scenarioFormSubmit.disabled = busy || !state.user;
+  elements.historyRefresh.disabled = busy || !state.user;
+  elements.historyLoadMore.disabled = busy || !state.user;
+  elements.reportPreview.disabled = busy || !state.user || !state.activeRecordId;
+  elements.exportMarkdown.disabled = busy || !state.user || !state.activeRecordId;
+  elements.exportJson.disabled = busy || !state.user || !state.activeRecordId;
+  elements.logoutButton.disabled = busy || !state.user;
+  elements.changePasswordOpen.disabled = busy || !state.user;
+  for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy || !state.user;
   elements.sendButton.textContent = busy ? "诊断中…" : "开始诊断";
   if (message) elements.interactionNote.textContent = message;
 }
 
+class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+function apiDetail(body, fallback) {
+  if (typeof body?.detail === "string") return body.detail;
+  if (Array.isArray(body?.detail)) {
+    return body.detail.map((item) => String(item.msg || "输入不符合要求")).join("；");
+  }
+  return fallback;
+}
+
 async function requestJSON(url, options = {}, timeoutMs = 15000) {
+  const authEpoch = state.authEpoch;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       ...options,
+      credentials: "same-origin",
       signal: controller.signal,
       headers: {
         Accept: "application/json",
@@ -142,7 +193,10 @@ async function requestJSON(url, options = {}, timeoutMs = 15000) {
       body = null;
     }
     if (!response.ok) {
-      throw new Error(body?.detail || `请求失败（HTTP ${response.status}）`);
+      if (response.status === 401 && !url.startsWith("/api/auth/") && state.authEpoch === authEpoch) {
+        showAuthGate("登录已过期，请重新登录。");
+      }
+      throw new ApiError(apiDetail(body, `请求失败（HTTP ${response.status}）`), response.status);
     }
     return body;
   } catch (error) {
@@ -154,12 +208,14 @@ async function requestJSON(url, options = {}, timeoutMs = 15000) {
 }
 
 async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
+  const authEpoch = state.authEpoch;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let completed = false;
   try {
     const response = await fetch(url, {
       ...options,
+      credentials: "same-origin",
       signal: controller.signal,
       headers: {
         Accept: "text/event-stream",
@@ -171,11 +227,14 @@ async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
       let detail = `流式请求失败（HTTP ${response.status}）`;
       try {
         const body = await response.json();
-        if (body?.detail) detail = body.detail;
+        detail = apiDetail(body, detail);
       } catch (_error) {
         // Keep the bounded generic message when the server response is not JSON.
       }
-      throw new Error(detail);
+      if (response.status === 401 && state.authEpoch === authEpoch) {
+        showAuthGate("登录已过期，请重新登录。");
+      }
+      throw new ApiError(detail, response.status);
     }
     if (!response.headers.get("content-type")?.startsWith("text/event-stream")) {
       throw new Error("服务端没有返回有效的 SSE 响应。");
@@ -227,6 +286,185 @@ async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
     throw error;
   } finally {
     window.clearTimeout(timeout);
+  }
+}
+
+function setAuthMode(mode) {
+  state.authMode = mode;
+  const registering = mode === "register";
+  elements.authTitle.textContent = registering ? "注册 TJU NetPilot" : "登录 TJU NetPilot";
+  elements.authLoginTab.setAttribute("aria-pressed", String(!registering));
+  elements.authRegisterTab.setAttribute("aria-pressed", String(registering));
+  for (const field of document.querySelectorAll(".register-only")) field.hidden = !registering;
+  elements.authUsername.minLength = registering ? 3 : 0;
+  if (registering) {
+    elements.authUsername.setAttribute("pattern", "[A-Za-z0-9_-]{3,32}");
+  } else {
+    elements.authUsername.removeAttribute("pattern");
+  }
+  elements.authPassword.minLength = registering ? 8 : 0;
+  elements.authPassword.autocomplete = registering ? "new-password" : "current-password";
+  elements.authConfirm.required = registering;
+  elements.authSubmit.textContent = registering ? "创建账号并登录" : "登录";
+  elements.authStatus.textContent = "";
+  elements.authPassword.value = "";
+  elements.authConfirm.value = "";
+}
+
+function showAuthGate(message = "请先登录或注册。") {
+  state.authEpoch += 1;
+  state.user = null;
+  state.health = null;
+  state.sessionId = null;
+  state.scenarios = [];
+  state.historyCursor = null;
+  elements.authGate.hidden = false;
+  elements.workspace.hidden = true;
+  elements.accountMenu.open = false;
+  elements.accountMenu.hidden = true;
+  elements.accountName.textContent = "";
+  elements.authForm.reset();
+  elements.passwordForm.reset();
+  elements.passwordStatus.textContent = "";
+  elements.reportContent.textContent = "";
+  elements.scenarioForm.reset();
+  elements.scenarioFormStatus.textContent = "";
+  if (elements.passwordDialog.open) elements.passwordDialog.close();
+  if (elements.reportDialog.open) elements.reportDialog.close();
+  if (elements.scenarioDialog.open) elements.scenarioDialog.close();
+  elements.messageInput.value = "";
+  elements.interactionNote.textContent = "";
+  elements.sessionLabel.textContent = "登录后创建会话";
+  elements.historyList.replaceChildren(emptyState("DB", "登录后可查看自己的诊断历史。"));
+  elements.historyLoadMore.hidden = true;
+  resetConversation();
+  elements.conversation.replaceChildren();
+  setBusy(false);
+  setAuthMode("login");
+  elements.authStatus.textContent = message;
+  elements.stateDot.className = "state-dot online";
+  elements.stateText.textContent = "请登录以继续";
+}
+
+async function enterAuthenticated(user) {
+  if (state.user && state.user.id !== user.id) showAuthGate();
+  state.authEpoch += 1;
+  const authEpoch = state.authEpoch;
+  state.user = user;
+  elements.accountName.textContent = user.nickname || user.username;
+  elements.accountMenu.hidden = false;
+  elements.authGate.hidden = true;
+  elements.workspace.hidden = false;
+  elements.authForm.reset();
+  setBusy(false);
+  try {
+    const health = await requestJSON("/api/health");
+    if (state.authEpoch !== authEpoch) return;
+    renderHealth(health);
+    await Promise.all([
+      createSession({ announce: false }),
+      loadScenarios(),
+      loadHistory(),
+    ]);
+  } catch (error) {
+    if (state.authEpoch === authEpoch) {
+      renderHealthError(error);
+      setBusy(false);
+    }
+  }
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  if (state.authBusy || !elements.authForm.reportValidity()) return;
+  const registering = state.authMode === "register";
+  if (registering && elements.authPassword.value !== elements.authConfirm.value) {
+    elements.authStatus.textContent = "两次输入的密码不一致。";
+    return;
+  }
+  state.authBusy = true;
+  elements.authSubmit.disabled = true;
+  elements.authLoginTab.disabled = true;
+  elements.authRegisterTab.disabled = true;
+  elements.authStatus.textContent = registering ? "正在创建账号…" : "正在登录…";
+  const payload = {
+    username: elements.authUsername.value.trim(),
+    password: elements.authPassword.value,
+  };
+  if (registering) payload.nickname = elements.authNickname.value.trim() || null;
+  try {
+    const user = await requestJSON(
+      registering ? "/api/auth/register" : "/api/auth/login",
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+    await enterAuthenticated(user);
+  } catch (error) {
+    elements.authStatus.textContent = error.message;
+    elements.authPassword.value = "";
+    elements.authConfirm.value = "";
+  } finally {
+    state.authBusy = false;
+    elements.authSubmit.disabled = false;
+    elements.authLoginTab.disabled = false;
+    elements.authRegisterTab.disabled = false;
+  }
+}
+
+async function logout() {
+  if (!state.user || state.busy) return;
+  const authEpoch = state.authEpoch;
+  elements.logoutButton.disabled = true;
+  try {
+    await requestJSON("/api/auth/logout", { method: "POST" });
+    if (state.authEpoch !== authEpoch) return;
+    showAuthGate("已安全退出。你可以登录其他账号。");
+    elements.authUsername.focus();
+  } catch (error) {
+    if (state.authEpoch === authEpoch) {
+      elements.interactionNote.textContent = error.message;
+      elements.logoutButton.disabled = false;
+    }
+  }
+}
+
+function openPasswordDialog() {
+  if (!state.user || state.busy) return;
+  elements.accountMenu.open = false;
+  elements.passwordForm.reset();
+  elements.passwordStatus.textContent = "";
+  elements.passwordDialog.showModal();
+  elements.oldPassword.focus();
+}
+
+async function submitPasswordChange(event) {
+  event.preventDefault();
+  if (!state.user || !elements.passwordForm.reportValidity()) return;
+  const authEpoch = state.authEpoch;
+  if (elements.newPassword.value !== elements.confirmNewPassword.value) {
+    elements.passwordStatus.textContent = "两次输入的新密码不一致。";
+    return;
+  }
+  elements.passwordSubmit.disabled = true;
+  elements.passwordStatus.textContent = "正在修改密码…";
+  try {
+    await requestJSON("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        old_password: elements.oldPassword.value,
+        new_password: elements.newPassword.value,
+      }),
+    });
+    if (state.authEpoch !== authEpoch) return;
+    elements.passwordForm.reset();
+    elements.passwordDialog.close();
+    elements.interactionNote.textContent = "密码已更新，其他设备上的旧登录会话已失效。";
+  } catch (error) {
+    if (state.authEpoch === authEpoch) {
+      elements.passwordStatus.textContent = error.message;
+      elements.oldPassword.value = "";
+    }
+  } finally {
+    if (state.authEpoch === authEpoch) elements.passwordSubmit.disabled = false;
   }
 }
 
@@ -291,18 +529,20 @@ function resetConversation() {
 
 function setReportRecord(recordId) {
   state.activeRecordId = recordId || null;
-  elements.reportActions.hidden = !state.activeRecordId;
-  elements.reportPreview.disabled = state.busy || !state.activeRecordId;
-  elements.exportMarkdown.disabled = state.busy || !state.activeRecordId;
-  elements.exportJson.disabled = state.busy || !state.activeRecordId;
+  elements.reportActions.hidden = !state.activeRecordId || !state.user;
+  elements.reportPreview.disabled = state.busy || !state.user || !state.activeRecordId;
+  elements.exportMarkdown.disabled = state.busy || !state.user || !state.activeRecordId;
+  elements.exportJson.disabled = state.busy || !state.user || !state.activeRecordId;
   if (!state.activeRecordId && elements.reportDialog.open) elements.reportDialog.close();
 }
 
 async function createSession({ announce = true } = {}) {
-  if (state.busy) return;
+  if (!state.user || state.busy) return;
+  const authEpoch = state.authEpoch;
   setBusy(true, "正在创建新会话…");
   try {
     const session = await requestJSON("/api/session", { method: "POST" });
+    if (state.authEpoch !== authEpoch) return;
     state.sessionId = session.session_id;
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
@@ -311,12 +551,13 @@ async function createSession({ announce = true } = {}) {
       : "会话已创建，但 TJU LLM 尚未配置。";
     if (announce) elements.messageInput.focus();
   } catch (error) {
+    if (state.authEpoch !== authEpoch) return;
     state.sessionId = null;
     elements.sessionLabel.textContent = "会话创建失败";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
@@ -489,6 +730,8 @@ function formatHistoryTime(value) {
 }
 
 async function loadHistory({ append = false } = {}) {
+  if (!state.user) return;
+  const authEpoch = state.authEpoch;
   if (!state.health?.history_ready) {
     state.historyCursor = null;
     elements.historyLoadMore.hidden = true;
@@ -503,10 +746,12 @@ async function loadHistory({ append = false } = {}) {
     : "/api/diagnoses?limit=10";
   try {
     const response = await requestJSON(query);
+    if (state.authEpoch !== authEpoch) return;
     renderHistoryItems(response.items, { append });
     state.historyCursor = response.next_cursor;
     elements.historyLoadMore.hidden = !state.historyCursor;
   } catch (error) {
+    if (state.authEpoch !== authEpoch) return;
     if (!append) {
       elements.historyList.replaceChildren(emptyState("!", error.message));
     }
@@ -515,10 +760,12 @@ async function loadHistory({ append = false } = {}) {
 }
 
 async function loadDiagnosisRecord(recordId) {
-  if (!recordId || state.busy) return;
+  if (!recordId || !state.user || state.busy) return;
+  const authEpoch = state.authEpoch;
   setBusy(true, "正在读取历史诊断…");
   try {
     const record = await requestJSON(`/api/diagnoses/${encodeURIComponent(recordId)}`);
+    if (state.authEpoch !== authEpoch) return;
     elements.conversation.replaceChildren();
     appendMessage("user", record.user_message);
     appendMessage("assistant", record.answer);
@@ -529,16 +776,17 @@ async function loadDiagnosisRecord(recordId) {
     setReportRecord(record.record_id);
     elements.interactionNote.textContent = `正在查看 ${formatHistoryTime(record.created_at)} 的诊断记录；当前会话仍可继续使用。`;
   } catch (error) {
-    elements.interactionNote.textContent = error.message;
+    if (state.authEpoch === authEpoch) elements.interactionNote.textContent = error.message;
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
 async function submitChat(event) {
   event.preventDefault();
   const message = elements.messageInput.value.trim();
-  if (!message || !state.sessionId || state.busy) return;
+  if (!message || !state.user || !state.sessionId || state.busy) return;
+  const authEpoch = state.authEpoch;
   appendMessage("user", message);
   const streamedAnswer = appendMessage("assistant", "");
   elements.messageInput.value = "";
@@ -552,6 +800,7 @@ async function submitChat(event) {
         body: JSON.stringify({ session_id: state.sessionId, message }),
       },
       async (eventName, data) => {
+        if (state.authEpoch !== authEpoch) return;
         if (eventName === "start") {
           elements.interactionNote.textContent = "流式连接已建立，正在执行诊断。";
         } else if (eventName === "delta") {
@@ -562,6 +811,7 @@ async function submitChat(event) {
         }
       },
     );
+    if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
     streamedAnswer.textContent = response.answer;
     renderDiagnosis(response.diagnosis);
@@ -570,15 +820,19 @@ async function submitChat(event) {
     renderSources(response.sources);
     setReportRecord(response.record_id);
     await loadHistory();
+    if (state.authEpoch !== authEpoch) return;
     elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
   } catch (error) {
+    if (state.authEpoch !== authEpoch) return;
     if (!streamedAnswer.textContent) streamedAnswer.textContent = "本次回答未能完成。";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;
     if (error.message.includes("会话不存在")) state.sessionId = null;
   } finally {
-    setBusy(false);
-    elements.messageInput.focus();
+    if (state.authEpoch === authEpoch) {
+      setBusy(false);
+      elements.messageInput.focus();
+    }
   }
 }
 
@@ -627,23 +881,26 @@ function formatReportPreview(report) {
 }
 
 async function previewReport() {
-  if (!state.activeRecordId || state.busy) return;
+  if (!state.user || !state.activeRecordId || state.busy) return;
+  const authEpoch = state.authEpoch;
   setBusy(true, "正在生成故障报告预览…");
   try {
     const recordId = encodeURIComponent(state.activeRecordId);
     const report = await requestJSON(`/api/diagnoses/${recordId}/report`);
+    if (state.authEpoch !== authEpoch) return;
     elements.reportContent.textContent = formatReportPreview(report);
     elements.reportDialog.showModal();
     elements.interactionNote.textContent = "报告已根据保存的诊断证据生成，未额外调用模型。";
   } catch (error) {
-    elements.interactionNote.textContent = error.message;
+    if (state.authEpoch === authEpoch) elements.interactionNote.textContent = error.message;
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
 async function downloadReport(format) {
-  if (!state.activeRecordId || state.busy) return;
+  if (!state.user || !state.activeRecordId || state.busy) return;
+  const authEpoch = state.authEpoch;
   setBusy(true, `正在准备 ${format === "markdown" ? "Markdown" : "JSON"} 报告…`);
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 30000);
@@ -651,6 +908,7 @@ async function downloadReport(format) {
     const recordId = encodeURIComponent(state.activeRecordId);
     const exportUrl = `/api/diagnoses/${recordId}/export?format=${format}`;
     const response = await fetch(exportUrl, {
+      credentials: "same-origin",
       headers: { Accept: format === "markdown" ? "text/markdown" : "application/json" },
       signal: controller.signal,
     });
@@ -658,12 +916,16 @@ async function downloadReport(format) {
       let detail = `报告导出失败（HTTP ${response.status}）`;
       try {
         const body = await response.json();
-        if (body?.detail) detail = body.detail;
+        detail = apiDetail(body, detail);
       } catch (_error) {
         // Keep the bounded generic error when the server did not return JSON.
       }
-      throw new Error(detail);
+      if (response.status === 401 && state.authEpoch === authEpoch) {
+        showAuthGate("登录已过期，请重新登录。");
+      }
+      throw new ApiError(detail, response.status);
     }
+    if (state.authEpoch !== authEpoch) return;
     await response.body?.cancel();
     const link = document.createElement("a");
     link.href = exportUrl;
@@ -673,17 +935,21 @@ async function downloadReport(format) {
     link.remove();
     elements.interactionNote.textContent = `${format === "markdown" ? "Markdown" : "JSON"} 报告已开始下载。`;
   } catch (error) {
-    elements.interactionNote.textContent = error.name === "AbortError" ? "报告导出超时，请稍后重试。" : error.message;
+    if (state.authEpoch === authEpoch) {
+      elements.interactionNote.textContent = error.name === "AbortError" ? "报告导出超时，请稍后重试。" : error.message;
+    }
   } finally {
     window.clearTimeout(timeout);
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
 async function loadScenarios() {
-  if (state.health?.tool_mode !== "mock") return;
+  if (!state.user || state.health?.tool_mode !== "mock") return;
+  const authEpoch = state.authEpoch;
   try {
     const response = await requestJSON("/api/scenarios");
+    if (state.authEpoch !== authEpoch) return;
     state.scenarios = response.scenarios;
     elements.scenarioSelect.replaceChildren();
     for (const scenario of response.scenarios) {
@@ -705,6 +971,7 @@ async function loadScenarios() {
       : "自定义场景功能随场景切换开关关闭。";
     renderScenarioDescription(response.current, response.switch_enabled);
   } catch (error) {
+    if (state.authEpoch !== authEpoch) return;
     elements.scenarioControl.hidden = false;
     elements.scenarioDescription.textContent = error.message;
   }
@@ -718,29 +985,34 @@ function renderScenarioDescription(name, enabled) {
 }
 
 async function activateScenario(scenario) {
+  const authEpoch = state.authEpoch;
   const response = await requestJSON(`/api/scenarios/${encodeURIComponent(scenario)}`, {
     method: "POST",
   });
-    state.sessionId = response.session_id;
-    elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
-    elements.scenarioSelect.value = response.current;
-    renderScenarioDescription(response.current, true);
-    resetConversation();
-    appendMessage("assistant", `已切换到“${elements.scenarioSelect.selectedOptions[0].textContent}”测试场景。`);
-    elements.interactionNote.textContent = "场景切换完成，旧会话已清理。";
+  if (state.authEpoch !== authEpoch) return;
+  state.sessionId = response.session_id;
+  elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
+  elements.scenarioSelect.value = response.current;
+  renderScenarioDescription(response.current, true);
+  resetConversation();
+  appendMessage("assistant", `已切换到“${elements.scenarioSelect.selectedOptions[0].textContent}”测试场景。`);
+  elements.interactionNote.textContent = "场景切换完成，旧会话已清理。";
 }
 
 async function switchScenario() {
   const scenario = elements.scenarioSelect.value;
-  if (!scenario || state.busy || elements.scenarioSelect.dataset.enabled !== "true") return;
+  if (!scenario || !state.user || state.busy || elements.scenarioSelect.dataset.enabled !== "true") return;
+  const authEpoch = state.authEpoch;
   setBusy(true, "正在切换 Mock 场景并重置会话…");
   try {
     await activateScenario(scenario);
   } catch (error) {
-    appendMessage("error", error.message);
-    elements.interactionNote.textContent = error.message;
+    if (state.authEpoch === authEpoch) {
+      appendMessage("error", error.message);
+      elements.interactionNote.textContent = error.message;
+    }
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
@@ -763,7 +1035,7 @@ function syncCustomBehaviorFields() {
 }
 
 function openCustomScenarioDialog() {
-  if (state.busy || elements.customScenarioNew.dataset.available !== "true") return;
+  if (!state.user || state.busy || elements.customScenarioNew.dataset.available !== "true") return;
   elements.scenarioForm.reset();
   elements.scenarioFormStatus.textContent = "";
   syncCustomBehaviorFields();
@@ -773,7 +1045,8 @@ function openCustomScenarioDialog() {
 
 async function createCustomScenario(event) {
   event.preventDefault();
-  if (state.busy || !elements.scenarioForm.reportValidity()) return;
+  if (!state.user || state.busy || !elements.scenarioForm.reportValidity()) return;
+  const authEpoch = state.authEpoch;
   const pingReachable = elements.scenarioPingReachable.checked;
   const httpReachable = elements.scenarioHttpReachable.checked;
   const payload = {
@@ -798,57 +1071,75 @@ async function createCustomScenario(event) {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    if (state.authEpoch !== authEpoch) return;
     await loadScenarios();
+    if (state.authEpoch !== authEpoch) return;
     elements.scenarioSelect.value = created.name;
     await activateScenario(created.name);
     elements.scenarioDialog.close();
   } catch (error) {
-    elements.scenarioFormStatus.textContent = error.message;
-    elements.interactionNote.textContent = error.message;
+    if (state.authEpoch === authEpoch) {
+      elements.scenarioFormStatus.textContent = error.message;
+      elements.interactionNote.textContent = error.message;
+    }
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
 async function deleteCurrentCustomScenario() {
   const scenario = state.scenarios.find((item) => item.name === elements.scenarioSelect.value);
-  if (!scenario || scenario.kind !== "custom" || state.busy) return;
+  if (!scenario || scenario.kind !== "custom" || !state.user || state.busy) return;
+  const authEpoch = state.authEpoch;
   setBusy(true, "正在删除自定义 Mock 场景…");
   try {
     const response = await requestJSON(
       `/api/scenarios/custom/${encodeURIComponent(scenario.name)}`,
       { method: "DELETE" },
     );
+    if (state.authEpoch !== authEpoch) return;
     if (response.session_id) {
       state.sessionId = response.session_id;
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
     }
     await loadScenarios();
+    if (state.authEpoch !== authEpoch) return;
     appendMessage("assistant", `已删除自定义场景“${scenario.label}”，当前恢复为内置健康场景。`);
     elements.interactionNote.textContent = "自定义场景已删除，旧会话已清理。";
   } catch (error) {
-    elements.interactionNote.textContent = error.message;
+    if (state.authEpoch === authEpoch) elements.interactionNote.textContent = error.message;
   } finally {
-    setBusy(false);
+    if (state.authEpoch === authEpoch) setBusy(false);
   }
 }
 
 async function initialize() {
   try {
-    const health = await requestJSON("/api/health");
-    renderHealth(health);
-    await Promise.all([
-      createSession({ announce: false }),
-      loadScenarios(),
-      loadHistory(),
-    ]);
+    const user = await requestJSON("/api/auth/me");
+    await enterAuthenticated(user);
   } catch (error) {
-    renderHealthError(error);
-    setBusy(false);
+    showAuthGate(error.status === 401 ? "请先登录或注册。" : error.message);
+    if (error.status !== 401) renderHealthError(error);
   }
 }
 
+elements.authLoginTab.addEventListener("click", () => setAuthMode("login"));
+elements.authRegisterTab.addEventListener("click", () => setAuthMode("register"));
+elements.authForm.addEventListener("submit", submitAuth);
+elements.logoutButton.addEventListener("click", logout);
+elements.changePasswordOpen.addEventListener("click", openPasswordDialog);
+elements.passwordForm.addEventListener("submit", submitPasswordChange);
+elements.passwordCancel.addEventListener("click", () => elements.passwordDialog.close());
+elements.passwordDialogClose.addEventListener("click", () => elements.passwordDialog.close());
+elements.myHistory.addEventListener("click", async () => {
+  elements.accountMenu.open = false;
+  const authEpoch = state.authEpoch;
+  await loadHistory();
+  if (state.authEpoch === authEpoch) {
+    elements.myHistoryCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
 elements.chatForm.addEventListener("submit", submitChat);
 elements.newSession.addEventListener("click", () => createSession());
 elements.scenarioSelect.addEventListener("change", switchScenario);
@@ -882,3 +1173,9 @@ for (const button of document.querySelectorAll("[data-prompt]")) {
 }
 
 initialize();
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    showAuthGate("正在验证登录状态…");
+    initialize();
+  }
+});

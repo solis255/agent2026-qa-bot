@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 
 from netpilot.config import Settings
 from netpilot.main import create_app
@@ -39,6 +40,7 @@ def test_mock_scenarios_are_listed_with_current_state() -> None:
 def test_switching_scenario_clears_old_sessions_and_returns_a_new_one() -> None:
     application = app_for()
     with TestClient(application) as client:
+        register_test_user(client)
         old_session = client.post("/api/session").json()["session_id"]
         response = client.post("/api/scenarios/dns_failure")
         stale = client.post(
@@ -56,6 +58,7 @@ def test_switching_scenario_clears_old_sessions_and_returns_a_new_one() -> None:
 
 def test_scenario_switch_is_disabled_by_default_and_invalid_names_are_rejected() -> None:
     with TestClient(app_for(enabled=False)) as client:
+        register_test_user(client)
         disabled = client.post("/api/scenarios/dns_failure")
         invalid = client.post("/api/scenarios/arbitrary-command")
 
@@ -65,6 +68,7 @@ def test_scenario_switch_is_disabled_by_default_and_invalid_names_are_rejected()
 
 def test_local_mode_rejects_mock_scenario_endpoints() -> None:
     with TestClient(app_for("local")) as client:
+        register_test_user(client)
         listed = client.get("/api/scenarios")
         switched = client.post("/api/scenarios/dns_failure")
 

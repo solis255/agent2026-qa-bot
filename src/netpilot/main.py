@@ -8,12 +8,16 @@ from pathlib import Path
 from threading import RLock
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from netpilot import __version__
 from netpilot.agent import AgentOrchestrator, SessionStore, ToolRegistry
 from netpilot.api.routes import router as api_router
+from netpilot.api.auth_routes import router as auth_router
 from netpilot.config import Settings
 from netpilot.llm import TJUClient
 from netpilot.history import DiagnosisStorageError, SQLiteDiagnosisRepository
@@ -29,6 +33,20 @@ from netpilot.tools import build_network_tools
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = PROJECT_ROOT / "web"
 logger = logging.getLogger(__name__)
+
+
+async def _validation_error_without_auth_secrets(
+    request: Request, exc: RequestValidationError
+) -> Response:
+    """Do not echo rejected auth request bodies (especially passwords)."""
+
+    if not request.url.path.startswith("/api/auth/"):
+        return await request_validation_exception_handler(request, exc)
+    details = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
 
 
 @asynccontextmanager
@@ -53,6 +71,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=app_lifespan,
     )
     app.state.settings = settings or Settings()
+    app.add_exception_handler(
+        RequestValidationError, _validation_error_without_auth_secrets
+    )
     configure_observability(app.state.settings.log_level)
     app.middleware("http")(request_logging_middleware)
     app.state.llm_client = TJUClient(app.state.settings)
@@ -91,8 +112,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The Mock provider is shared mutable demo state. Serialize Agent runs with
     # scenario changes so a diagnostic turn cannot observe two scenarios.
     app.state.runtime_lock = RLock()
+    app.state.auth_lock = RLock()
+    app.state.auth_service = None
 
     app.include_router(api_router, prefix="/api")
+    app.include_router(auth_router, prefix="/api")
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 

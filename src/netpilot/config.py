@@ -66,6 +66,14 @@ class Settings(BaseSettings):
         le=5_000_000,
     )
 
+    # Authentication is mandatory; a false env value fails closed at startup.
+    auth_enabled: Literal[True] = True
+    # Auth sessions use the same SQLite file as diagnosis history.
+    auth_cookie_name: str = "netpilot_session"
+    auth_cookie_secure: bool = False
+    auth_session_hours: int = Field(default=12, ge=1, le=168)
+    auth_max_active_sessions_per_user: int = Field(default=5, ge=1, le=50)
+
     tool_mode: ToolMode = ToolMode.MOCK
     mock_scenario: MockScenario = MockScenario.HEALTHY
     network_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
@@ -119,6 +127,15 @@ class Settings(BaseSettings):
         if value >= chunk_size:
             raise ValueError("RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE")
         return value
+
+    @field_validator("auth_cookie_name")
+    @classmethod
+    def validate_auth_cookie_name(cls, value: str) -> str:
+        normalized = value.strip()
+        allowed = normalized.replace("_", "").replace("-", "")
+        if not normalized or not normalized.isascii() or not allowed.isalnum():
+            raise ValueError("AUTH_COOKIE_NAME must contain only ASCII letters, digits, _ or -")
+        return normalized
 
     @property
     def llm_configured(self) -> bool:

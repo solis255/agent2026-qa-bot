@@ -55,6 +55,7 @@ def test_settings_load_valid_operational_values() -> None:
     assert settings.custom_scenario_max_count == 12
     assert settings.sse_chunk_chars == 24
     assert settings.sse_heartbeat_seconds == 10
+    assert settings.auth_enabled is True
 
 
 @pytest.mark.parametrize(
@@ -80,6 +81,7 @@ def test_settings_load_valid_operational_values() -> None:
         ("rag_chunk_overlap", 700),
         ("app_port", 70000),
         ("app_host", "  "),
+        ("auth_enabled", False),
     ],
 )
 def test_settings_reject_invalid_operational_values(field: str, value: object) -> None:

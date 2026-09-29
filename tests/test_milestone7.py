@@ -24,6 +24,7 @@ from netpilot.tools.schemas import (
     ToolErrorCode,
     ToolResult,
 )
+from conftest import register_test_user
 
 
 def _step(
@@ -178,6 +179,7 @@ def test_request_and_agent_logs_are_structured_and_secret_free(caplog) -> None:
 
     with caplog.at_level(logging.INFO, logger="netpilot"):
         with TestClient(app) as client:
+            register_test_user(client)
             session = client.post("/api/session").json()["session_id"]
             response = client.post(
                 "/api/chat",
@@ -224,6 +226,7 @@ def test_chat_rejects_oversized_message() -> None:
         )
     )
     with TestClient(app) as client:
+        register_test_user(client)
         session = client.post("/api/session").json()["session_id"]
         response = client.post(
             "/api/chat",

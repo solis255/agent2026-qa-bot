@@ -16,8 +16,8 @@ TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边�
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ FastAPI: netpilot.main.create_app()                                          │
 │  request_logging_middleware()                                                │
-│  netpilot.api.routes                                                         │
-│  /health /session /chat /chat/stream /diagnoses /reports /scenarios         │
+│  netpilot.api.auth_routes + netpilot.api.routes                              │
+│  /auth/* /health /session /chat /chat/stream /diagnoses /reports /scenarios │
 │  StaticFiles("web/", html=True)                                              │
 └──────────────┬──────────────────┬─────────────────────────┬───────────────────┘
                │                  │                         │
@@ -26,7 +26,7 @@ TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边�
 ┌──────────────────────┐  ┌────────────────────────┐  ┌───────────────────────┐
 │ SessionStore         │  │ SQLiteDiagnosis-      │  │ runtime_lock +       │
 │ bounded in-memory    │  │ Repository            │  │ Mock scenario state  │
-│ text conversation    │  │ immutable snapshots   │  └───────────────────────┘
+│ owner_user_id       │  │ user_id + snapshots   │  └───────────────────────┘
 └──────────┬───────────┘  └───────────┬────────────┘
            │ history                  │
            │                          └──> build_diagnosis_report()
@@ -80,6 +80,7 @@ agent2026-qa-bot/
 │   ├── config.py                # Settings、ToolMode、MockScenario
 │   ├── agent/                   # AgentOrchestrator、ToolRegistry、Session、诊断
 │   ├── api/                     # routes、presenters、SSE encoder
+│   ├── auth/                    # 用户、Argon2id、服务端 Auth Session、依赖
 │   ├── llm/                     # TJUClient 与 LLM schemas/errors
 │   ├── tools/                   # Provider contract、Mock/Local、输入/结果 schemas
 │   ├── rag/                     # loader、chunker、embedding、FAISS、retriever
@@ -94,7 +95,7 @@ agent2026-qa-bot/
 ├── scripts/                     # 索引构建、产品/模型冒烟脚本及上游脚本
 ├── tests/                       # 自动化测试
 ├── docs/                        # 架构、验收、上游和既有 Milestone 文档
-├── screenshots/                 # 真实截图采集说明；不含伪造 PNG
+├── screenshots/                 # 真实截图采集说明及已提供的双账号页面 PNG
 ├── labs/                        # 上游 Labs 1–6
 ├── lab/                         # 上游 Containerlab topology/configs
 ├── examples/                    # 上游示例与 mock spine/leaf
@@ -116,8 +117,9 @@ agent2026-qa-bot/
 | RAG | `load_configured_retriever()` → `FaissRetriever | None` | 离线加载匹配的本地索引与模型缓存 |
 | Registry | `ToolRegistry` | 暴露 allowlist schemas、校验并 dispatch Tool |
 | Agent | `AgentOrchestrator` | 有界 Tool loop、去重、来源聚合与 fallback |
-| 会话 | `SessionStore` | 有界内存文本历史与 busy 控制 |
-| 历史 | `SQLiteDiagnosisRepository | None` | 保存不可变诊断快照 |
+| 认证 | `AuthService`、`UserRepository`、`AuthSessionRepository` | SQLite 用户/Session，HttpOnly Cookie 解析与当前用户依赖 |
+| 会话 | `SessionStore` | 绑定 owner 的有界内存文本历史与 busy 控制 |
+| 历史 | `SQLiteDiagnosisRepository | None` | 按用户保存及读取不可变诊断快照 |
 | 并发锁 | `RLock` (`runtime_lock`) | 防止 Agent 运行中切换 Mock 场景 |
 
 应用构造不发起 TJU 模型或网络 Tool 请求。关闭应用时，lifespan 会释放 `TJUClient` 自己持有的 SDK transport。
@@ -127,24 +129,25 @@ agent2026-qa-bot/
 通用 HTTP 流程：
 
 1. 请求进入 `request_logging_middleware()`，校验/生成 `X-Request-ID` 并写入安全结构化日志上下文。
-2. `routes.py` 的 Pydantic request model 校验 UUID、消息长度、字段白名单和查询参数。
-3. chat 路由确认 `TJUClient.configured`，再通过 `SessionStore.begin_turn()` 获取历史并将会话标为 busy。
+2. 受保护路由通过 `require_current_user()` 验证服务端 Auth Session Cookie；未登录返回 401。Pydantic request model 校验 UUID、消息长度、字段白名单和查询参数。
+3. chat 路由确认 `TJUClient.configured`，再通过 `SessionStore.begin_turn(session_id, user.id)` 校验 owner、获取历史并将会话标为 busy；其他用户的 session 返回 404。
 4. `AgentOrchestrator.run()` 在 `runtime_lock` 内执行，避免同一轮诊断观察到两个 Mock 场景。
 5. `present_chat()` 把 `AgentResult` 转换为公开 `ChatResponse`，包括 diagnosis、metrics、Tool Timeline 和 sources。
-6. 若历史仓库可用，保存快照并把 `record_id` 加入响应；保存失败只记录安全告警，不使聊天失败。
+6. 若历史仓库可用，连同 `user.id` 保存快照并把 `record_id` 加入响应；保存失败只记录安全告警，不使聊天失败。
 7. 完成/异常路径分别调用 `finish_turn()`/`abort_turn()`，确保 busy 状态释放。
 
 ### POST /api/chat
 
 ```text
 ChatRequest
+  -> require_current_user() / HttpOnly Cookie
   -> configured check
-  -> SessionStore.begin_turn(session_id)
+  -> SessionStore.begin_turn(session_id, user.id)
   -> runtime_lock
   -> AgentOrchestrator.run(message, history)
   -> SessionStore.finish_turn(user text, assistant text)
   -> present_chat()
-  -> SQLiteDiagnosisRepository.save() [optional, degradable]
+  -> SQLiteDiagnosisRepository.save(user.id, ...) [optional, degradable]
   -> ChatResponse
 ```
 
@@ -154,7 +157,7 @@ ChatRequest
 
 ```text
 ChatRequest
-  -> same prevalidation and SessionStore.begin_turn()
+  -> same authentication, prevalidation and SessionStore.begin_turn(session_id, user.id)
   -> StreamingResponse(text/event-stream)
        -> start event
        -> worker: same Agent turn + session finalization + optional history save
@@ -173,6 +176,7 @@ sequenceDiagram
     autonumber
     actor U as User / Browser
     participant API as FastAPI routes
+    participant Auth as require_current_user
     participant S as SessionStore
     participant A as AgentOrchestrator
     participant L as TJUClient / tju-llm
@@ -181,7 +185,9 @@ sequenceDiagram
     participant H as SQLiteDiagnosisRepository
 
     U->>API: POST /api/chat {session_id, message}
-    API->>S: begin_turn(session_id)
+    API->>Auth: validate HttpOnly Cookie
+    Auth-->>API: current user or 401
+    API->>S: begin_turn(session_id, user.id)
     S-->>API: bounded text history
     API->>A: run(message, history)
     A->>R: schemas()
@@ -199,7 +205,7 @@ sequenceDiagram
     end
     A-->>API: AgentResult + AgentToolStep[] + sources
     API->>S: finish_turn(user text, answer)
-    API->>H: save immutable snapshot (if ready)
+    API->>H: save(user.id, immutable snapshot) (if ready)
     H-->>API: record_id
     API-->>U: ChatResponse
 ```
@@ -264,6 +270,7 @@ Campus knowledge intent
 |---|---|---|
 | 用途 | 给下一轮 Agent 提供对话上下文 | 回看、分页、报告和导出 |
 | 存储 | 进程内字典 | 本地 SQLite 文件 |
+| 所有权 | `owner_user_id`，跨用户 session 404 | 行与新快照均带 `user_id`；查询按 owner 过滤 |
 | 内容 | 仅 user/assistant 文本消息 | 完整不可变诊断快照 |
 | 生命周期 | 进程重启或 clear 后消失 | 跨应用重启保留 |
 | 上限 | `MAX_HISTORY_MESSAGES`、`MAX_SESSIONS` | `DIAGNOSIS_MAX_RECORDS` |
@@ -272,15 +279,18 @@ Campus knowledge intent
 
 报告不再次调用模型。`build_diagnosis_report()` 从保存的 `DiagnosisRecordView` 确定性生成 `DiagnosisReportView`，`export_diagnosis_report()` 生成有大小上限、稳定文件名的 Markdown 或 JSON。
 
+现有 v1 历史表通过事务性、幂等迁移增加可空 `user_id`。旧记录保留为 `NULL`，普通用户不可见；新记录带当前用户 ID。`users` 与 `auth_sessions` 位于同一个 `DIAGNOSIS_DB_PATH`，但 Auth Session 与聊天 `SessionStore` 是两类不同状态。
+
 ## Web and API
 
-`web/` 由 FastAPI `StaticFiles` 挂载到 `/`。浏览器使用同源 API，展示聊天、诊断摘要、Tool Timeline、来源、指标、历史、报告与 Mock 场景。用户/模型/场景文本通过安全 DOM 文本接口渲染，不依赖浏览器持久化存储保存会话内容或凭据。
+`web/` 由 FastAPI `StaticFiles` 挂载到 `/`。9C 页面先请求 `/api/auth/me`：有效 Cookie 显示主界面并加载个人 Session/History，401 显示登录/注册面板。右上角当前用户菜单提供“我的诊断历史”、改密和退出；退出或登录过期会清空前一账号的会话、诊断与报告 DOM。浏览器用 `credentials: "same-origin"` 调用同源 API，不将密码或 Auth Token 放入本地浏览器存储。聊天、诊断摘要、Tool Timeline、来源、指标、历史、报告与 Mock 场景仍经文本 DOM 接口安全渲染。
 
 主要 API：
 
 | Method | Path | 作用 |
 |---|---|---|
 | GET | `/api/health` | LLM、Provider、RAG、History readiness |
+| POST/GET | `/api/auth/*` | 注册、登录、退出、当前用户、修改密码 |
 | POST | `/api/session` | 创建内存会话 |
 | POST | `/api/chat` | 非 SSE 的完整 `ChatResponse` |
 | POST | `/api/chat/stream` | transport-level SSE |
@@ -292,6 +302,8 @@ Campus knowledge intent
 | POST | `/api/scenarios/{scenario}` | 受开关保护的切换 |
 | POST | `/api/scenarios/custom` | 创建严格自定义 Mock 场景 |
 | DELETE | `/api/scenarios/custom/{name}` | 删除自定义场景 |
+
+除健康检查与 Mock 场景列表外，表中聊天、历史、报告和场景写接口均要求当前用户。按 `record_id` 的详情、报告和导出通过 `record_id + user_id` 查询；跨用户返回 404。详细验收见 [`MILESTONE9B_VALIDATION.md`](MILESTONE9B_VALIDATION.md)。
 
 ## SSE Flow
 
@@ -319,10 +331,12 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 - Demo：`SCENARIO_SWITCH_ENABLED`、`CUSTOM_SCENARIO_MAX_COUNT`；
 - RAG：`RAG_ENABLED`、`EMBEDDING_MODEL`、Top-K、阈值、chunk 参数；
 - History/Report：开关、SQLite 路径、记录与导出上限；
+- Auth：`AUTH_ENABLED=true` 强制启用（false 拒绝启动）、Cookie 名称/Secure、登录时长与活跃 Session 上限；
 - SSE：`SSE_CHUNK_CHARS`、`SSE_HEARTBEAT_SECONDS`；
 - App/Logs：host、port、debug、log level。
 
 `.env.example` 只提供模板。真实 `.env` 和 API Key 不应进入 Git、日志、响应或文档。
+可信 LAN HTTP 演示的只读预检位于 `scripts/check_lan_demo.py`，仅检查本地配置与索引文件，不打开端口或接触网络；已收录两张双账号页面截图，防火墙、跨设备可达性及其余场景仍需人工核查，见 [`MILESTONE9D_LAN_DEMO.md`](MILESTONE9D_LAN_DEMO.md)。
 
 ## Error Boundaries
 
@@ -354,6 +368,7 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 - FastAPI `TestClient` 验证 health/session/chat/SSE/history/report/scenario API；
 - 临时 SQLite 验证重启、并发、保留、游标与降级；
 - 静态 Web 断言验证页面功能面、同源请求、文本渲染和响应式状态。
+- `tests/test_lan_demo_preflight.py` 验证认证不可关闭、LAN HTTP 配置预检及不回显错误配置值；预检不等于实际网络/浏览器验收。
 
 本套测试默认离线，不以真实模型或现场网络作为稳定依赖。完整映射见 [`test-cases.md`](test-cases.md)。
 

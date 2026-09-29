@@ -16,6 +16,7 @@ pydantic-settings>=2.6,<3
 httpx>=0.27,<1
 psutil>=5.9,<8
 dnspython>=2.6,<3
+argon2-cffi>=23.1,<26
 
 # NetPilot Milestone 5 local Chinese embeddings and vector search
 fastembed>=0.7,<1

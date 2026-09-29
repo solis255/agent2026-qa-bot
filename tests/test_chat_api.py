@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 
 from netpilot.agent import AgentResult, AgentStatus, AgentToolStep
 from netpilot.config import Settings
@@ -70,6 +71,7 @@ def build_application(*, api_key: str | None = "web-test-key", **overrides):
 
 
 def create_session(client: TestClient) -> str:
+    register_test_user(client)
     response = client.post("/api/session")
     assert response.status_code == 201
     return response.json()["session_id"]
@@ -104,6 +106,7 @@ def test_chat_api_passes_bounded_session_history_to_agent() -> None:
     fake_agent = application.state.agent
     with TestClient(application) as client:
         session_id = create_session(client)
+        owner = UUID(client.get("/api/auth/me").json()["id"])
         for message in ("第一问", "第二问"):
             assert client.post(
                 "/api/chat",
@@ -115,18 +118,19 @@ def test_chat_api_passes_bounded_session_history_to_agent() -> None:
         "第一问",
         "问题判断：DNS 解析异常。\n建议：检查 DNS 设置。",
     ]
-    assert len(application.state.sessions.history(UUID(session_id))) == 2
+    assert len(application.state.sessions.history(UUID(session_id), owner)) == 2
 
 
 def test_chat_api_handles_unknown_busy_and_unconfigured_sessions() -> None:
     application = build_application()
     with TestClient(application) as client:
+        session_id = create_session(client)
+        owner = UUID(client.get("/api/auth/me").json()["id"])
         unknown = client.post(
             "/api/chat",
             json={"session_id": "27929b0e-5680-49ca-9d2b-feb153c13a40", "message": "测试"},
         )
-        session_id = create_session(client)
-        application.state.sessions.begin_turn(UUID(session_id))
+        application.state.sessions.begin_turn(UUID(session_id), owner)
         busy = client.post(
             "/api/chat",
             json={"session_id": session_id, "message": "测试"},
@@ -151,6 +155,7 @@ def test_chat_api_validates_messages_and_hides_unexpected_errors() -> None:
     application.state.agent = BrokenAgent()
     with TestClient(application) as client:
         session_id = create_session(client)
+        owner = UUID(client.get("/api/auth/me").json()["id"])
         empty = client.post(
             "/api/chat",
             json={"session_id": session_id, "message": "   "},
@@ -168,4 +173,4 @@ def test_chat_api_validates_messages_and_hides_unexpected_errors() -> None:
     assert too_long.status_code == 422
     assert failed.status_code == 500
     assert "secret backend detail" not in failed.text
-    assert application.state.sessions.get(UUID(session_id)).busy is False
+    assert application.state.sessions.get(UUID(session_id), owner).busy is False

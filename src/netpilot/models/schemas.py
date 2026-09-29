@@ -121,6 +121,7 @@ class ChatResponse(BaseModel):
 class DiagnosisRecordView(BaseModel):
     schema_version: Literal[1] = 1
     record_id: UUID
+    user_id: UUID | None = None
     session_id: UUID
     created_at: datetime
     user_message: str = Field(min_length=1, max_length=4000)

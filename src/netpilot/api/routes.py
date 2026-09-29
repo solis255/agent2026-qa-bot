@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from contextvars import copy_context
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from netpilot.agent import (
@@ -17,6 +17,8 @@ from netpilot.agent import (
     SessionNotFoundError,
     SessionStore,
 )
+from netpilot.auth.dependencies import require_current_user
+from netpilot.auth.models import UserRecord
 from netpilot.api.presenters import present_chat
 from netpilot.api.sse import iter_chat_sse
 from netpilot.config import MockScenario, Settings, ToolMode
@@ -56,6 +58,7 @@ from netpilot.tools.custom_scenarios import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+CurrentUser = Annotated[UserRecord, Depends(require_current_user)]
 
 SCENARIO_DETAILS = {
     MockScenario.HEALTHY: ("网络正常", "各项基础网络检查均正常"),
@@ -87,9 +90,9 @@ def health(request: Request) -> HealthResponse:
     status_code=status.HTTP_201_CREATED,
     tags=["chat"],
 )
-def create_session(request: Request) -> SessionResponse:
+def create_session(request: Request, user: CurrentUser) -> SessionResponse:
     try:
-        snapshot = _sessions(request).create()
+        snapshot = _sessions(request).create(user.id)
     except SessionCapacityError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -102,7 +105,7 @@ def create_session(request: Request) -> SessionResponse:
 
 
 @router.post("/chat", response_model=ChatResponse, tags=["chat"])
-def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatResponse:
     """Run one bounded Agent turn and append only text history to the session."""
 
     llm_client: TJUClient = request.app.state.llm_client
@@ -114,7 +117,7 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     session_token = set_session_id(payload.session_id)
     sessions = _sessions(request)
     try:
-        history = sessions.begin_turn(payload.session_id)
+        history = sessions.begin_turn(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         reset_session_id(session_token)
         raise HTTPException(
@@ -150,7 +153,7 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     repository = _diagnoses(request)
     if repository is not None:
         try:
-            record = repository.save(payload.message, response)
+            record = repository.save(user.id, payload.message, response)
             response = response.model_copy(update={"record_id": record.record_id})
         except DiagnosisStorageError:
             log_event(
@@ -177,7 +180,9 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     response_class=StreamingResponse,
     tags=["chat"],
 )
-def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
+def chat_stream(
+    payload: ChatRequest, request: Request, user: CurrentUser
+) -> StreamingResponse:
     """Run one Agent turn and emit a versioned JSON SSE event sequence."""
 
     llm_client: TJUClient = request.app.state.llm_client
@@ -188,7 +193,7 @@ def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
         )
     sessions = _sessions(request)
     try:
-        history = sessions.begin_turn(payload.session_id)
+        history = sessions.begin_turn(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -213,7 +218,7 @@ def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
             repository = _diagnoses(request)
             if repository is not None:
                 try:
-                    record = repository.save(payload.message, response)
+                    record = repository.save(user.id, payload.message, response)
                     response = response.model_copy(update={"record_id": record.record_id})
                 except DiagnosisStorageError:
                     log_event(
@@ -268,6 +273,7 @@ def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
 )
 def list_diagnoses(
     request: Request,
+    user: CurrentUser,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None, max_length=512),
     session_id: UUID | None = None,
@@ -275,6 +281,7 @@ def list_diagnoses(
     repository = _require_diagnoses(request)
     try:
         return repository.list(
+            user.id,
             limit=limit,
             cursor=cursor,
             session_id=session_id,
@@ -296,8 +303,10 @@ def list_diagnoses(
     response_model=DiagnosisRecordView,
     tags=["history"],
 )
-def get_diagnosis(record_id: UUID, request: Request) -> DiagnosisRecordView:
-    return _get_diagnosis_record(request, record_id)
+def get_diagnosis(
+    record_id: UUID, request: Request, user: CurrentUser
+) -> DiagnosisRecordView:
+    return _get_diagnosis_record(request, user.id, record_id)
 
 
 @router.get(
@@ -308,8 +317,9 @@ def get_diagnosis(record_id: UUID, request: Request) -> DiagnosisRecordView:
 def get_diagnosis_report(
     record_id: UUID,
     request: Request,
+    user: CurrentUser,
 ) -> DiagnosisReportView:
-    record = _get_diagnosis_record(request, record_id)
+    record = _get_diagnosis_record(request, user.id, record_id)
     return build_diagnosis_report(record)
 
 
@@ -321,9 +331,10 @@ def get_diagnosis_report(
 def export_diagnosis(
     record_id: UUID,
     request: Request,
+    user: CurrentUser,
     report_format: Literal["markdown", "json"] = Query(alias="format"),
 ) -> Response:
-    record = _get_diagnosis_record(request, record_id)
+    record = _get_diagnosis_record(request, user.id, record_id)
     report = build_diagnosis_report(record)
     try:
         artifact = export_diagnosis_report(
@@ -402,6 +413,7 @@ def list_scenarios(request: Request) -> ScenarioListResponse:
 def create_custom_scenario(
     payload: CustomScenarioCreateRequest,
     request: Request,
+    user: CurrentUser,
 ) -> ScenarioOption:
     _require_custom_scenario_write(request)
     try:
@@ -434,6 +446,7 @@ def create_custom_scenario(
 def delete_custom_scenario(
     scenario: str,
     request: Request,
+    user: CurrentUser,
 ) -> CustomScenarioDeleteResponse:
     _require_custom_scenario_write(request)
     _validate_scenario_name(scenario)
@@ -444,7 +457,7 @@ def delete_custom_scenario(
             session_id = None
             if was_active:
                 cleared = _sessions(request).clear()
-                session_id = _sessions(request).create().session_id
+                session_id = _sessions(request).create(user.id).session_id
             current = request.app.state.network_tools.provider.scenario_name
     except CustomScenarioNotFoundError as exc:
         raise HTTPException(
@@ -467,6 +480,7 @@ def delete_custom_scenario(
 def switch_scenario(
     scenario: str,
     request: Request,
+    user: CurrentUser,
 ) -> ScenarioSwitchResponse:
     settings: Settings = request.app.state.settings
     if settings.tool_mode is not ToolMode.MOCK:
@@ -493,7 +507,7 @@ def switch_scenario(
         with request.app.state.runtime_lock:
             current = request.app.state.network_tools.set_mock_scenario(scenario)
             cleared = _sessions(request).clear()
-            snapshot = _sessions(request).create()
+            snapshot = _sessions(request).create(user.id)
     except CustomScenarioNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -549,11 +563,12 @@ def _require_diagnoses(request: Request) -> DiagnosisRepository:
 
 def _get_diagnosis_record(
     request: Request,
+    user_id: UUID,
     record_id: UUID,
 ) -> DiagnosisRecordView:
     repository = _require_diagnoses(request)
     try:
-        return repository.get(record_id)
+        return repository.get(user_id, record_id)
     except DiagnosisRecordNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

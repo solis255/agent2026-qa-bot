@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=p1d">
+    <link rel="stylesheet" href="/style.css?v=m9c">
   </head>
   <body>
     <header class="topbar">
@@ -14,16 +14,49 @@
         <span class="brand-mark">NP</span>
         <span>
           <strong>TJU NetPilot</strong>
-          <small>校园网络智能诊断与服务 Agent</small>
+          <small>天津大学校园网络智能诊断与服务 Agent</small>
         </span>
       </a>
       <div class="service-state" id="service-state" role="status" aria-live="polite">
         <span class="state-dot"></span>
         <span class="state-text">正在连接后端…</span>
       </div>
+      <details class="account-menu" id="account-menu" hidden>
+        <summary id="account-name" aria-label="当前用户菜单">当前用户</summary>
+        <div class="account-actions">
+          <button type="button" id="my-history">我的诊断历史</button>
+          <button type="button" id="change-password-open">修改密码</button>
+          <button type="button" id="logout-button">退出登录</button>
+        </div>
+      </details>
     </header>
 
-    <main class="workspace">
+    <main class="auth-gate" id="auth-gate" aria-labelledby="auth-title">
+      <section class="auth-card">
+        <p class="eyebrow">账号访问</p>
+        <h1 id="auth-title">登录 TJU NetPilot</h1>
+        <p class="auth-intro">登录后创建自己的诊断会话，查看和导出自己的诊断记录。</p>
+        <div class="auth-tabs" role="group" aria-label="选择登录或注册">
+          <button type="button" id="auth-login-tab" aria-pressed="true">登录</button>
+          <button type="button" id="auth-register-tab" aria-pressed="false">注册</button>
+        </div>
+        <form id="auth-form" class="auth-form">
+          <label for="auth-username">用户名</label>
+          <input id="auth-username" name="username" autocomplete="username" required maxlength="32" placeholder="3–32 位字母、数字、_ 或 -">
+          <label class="register-only" for="auth-nickname" hidden>昵称（可选）</label>
+          <input class="register-only" id="auth-nickname" name="nickname" autocomplete="nickname" maxlength="40" hidden placeholder="用于页面展示">
+          <label for="auth-password">密码</label>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+          <label class="register-only" for="auth-confirm" hidden>确认密码</label>
+          <input class="register-only" id="auth-confirm" name="confirm_password" type="password" autocomplete="new-password" hidden>
+          <button type="submit" id="auth-submit">登录</button>
+        </form>
+        <p class="form-status" id="auth-status" role="status" aria-live="polite"></p>
+        <p class="auth-safety">HTTP 演示仅使用专用测试账号与非敏感、未复用的密码。请勿输入学校统一身份认证密码。</p>
+      </section>
+    </main>
+
+    <main class="workspace" id="workspace" hidden>
       <section class="chat-panel" aria-labelledby="chat-title">
         <div class="section-heading chat-heading">
           <div>
@@ -127,11 +160,11 @@
           </div>
         </section>
 
-        <section class="status-card history-card">
+        <section class="status-card history-card" id="my-history-card">
           <div class="section-heading compact">
             <div>
               <p class="eyebrow">持久化记录</p>
-              <h2>诊断历史</h2>
+              <h2>我的诊断历史</h2>
             </div>
             <button type="button" class="text-button" id="history-refresh">刷新</button>
           </div>
@@ -202,6 +235,31 @@
       <pre class="report-content" id="report-content" tabindex="0">正在加载报告…</pre>
     </dialog>
 
-    <script src="/app.js?v=p1d" defer></script>
+    <dialog class="password-dialog" id="password-dialog" aria-labelledby="password-dialog-title">
+      <form id="password-form" class="password-form">
+        <div class="report-dialog-heading">
+          <div>
+            <p class="eyebrow">账号安全</p>
+            <h2 id="password-dialog-title">修改密码</h2>
+          </div>
+          <button type="button" class="report-close" id="password-dialog-close" aria-label="关闭修改密码表单">关闭</button>
+        </div>
+        <div class="password-form-body">
+          <label for="old-password">当前密码</label>
+          <input id="old-password" name="old_password" type="password" autocomplete="current-password" required>
+          <label for="new-password">新密码（8–128 字符）</label>
+          <input id="new-password" name="new_password" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+          <label for="confirm-new-password">确认新密码</label>
+          <input id="confirm-new-password" name="confirm_new_password" type="password" autocomplete="new-password" required>
+          <p class="form-status" id="password-status" role="status" aria-live="polite"></p>
+          <div class="scenario-form-actions">
+            <button type="button" class="secondary-button" id="password-cancel">取消</button>
+            <button type="submit" id="password-submit">保存新密码</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js?v=m9c" defer></script>
   </body>
 </html>

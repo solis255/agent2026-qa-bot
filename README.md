@@ -19,8 +19,8 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | 网络检测 | 六个 allowlisted、只读 Tool；严格参数校验与统一结构化证据 |
 | Provider | 确定性离线 `MockNetworkProvider`；检测运行 NetPilot 主机的 `LocalNetworkProvider` |
 | RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
-| Web/API | 中文 Web、会话、结构化 Tool Timeline、来源、健康检查、Mock 场景控制 |
-| 历史与报告 | SQLite 诊断快照、游标分页、确定性报告、Markdown/JSON 导出 |
+| Web/API | 中文 Web、登录/注册/改密/退出、当前用户菜单、个人会话与历史、结构化 Tool Timeline、健康检查、Mock 场景控制 |
+| 历史与报告 | 按用户隔离的 SQLite 诊断快照、游标分页、确定性报告、Markdown/JSON 导出 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -78,7 +78,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 
 预期：时间线显示知识参考，来源区展示 `community`、标题、相关度与原始 URL；回答明确社区资料不等于学校当前官方规定。
 
-更多统一验收场景见[比赛测试用例矩阵](docs/test-cases.md)。截图目录目前只提供[真实截图采集清单](screenshots/README.md)，未提交伪造占位图。
+更多统一验收场景见[比赛测试用例矩阵](docs/test-cases.md)。[真实截图清单](screenshots/README.md)已收录两个测试账号的页面截图，其他场景仍待采集；未提交伪造占位图。
 
 ## 架构
 
@@ -161,7 +161,7 @@ TJU_MODEL=tju-llm
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 <http://127.0.0.1:8000/>，健康检查位于 <http://127.0.0.1:8000/api/health>。没有 `TJU_API_KEY` 时应用仍会启动并返回 `llm_configured=false`，但聊天接口不可用；Tool Provider 构造阶段不会发出网络请求。
+打开 <http://127.0.0.1:8000/>，注册专用演示账号或登录后即可创建个人会话；右上角菜单提供“我的诊断历史”、修改密码和退出。健康检查位于 <http://127.0.0.1:8000/api/health>。没有 `TJU_API_KEY` 时应用仍会启动并返回 `llm_configured=false`，但聊天接口不可用；Tool Provider 构造阶段不会发出网络请求。
 
 ### Mock 比赛演示
 
@@ -172,6 +172,12 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 ```
 
 内置场景：`healthy`、`dns_failure`、`gateway_unreachable`、`tcp_ssh_blocked`、`http_failure`、`partial_connectivity`。Mock Provider 不执行系统命令、Socket 或 HTTP 请求。
+
+### 可信 LAN 双账号演示
+
+完整配置、安全边界、预检、demo-a/demo-b 历史隔离脚本和真实截图清单见 [Milestone 9D LAN 演示手册](docs/MILESTONE9D_LAN_DEMO.md)。本机默认仍只监听 `127.0.0.1`；仅在确认防火墙限制到可信演示网段后，才在私有 `.env` 中设置 `APP_HOST=0.0.0.0`，并通过 `python -m netpilot.main` 启动。运行 `python scripts/check_lan_demo.py` 可先做不接触密钥的只读配置预检。
+
+认证始终开启，`AUTH_ENABLED=false` 会拒绝启动。直接 HTTP LAN 演示用 `AUTH_COOKIE_SECURE=false`，只允许专用测试账号和不复用的非敏感密码；正式 HTTPS 环境必须改为 `true`。远端用户应访问同一服务端私网 IP，不能保证校园 Wi-Fi 或所有网段互通。已收录 [`demo1` 历史/报告入口](screenshots/05-history-report.png)与 [`demo2` 空历史](screenshots/06-multiuser-isolation.png)的真实截图；登录、DNS、SSH 等其余画面仍待采集。
 
 ### Local 本机检测
 
@@ -215,15 +221,21 @@ GET  /api/scenarios
 python -m pytest -q
 ```
 
-本次 Milestone 8 修改前的实际基线为：
+Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 9D 全量回归实测为：
 
 ```text
-214 passed in 8.80s
+246 passed in 14.83s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
 
 ## 安全与限制
+
+### Milestone 9A–9D 当前状态
+
+已增加 SQLite 用户表/服务端认证 Session、Argon2id 密码哈希，以及 `/api/auth/register`、`/api/auth/login`、`/api/auth/logout`、`/api/auth/me`、`/api/auth/change-password`。详见 [9A 验收说明](docs/MILESTONE9A_VALIDATION.md)。
+
+9B 已为 Chat Session 绑定 `owner_user_id`，诊断历史新记录绑定 `user_id`；会话、聊天、历史、报告、导出需登录，跨用户资源访问返回 404。旧历史迁移后保留为 `user_id=NULL`，普通账号不可见。详见 [9B 验收说明](docs/MILESTONE9B_VALIDATION.md)。9C 已接入同源 Cookie 的 Web 登录/注册、当前用户、退出、修改密码与“我的诊断历史”，详见 [9C 验收说明](docs/MILESTONE9C_VALIDATION.md)。9D 已增加认证 fail-closed 配置、LAN 只读预检及双账号演示手册，并收录两张真实浏览器截图；跨设备 LAN 人工验收和其余截图仍待现场完成。
 
 - LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
 - 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。

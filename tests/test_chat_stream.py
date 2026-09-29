@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+from conftest import register_test_user
 
 from netpilot.agent import AgentResult, AgentStatus, AgentToolStep
 from netpilot.api.sse import encode_sse_event, iter_chat_sse
@@ -69,6 +70,7 @@ def stream_app(tmp_path, *, api_key: str | None = "stream-test-key"):
 
 
 def create_session(client: TestClient) -> str:
+    register_test_user(client)
     response = client.post("/api/session")
     assert response.status_code == 201
     return response.json()["session_id"]
@@ -123,7 +125,8 @@ def test_stream_api_emits_versioned_deltas_and_complete_snapshot(tmp_path) -> No
         ) as response:
             payload = "".join(response.iter_text())
 
-        history = application.state.sessions.history(UUID(session_id))
+        owner = UUID(client.get("/api/auth/me").json()["id"])
+        history = application.state.sessions.history(UUID(session_id), owner)
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -150,12 +153,13 @@ def test_stream_api_emits_versioned_deltas_and_complete_snapshot(tmp_path) -> No
 def test_stream_api_prevalidates_sessions_and_configuration(tmp_path) -> None:
     application = stream_app(tmp_path)
     with TestClient(application) as client:
+        session_id = create_session(client)
+        owner = UUID(client.get("/api/auth/me").json()["id"])
         unknown = client.post(
             "/api/chat/stream",
             json={"session_id": str(uuid4()), "message": "测试"},
         )
-        session_id = create_session(client)
-        application.state.sessions.begin_turn(UUID(session_id))
+        application.state.sessions.begin_turn(UUID(session_id), owner)
         busy = client.post(
             "/api/chat/stream",
             json={"session_id": session_id, "message": "测试"},
@@ -184,7 +188,8 @@ def test_stream_worker_error_is_safe_and_releases_busy_session(tmp_path) -> None
             "/api/chat/stream",
             json={"session_id": session_id, "message": "触发错误"},
         )
-        snapshot = application.state.sessions.get(UUID(session_id))
+        owner = UUID(client.get("/api/auth/me").json()["id"])
+        snapshot = application.state.sessions.get(UUID(session_id), owner)
 
     events = parse_sse(response.text)
     assert response.status_code == 200
