@@ -171,6 +171,44 @@ const submit = (id) => get(id).handlers.submit({ preventDefault() {} });
   assert.equal(get("history-list").children[0].className, "empty-state");
   assert.equal(vm.runInContext("state.user.id", context), "bob-id");
   assert.ok(calls.every((call) => call.options.credentials === "same-origin"));
+
+  const streamEvents = [];
+  context.streamEvents = streamEvents;
+  context.fetch = async (_url, options) => {
+    const chunks = [
+      'id: 0\nevent: start\ndata: {"schema_version":1,"session_id":"test"}\n\n',
+      ': keep-alive\n\n',
+      'id: 1\nevent: complete\ndata: {"schema_version":1,"response":{"answer":"完成"}}\n\n',
+    ].map((item) => Buffer.from(item, "utf8"));
+    let index = 0;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get(name) { return name === "content-type" ? "text/event-stream" : null; } },
+      body: {
+        getReader() {
+          return {
+            async read() {
+              await new Promise((resolve) => setTimeout(resolve, 15));
+              if (options.signal.aborted) {
+                const error = new Error("aborted");
+                error.name = "AbortError";
+                throw error;
+              }
+              if (index >= chunks.length) return { value: undefined, done: true };
+              return { value: chunks[index++], done: false };
+            },
+          };
+        },
+      },
+    };
+  };
+  await vm.runInContext(
+    'requestSSE("/api/chat/stream", {method: "POST", body: "{}"}, '
+      + 'async (name) => streamEvents.push(name), 25)',
+    context,
+  );
+  assert.deepEqual(streamEvents, ["start", "complete"]);
   process.stdout.write("9C Web runtime state flow passed\n");
 })().catch((error) => {
   console.error(error);

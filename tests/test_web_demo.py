@@ -45,6 +45,7 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
 
 
 def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
+    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
     javascript = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
     for endpoint in (
@@ -76,6 +77,10 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert 'eventName === "delta"' in javascript
     assert 'eventName === "complete"' in javascript
     assert "TextDecoder" in javascript
+    assert "armInactivityTimeout" in javascript
+    assert "流式连接长时间未收到数据" in javascript
+    assert "timeoutMs = 180000" not in javascript
+    assert 'src="/app.js?v=m9d-sse-idle"' in html
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:

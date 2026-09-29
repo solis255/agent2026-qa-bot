@@ -207,12 +207,21 @@ async function requestJSON(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
+async function requestSSE(url, options, onEvent, inactivityTimeoutMs = 45000) {
   const authEpoch = state.authEpoch;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let inactivityTimeout = null;
+  const armInactivityTimeout = () => {
+    if (inactivityTimeout !== null) window.clearTimeout(inactivityTimeout);
+    inactivityTimeout = window.setTimeout(() => controller.abort(), inactivityTimeoutMs);
+  };
+  const clearInactivityTimeout = () => {
+    if (inactivityTimeout !== null) window.clearTimeout(inactivityTimeout);
+    inactivityTimeout = null;
+  };
   let completed = false;
   try {
+    armInactivityTimeout();
     const response = await fetch(url, {
       ...options,
       credentials: "same-origin",
@@ -223,6 +232,7 @@ async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
         ...(options.headers || {}),
       },
     });
+    clearInactivityTimeout();
     if (!response.ok) {
       let detail = `流式请求失败（HTTP ${response.status}）`;
       try {
@@ -267,7 +277,9 @@ async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
     };
 
     while (true) {
+      armInactivityTimeout();
       const { value, done } = await reader.read();
+      clearInactivityTimeout();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       buffer = buffer.replace(/\r\n/g, "\n");
       let boundary = buffer.indexOf("\n\n");
@@ -282,10 +294,10 @@ async function requestSSE(url, options, onEvent, timeoutMs = 180000) {
     if (buffer.trim()) await dispatchBlock(buffer.trim());
     if (!completed) throw new Error("流式响应在完成事件前中断，请稍后重试。");
   } catch (error) {
-    if (error.name === "AbortError") throw new Error("流式诊断超时，请稍后重试。");
+    if (error.name === "AbortError") throw new Error("流式连接长时间未收到数据，请稍后重试。");
     throw error;
   } finally {
-    window.clearTimeout(timeout);
+    clearInactivityTimeout();
   }
 }
 
