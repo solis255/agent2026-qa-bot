@@ -23,7 +23,8 @@ class StreamAgent:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def run(self, message: str, *, history=()) -> AgentResult:
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del task_state
         self.calls.append({"message": message, "history": list(history)})
         return AgentResult(
             answer=ANSWER,
@@ -48,7 +49,8 @@ class StreamAgent:
 
 
 class BrokenStreamAgent:
-    def run(self, message: str, *, history=()) -> AgentResult:
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del task_state
         raise RuntimeError("secret streaming backend detail")
 
 

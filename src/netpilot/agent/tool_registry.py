@@ -198,6 +198,32 @@ class ToolRegistry:
             ))
         return finish(RegistryExecution(arguments=arguments, result=result))
 
+    def normalize_arguments(
+        self,
+        tool_name: str,
+        raw_arguments: str,
+    ) -> dict[str, Any] | None:
+        """Validate a call and materialize defaults without executing it.
+
+        ``None`` means the call is unknown or invalid.  The ordinary execution
+        path remains responsible for returning its safe structured error.
+        """
+
+        spec = self._specs.get(tool_name)
+        if spec is None:
+            return None
+        try:
+            payload = json.loads(raw_arguments)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        try:
+            request = spec.input_model.model_validate(payload)
+        except ValidationError:
+            return None
+        return request.model_dump(mode="json")
+
 
 def _function_parameters(input_model: type[BaseModel]) -> dict[str, Any]:
     schema = input_model.model_json_schema()

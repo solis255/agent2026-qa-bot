@@ -152,8 +152,8 @@ def test_knowledge_tool_is_gated_by_campus_information_intent() -> None:
 
 
 class ApiAgent:
-    def run(self, message: str, *, history=()):
-        del message, history
+    def run(self, message: str, *, history=(), task_state=None):
+        del message, history, task_state
         from netpilot.agent import AgentResult
 
         return AgentResult(

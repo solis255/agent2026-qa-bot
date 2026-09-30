@@ -62,13 +62,14 @@ Multi-Agent 并非当前需求必要条件。现阶段没有需要并行自治�
 
 `AgentOrchestrator.run()` 的核心流程是：
 
-1. 组合系统提示、裁剪后的文本历史与当前用户消息；
-2. 根据用户意图决定是否向模型提供 `knowledge_search`；
-3. 将可用 Function schemas 发送给 `tju-llm`；
+1. 用确定性高置信规则将当前 Turn 分为 `diagnose / clarify / analyze_existing / knowledge_request / report_request / compare / followup_action / meta_feedback / state_changed / general_question`；
+2. 将 Intent 映射为 `ResponseMode` 和服务端 `ToolPolicy`，先缩小 Tool schemas，再由 `Context Builder` 把 Task、分类 Evidence、来源、假设和已执行 Tool 压缩成七段上下文；原始 Tool JSON 留在 TaskState，不跨 Turn 整包注入；
+3. 将策略允许的 Function schemas 发送给 `tju-llm`；零 Tool 意图使用 `tools=None`，使真实 SDK 请求完全省略 Tool 字段；
 4. 若模型直接回答，则返回；若返回 Tool Calls，则逐个校验和执行；
 5. 保存结构化 `AgentToolStep`，按 `tool_call_id` 回填 Tool 消息；
-6. 根据新证据继续一轮模型调用或要求最终回答；
-7. 达到 `MAX_TOOL_ROUNDS`、重复调用或模型异常时停止，并在已有证据允许时构造确定性 fallback。
+6. 将新证据映射为 `DiagnosticCoverage`，更新轻量 `Hypothesis`，并根据用户目标计算 `EvidenceSufficiency`；
+7. 只有覆盖充分或已完成用户明确点名的有界检测时，才要求最终回答；
+8. 达到 `MAX_TOOL_ROUNDS`、无法填补的重复调用或模型异常时停止，并在已有证据允许时构造确定性 fallback。
 
 一轮模型响应可以包含多个 Tool Call。相同 Tool/目标的重复检测会被去重，避免循环和无意义开销。
 
@@ -77,6 +78,8 @@ Multi-Agent 并非当前需求必要条件。现阶段没有需要并行自治�
 实时状态不能由语言模型记忆可靠得出。DNS、可达性、端口和 HTTP 等结论必须优先来自当前 Tool 证据；`resolved=false`、`connected=false` 等是“执行成功的异常观察”，不等同于 Tool 崩溃。
 
 同时，取证不是越多越好。Agent 应从用户现象出发选择最小检测集，例如 SSH 单端口问题优先 `tcp_check`，DNS 现象用公网 IP Ping 与域名解析交叉验证。概念解释和普通知识回答允许直接作答；校园服务知识意图可启用 `knowledge_search`，但不应顺带运行无关网络探测。
+
+停止决策不再使用“发现任意 abnormal”。完整网页故障目标要求网络配置、DNS、公网 IP 连通性和 TCP/HTTP 应用层四类覆盖；一项 DNS 失败只能支持 DNS 解析链路异常，不足以回答完整根因。多个同类 Evidence 在确定性输出中按 Tool 与状态聚合，模型最终回答前也会收到聚合摘要。
 
 ## 10. Tool Registry
 
@@ -101,17 +104,19 @@ RAG 构建链路为：带 front matter 的 UTF-8 Markdown/TXT → `load_document
 
 RAG 文档是 **untrusted reference data**。检索文本不得覆盖系统指令、扩大 Tool 权限或自动触发命令；知识参考也不是当前连通性的实时证据。
 
+同一 Turn 默认最多执行两次 `knowledge_search`，并优先控制在一次。查询经 Unicode/大小写/空白规范化后，再用中文字符和英文词集合的 Jaccard 相似度识别近义 query；命中时复用已有结果，不再次调用 Retriever。公开 API 的 `sources` 与 `diagnosis.evidence` 分离：前者是 Knowledge Source 操作参考，后者只承载实时 Network Evidence。
+
 ## 13. Diagnosis / Evidence
 
 `finding_status()` 将结果区分为 `normal`、`abnormal`、`error`、`inconclusive`、`blocked`、`reference`。`assess_diagnosis()` 再从结构化步骤生成主要问题、置信度、摘要、建议和限制。
 
-这种分层防止三类误判：把网络负面观察当成执行失败；把 Tool 超时当成目标不可达；把 SSRF 阻止当成网站响应失败。若模型最终回答缺失或异常，`build_diagnostic_answer()` 可基于已有 Tool 步骤提供保守 fallback。
+这种分层防止三类误判：把网络负面观察当成执行失败；把 Tool 超时当成目标不可达；把 SSRF 阻止当成网站响应失败。模型最终化失败时，`fallback_reason` 记录 `llm_error / max_tool_rounds / invalid_tool_loop / finalization_failed` 等原因；fallback 同时读取当前 Intent 和 `ResponseMode`，因此 report 生成六段报告、meta 直接回应反馈、analysis 分析已有 Evidence，而不是统一落回网络故障模板。
 
 ## 14. Session / History
 
 `SessionStore` 与 SQLite Diagnosis History 解决不同问题：
 
-- `SessionStore` 是进程内、有界、线程安全的对话上下文，绑定 `owner_user_id`，只保存 user/assistant 文本；重启或场景清理后消失；同一会话一次只允许一个 active turn，跨用户访问返回 404。
+- `SessionStore` 是进程内、有界、线程安全的会话状态，绑定 `owner_user_id`。user/assistant 文本与 `SessionTaskState` 分开保存；后者保留规范化 Tool Signature 和结构化 `EvidenceRecord`，使同一 Session 的后续 Turn 能复用证据并阻止等价 Tool 重跑。两者在重启或场景清理后消失；同一会话一次只允许一个 active turn，跨用户访问返回 404。
 - `SQLiteDiagnosisRepository` 保存带 `user_id` 的不可变结构化快照，包括问题、回答、诊断、指标、Tool Timeline 和来源；查询、分页、会话筛选与报告导出均按当前用户授权。旧记录迁移为 `user_id=NULL`，保留但对普通用户不可见。
 
 历史写入失败不会回滚已经完成的聊天。持久化内容可能包含用户问题和网络证据，部署者必须设置路径权限、保留策略与备份策略。
@@ -140,7 +145,7 @@ RAG 文档是 **untrusted reference data**。检索文本不得覆盖系统指�
 - RAG 索引缺失、损坏、模型不匹配或缓存不可用：`rag_ready=false`，不注册 `knowledge_search`，网络 Tool 继续可用；
 - SQLite 初始化失败：`history_ready=false`，聊天继续；后续写入失败也不改变聊天结果；
 - traceroute 命令不可用或 Tool 超时：返回 `inconclusive`，不伪造网络结论；
-- 模型失败：无 Tool 证据时返回安全模型错误；已有证据时尽可能生成确定性 fallback；
+- 模型失败：无上下文依据的普通问答返回安全模型错误；report / meta / analysis 或已有 Evidence 的路径生成 intent-aware deterministic fallback，并在 API metrics 与日志中暴露安全的 `fallback_reason`；
 - SSE 响应头发出后的异常：输出安全 `error` 事件，并释放 session busy 状态。
 
 ## 18. 测试
@@ -162,9 +167,9 @@ TJU NetPilot 的正式比赛产品位于 `src/netpilot/`，并配套 `web/`、`k
 - 不修改 DNS、代理、网卡、路由器或任何网络配置；
 - 当前内置 RAG 种子均为 community 摘要，不代表最新官方政策；
 - SSE 不是模型 token streaming；
-- SessionStore 不跨进程共享，SQLite History 也不是多节点协调服务；
+- SessionTaskState / Evidence Memory 仅在单进程 SessionStore 内存在，不跨重启或多进程共享；SQLite History 也不是多节点协调服务；
 - Web 已提供 9C 认证界面，但完整浏览器/LAN Demo 人工验收仍需完成；Mock 场景仍是应用级共享状态；
-- 诊断依赖用户提供足够目标信息，模糊问题主动澄清尚缺可靠自动验收；
+- 模糊问题已有高置信规则澄清路径，但尚未引入 LLM 辅助的低置信 Intent 分类，规则外表达可能落入 `general_question`；
 - Mock 场景用于演示与测试，不能代表真实校园网络状态。
 
 ## 21. 后续演进

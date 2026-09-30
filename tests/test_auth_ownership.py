@@ -22,8 +22,8 @@ from netpilot.main import create_app
 
 
 class OwnershipAgent:
-    def run(self, message: str, *, history=()) -> AgentResult:
-        del history
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del history, task_state
         return AgentResult(
             answer=f"诊断完成：{message}",
             status=AgentStatus.COMPLETED,

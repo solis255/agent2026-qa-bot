@@ -17,7 +17,8 @@ class FakeAgent:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def run(self, message: str, *, history=()) -> AgentResult:
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del task_state
         self.calls.append({"message": message, "history": list(history)})
         return AgentResult(
             answer="问题判断：DNS 解析异常。\n建议：检查 DNS 设置。",
@@ -53,7 +54,8 @@ class FakeAgent:
 
 
 class BrokenAgent:
-    def run(self, message: str, *, history=()):
+    def run(self, message: str, *, history=(), task_state=None):
+        del task_state
         raise RuntimeError("secret backend detail")
 
 

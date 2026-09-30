@@ -87,6 +87,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.llm_client,
         app.state.tool_registry,
         max_tool_rounds=app.state.settings.max_tool_rounds,
+        max_rag_calls_per_turn=app.state.settings.max_rag_calls_per_turn,
+        max_output_tokens=app.state.settings.llm_max_output_tokens,
+        report_max_output_tokens=app.state.settings.llm_report_max_output_tokens,
     )
     app.state.rag_ready = app.state.retriever is not None
     app.state.diagnosis_repository = None

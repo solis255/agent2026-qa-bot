@@ -28,6 +28,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             summary=tool_call.summary,
         )
         for tool_call in tool_calls
+        if tool_call.tool_name != "knowledge_search"
     ]
     return ChatResponse(
         session_id=session_id,
@@ -47,6 +48,17 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             llm_duration_ms=round(result.llm_duration_ms, 2),
             tool_duration_ms=sum(item.duration_ms for item in tool_calls),
             tool_calls=len(tool_calls),
+            turn_intent=(
+                result.turn_intent.value if result.turn_intent is not None else None
+            ),
+            response_mode=(
+                result.response_mode.value if result.response_mode is not None else None
+            ),
+            fallback_reason=(
+                result.fallback_reason.value
+                if result.fallback_reason is not None
+                else None
+            ),
         ),
         tool_calls=tool_calls,
         sources=[SourceView(**source.model_dump(mode="json")) for source in result.sources],

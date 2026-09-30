@@ -118,6 +118,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
     sessions = _sessions(request)
     try:
         history = sessions.begin_turn(payload.session_id, user.id)
+        task_state = sessions.task_state(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         reset_session_id(session_token)
         raise HTTPException(
@@ -133,8 +134,17 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
 
     try:
         with request.app.state.runtime_lock:
-            result = request.app.state.agent.run(payload.message, history=history)
-        sessions.finish_turn(payload.session_id, payload.message, result.answer)
+            result = request.app.state.agent.run(
+                payload.message,
+                history=history,
+                task_state=task_state,
+            )
+        sessions.finish_turn(
+            payload.session_id,
+            payload.message,
+            result.answer,
+            result=result,
+        )
     except Exception as exc:
         sessions.abort_turn(payload.session_id)
         log_event(
@@ -170,6 +180,11 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
         llm_duration=round(result.llm_duration_ms, 2),
         tool_rounds=result.tool_rounds,
         status=str(getattr(result.status, "value", result.status)),
+        turn_intent=(result.turn_intent.value if result.turn_intent else None),
+        response_mode=(result.response_mode.value if result.response_mode else None),
+        fallback_reason=(
+            result.fallback_reason.value if result.fallback_reason else None
+        ),
     )
     reset_session_id(session_token)
     return response
@@ -194,6 +209,7 @@ def chat_stream(
     sessions = _sessions(request)
     try:
         history = sessions.begin_turn(payload.session_id, user.id)
+        task_state = sessions.task_state(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -212,8 +228,17 @@ def chat_stream(
     def run_turn() -> ChatResponse:
         try:
             with request.app.state.runtime_lock:
-                result = request.app.state.agent.run(payload.message, history=history)
-            sessions.finish_turn(payload.session_id, payload.message, result.answer)
+                result = request.app.state.agent.run(
+                    payload.message,
+                    history=history,
+                    task_state=task_state,
+                )
+            sessions.finish_turn(
+                payload.session_id,
+                payload.message,
+                result.answer,
+                result=result,
+            )
             response = present_chat(payload.session_id, result)
             repository = _diagnoses(request)
             if repository is not None:
@@ -235,6 +260,11 @@ def chat_stream(
                 llm_duration=round(result.llm_duration_ms, 2),
                 tool_rounds=result.tool_rounds,
                 status=str(getattr(result.status, "value", result.status)),
+                turn_intent=(result.turn_intent.value if result.turn_intent else None),
+                response_mode=(result.response_mode.value if result.response_mode else None),
+                fallback_reason=(
+                    result.fallback_reason.value if result.fallback_reason else None
+                ),
             )
             return response
         except Exception as exc:

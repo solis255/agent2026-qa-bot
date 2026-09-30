@@ -6,6 +6,7 @@ import ipaddress
 from dataclasses import dataclass
 
 from netpilot.agent.evidence import finding_status, json_data
+from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.schemas import AgentToolStep
 
 
@@ -163,7 +164,11 @@ def assess_diagnosis(steps: list[AgentToolStep]) -> DiagnosticAssessment:
     )
 
 
-def build_diagnostic_answer(steps: list[AgentToolStep]) -> str:
+def build_diagnostic_answer(
+    steps: list[AgentToolStep],
+    *,
+    hypotheses: list[Hypothesis] | None = None,
+) -> str:
     assessment = assess_diagnosis(steps)
     labels = {
         "get_network_info": "网络接口",
@@ -182,11 +187,7 @@ def build_diagnostic_answer(steps: list[AgentToolStep]) -> str:
         "blocked": "安全阻止",
         "reference": "参考资料",
     }
-    evidence = [
-        f"- {labels.get(step.tool_name, step.tool_name)}："
-        f"{markers[step_status(step)]}，{step.result.summary}"
-        for step in steps
-    ]
+    evidence = _aggregate_evidence(steps, labels, markers)
     parts = [
         f"问题判断：{assessment.summary}",
         "检测结果：\n" + "\n".join(evidence),
@@ -199,7 +200,66 @@ def build_diagnostic_answer(steps: list[AgentToolStep]) -> str:
             "结论限制：\n"
             + "\n".join(f"- {item}" for item in assessment.limitations)
         )
+    tracked = list(hypotheses or ())
+    if tracked:
+        status_labels = {
+            "possible": "待验证",
+            "supported": "已支持",
+            "weakened": "已削弱",
+            "excluded": "已排除",
+        }
+        parts.append(
+            "假设跟踪：\n"
+            + "\n".join(
+                f"- {item.name}：{status_labels[item.status]}"
+                for item in tracked
+            )
+        )
     return "\n\n".join(parts)
+
+
+def _aggregate_evidence(
+    steps: list[AgentToolStep],
+    labels: dict[str, str],
+    markers: dict[str, str],
+) -> list[str]:
+    grouped: dict[tuple[str, str], list[AgentToolStep]] = {}
+    for step in steps:
+        grouped.setdefault((step.tool_name, step_status(step)), []).append(step)
+
+    lines: list[str] = []
+    for (tool_name, status), group in grouped.items():
+        heading = f"- {labels.get(tool_name, tool_name)}：{markers.get(status, status)}"
+        details: list[str] = []
+        for step in group:
+            target = _step_target(step)
+            detail = f"{target}：{step.result.summary}" if target else step.result.summary
+            if detail not in details:
+                details.append(detail)
+        if len(group) == 1:
+            lines.append(f"{heading}，{details[0]}")
+            continue
+        lines.append(f"{heading}（{len(group)} 项）")
+        lines.extend(f"  - {detail}" for detail in details)
+    return lines
+
+
+def _step_target(step: AgentToolStep) -> str | None:
+    if step.tool_name == "dns_lookup":
+        value = step.arguments.get("domain")
+    elif step.tool_name in {"ping_host", "traceroute"}:
+        value = step.arguments.get("host")
+    elif step.tool_name == "tcp_check":
+        host = step.arguments.get("host")
+        port = step.arguments.get("port")
+        value = f"{host}:{port}" if host and port else host
+    elif step.tool_name == "http_check":
+        value = step.arguments.get("url")
+    elif step.tool_name == "knowledge_search":
+        value = step.arguments.get("query")
+    else:
+        value = None
+    return str(value) if value else None
 
 
 def _limitations(

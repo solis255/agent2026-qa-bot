@@ -106,6 +106,9 @@ class ExecutionMetricsView(BaseModel):
     llm_duration_ms: float = Field(default=0, ge=0)
     tool_duration_ms: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)
+    turn_intent: str | None = None
+    response_mode: str | None = None
+    fallback_reason: str | None = None
 
 
 class ChatResponse(BaseModel):

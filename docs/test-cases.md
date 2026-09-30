@@ -31,6 +31,9 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 | NP-SC-005 | Mock 场景：http_failure | 场景 `http_failure`；对 `example.com` 检查 DNS、TCP 443、HTTPS | DNS/Ping/TCP 证据健康；HTTP 为异常或错误状态证据；定位 HTTP/TLS/应用层 | 自动 + 手工 | `tests/test_mock_scenarios.py`、`tests/test_custom_scenarios.py` |
 | NP-SC-006 | Mock 场景：partial_connectivity | 场景 `partial_connectivity`；检查 `1.1.1.1` Ping 和 `example.com` traceroute | 同时存在成功和退化证据；不无限重复相同 Tool/目标；结论保留限制 | 自动 + 手工 | `tests/test_mock_scenarios.py`、`tests/test_agent_orchestrator.py` |
 | NP-RAG-001 | VPN / RAG | RAG ready；“天津大学 VPN 怎么使用？请调用 knowledge_search，并给出资料类型和来源” | 仅校园知识意图启用 `knowledge_search`；返回 title/URL/source_type/file/chunk/score；当前种子显示 `community`；资料作为 untrusted reference，不冒充实时证据或官方现行规定 | 自动 + 手工 | `tests/test_agent_rag_scenario.py`、`tests/test_milestone7.py`、`tests/test_rag_loader.py`、`tests/test_rag_index.py` |
+| NP-RAG-002 | RAG 去重与上限 | 同一 Turn 请求相同、近义及三个不同知识 query | 相同/近义 query 复用；默认最多执行两次 Retriever；第三个不同 query 被受控阻止；Knowledge Sources 不进入 `diagnosis.evidence` | 自动 | `tests/test_milestone10d.py` |
+| NP-AG-004 | Intent-aware fallback | 在 report、meta、analysis 模式令 LLM 超时 | 分别生成六段报告、反馈回应和已有 Evidence 分析；`response_mode` / `fallback_reason` 出现在 metrics；不落回固定 DNS 模板 | 自动 | `tests/test_milestone10d.py` |
+| NP-CTX-001 | Compact Context | TaskState 同时含 DNS 原始 data 和 RAG 结果 | 上下文包含七个固定区段；Network Evidence 与 Knowledge Sources 分离；不注入原始 Tool JSON | 自动 | `tests/test_milestone10d.py`、`tests/test_evidence_memory.py` |
 | NP-AG-001 | Multiple tool calls | Fake LLM 一次返回多个原生 `tool_calls` | 每个 allowlisted Tool 都执行；保留完整 assistant/tool 顺序；每个结果匹配自己的 `tool_call_id` | 自动 | `tests/test_agent_orchestrator.py`、`tests/test_agentic_tju_loop.py` |
 | NP-AG-002 | `MAX_TOOL_ROUNDS` | Fake LLM 持续请求新的 Tool；默认 `MAX_TOOL_ROUNDS=6` | 第七轮执行前停止；状态为 `max_tool_rounds`；有证据时给出保守 fallback，不无限循环 | 自动 | `tests/test_agent_orchestrator.py`、`tests/test_netpilot_config.py` |
 | NP-AG-003 | Invalid tool arguments | 未知 Tool、非 JSON、数组参数、额外 `command` 字段、越界端口 | 不执行 handler；返回 `unsupported` 或 `invalid_input`；安全错误可回填模型 | 自动 | `tests/test_tool_registry.py`、`tests/test_agent_orchestrator.py`、`tests/test_tools.py` |
@@ -45,7 +48,7 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 | NP-SSE-001 | SSE | `POST /api/chat/stream`；正常、慢 worker、异常、客户端关闭；不可信换行文本 | `start` → keep-alive 可选 → `delta...` → `complete`，或安全 `error`；完整 response 一致；JSON 防事件行注入；session 被释放 | 自动 | `tests/test_chat_stream.py` |
 | NP-SSE-002 | SSE 事实边界 | 检查 `TJUClient` 请求和 delta 时机 | 上游请求 `stream=false`；delta 只在完整 Agent 结果后分块；不得宣称模型 token streaming，不发生第二次模型请求 | 自动 + 文档审查 | `tests/test_netpilot_llm.py`、`tests/test_chat_stream.py` |
 | NP-WEB-001 | Web manual demo | 先登录演示账号，再依次演示 DNS、SSH、VPN/RAG、个人历史与报告下载；手机宽度复核 | 中文界面可用；Tool Timeline、来源、指标、历史/报告与当前记录一致；退出后旧账号数据不再显示；响应式布局可读 | 手工待执行；静态表面有自动检查 | `tests/test_web_demo.py`、`tests/test_web_auth_ui.py`；原流程见 `docs/MILESTONE6_MANUAL_TEST_CASES.md` |
-| NP-CLR-001 | 模糊问题主动澄清 | 仅输入“网络不行”或缺少目标/现象的信息 | **TODO：** 应先请求必要信息，避免随意选择大量 Tool；目前没有稳定、专门的自动测试，不能标记完成 | TODO / 手工观察 | 暂无可靠专项 pytest；后续应新增 Agent 行为测试 |
+| NP-CLR-001 | 模糊问题主动澄清 | 仅输入“网络不行”或缺少目标/现象的信息 | 返回确定性澄清问题；0 次 LLM、0 次 Network Tool；询问连接类型、影响范围及 VPN/Proxy 状态 | 自动 + 手工 | `tests/test_tool_policy.py`、`tests/test_turn_intent.py` |
 
 ## 手工 Demo 详细步骤
 

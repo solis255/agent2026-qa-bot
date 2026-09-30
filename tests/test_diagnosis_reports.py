@@ -134,8 +134,8 @@ class ReportAgent:
         self.answer = answer
         self.call_count = 0
 
-    def run(self, message: str, *, history=()) -> AgentResult:
-        del message, history
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del message, history, task_state
         self.call_count += 1
         return _result(self.answer)
 

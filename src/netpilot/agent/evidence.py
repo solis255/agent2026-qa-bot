@@ -78,7 +78,7 @@ def llm_tool_feedback(tool_name: str, result: Any) -> dict[str, Any]:
             "execution_status": "error",
             "diagnostic_status": "tool_error",
             "summary": result.summary,
-            "evidence": _replace_booleans(data),
+            "evidence": model_safe_data(data),
             "error": {
                 "code": str(
                     getattr(result.error.code, "value", result.error.code)
@@ -101,17 +101,17 @@ def llm_tool_feedback(tool_name: str, result: Any) -> dict[str, Any]:
             "reference": "reference_found",
         }.get(status, status),
         "summary": summary,
-        "evidence": _replace_booleans(data),
+        "evidence": model_safe_data(data),
     }
 
 
-def _replace_booleans(value: Any) -> Any:
+def model_safe_data(value: Any) -> Any:
     """Use unambiguous words rather than booleans in model-facing feedback."""
 
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, dict):
-        return {key: _replace_booleans(item) for key, item in value.items()}
+        return {key: model_safe_data(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_replace_booleans(item) for item in value]
+        return [model_safe_data(item) for item in value]
     return value

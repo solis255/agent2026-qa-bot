@@ -136,8 +136,8 @@ def test_sqlite_history_serializes_concurrent_writes(tmp_path: Path) -> None:
 
 
 class HistoryAgent:
-    def run(self, message: str, *, history=()) -> AgentResult:
-        del message, history
+    def run(self, message: str, *, history=(), task_state=None) -> AgentResult:
+        del message, history, task_state
         return _agent_result(7)
 
 
@@ -181,9 +181,12 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
             "total_tokens": 22,
         },
         "llm_duration_ms": 27.5,
-        "tool_duration_ms": 4,
-        "tool_calls": 1,
-    }
+            "tool_duration_ms": 4,
+            "tool_calls": 1,
+            "turn_intent": None,
+            "response_mode": None,
+            "fallback_reason": None,
+        }
     assert listing.json()["items"][0]["record_id"] == body["record_id"]
 
     second_app = _history_app(database)

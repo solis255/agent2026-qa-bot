@@ -51,8 +51,11 @@ class Settings(BaseSettings):
     tju_show_token_usage: bool = True
     tju_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
     tju_max_retries: int = Field(default=2, ge=0, le=5)
+    llm_max_output_tokens: int = Field(default=1600, ge=1, le=32_768)
+    llm_report_max_output_tokens: int = Field(default=2800, ge=1, le=32_768)
 
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
+    max_rag_calls_per_turn: int = Field(default=2, ge=1, le=10)
     max_history_messages: int = Field(default=20, ge=1, le=200)
     max_sessions: int = Field(default=500, ge=1, le=10_000)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

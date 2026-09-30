@@ -124,7 +124,10 @@ def test_agent_returns_direct_answer_without_calling_tools() -> None:
     assert answer.tool_rounds == 0
     assert answer.steps == []
     assert len(llm.calls) == 1
-    assert llm.calls[0]["tool_choice"] == "auto"
+    assert answer.turn_intent.value == "general_question"
+    assert answer.response_mode.value == "knowledge"
+    assert llm.calls[0]["tool_choice"] == "none"
+    assert llm.calls[0]["tools"] is None
 
 
 def test_agent_places_trimmed_history_between_system_and_current_user() -> None:
@@ -140,11 +143,15 @@ def test_agent_places_trimmed_history_between_system_and_current_user() -> None:
     messages = llm.calls[0]["messages"]
     assert [message.role.value for message in messages] == [
         "system",
+        "system",
+        "system",
         "user",
         "assistant",
         "user",
     ]
-    assert [message.content for message in messages[1:]] == ["上一问", "上一答", "追问"]
+    assert "TURN RESPONSE MODE" in messages[1].content
+    assert "CURRENT TASK" in messages[2].content
+    assert [message.content for message in messages[3:]] == ["上一问", "上一答", "追问"]
 
 
 def test_agent_executes_multiple_calls_and_preserves_each_id() -> None:
@@ -186,7 +193,12 @@ def test_negative_finding_is_not_reported_to_llm_as_tool_failure() -> None:
 
     agent.run("检查 github.com")
 
-    feedback = json.loads(llm.calls[1]["messages"][-1].content)
+    feedback_message = next(
+        message
+        for message in reversed(llm.calls[1]["messages"])
+        if message.role.value == "tool"
+    )
+    feedback = json.loads(feedback_message.content)
     assert feedback["execution_status"] == "success"
     assert feedback["diagnostic_status"] == "issue_observed"
     assert feedback["evidence"]["resolved"] == "no"
@@ -222,7 +234,7 @@ def test_agent_stops_before_a_seventh_tool_execution() -> None:
     llm = EndlessToolLLM()
     agent = AgentOrchestrator(llm, registry(), max_tool_rounds=6)
 
-    answer = agent.run("持续检测")
+    answer = agent.run("网页打不开，请按照排障流程完整诊断")
 
     assert answer.status is AgentStatus.MAX_TOOL_ROUNDS
     assert answer.answer != MAX_TOOL_ROUNDS_ANSWER
@@ -249,7 +261,7 @@ def test_agent_deduplicates_identical_calls_and_returns_evidence_fallback() -> N
     assert len(llm.calls) == 2
 
 
-def test_agent_deduplicates_same_target_when_ping_count_changes() -> None:
+def test_agent_signature_treats_changed_ping_count_as_new_call() -> None:
     llm = SequenceLLM(
         [
             result(
@@ -262,14 +274,17 @@ def test_agent_deduplicates_same_target_when_ping_count_changes() -> None:
                     call("duplicate", "ping_host", '{"host":"1.1.1.1","count":4}')
                 ]
             ),
+            result("两次不同采样次数的 Ping 已完成。"),
+            result("两次不同采样次数的 Ping 已完成。"),
+            result("两次不同采样次数的 Ping 已完成。"),
         ]
     )
     agent = AgentOrchestrator(llm, registry())
 
-    answer = agent.run("检查公网连通性")
+    answer = agent.run("网页打不开，请按照排障流程完整诊断")
 
     assert answer.status is AgentStatus.COMPLETED
-    assert len(answer.steps) == 1
+    assert len(answer.steps) == 2
     assert answer.answer != MAX_TOOL_ROUNDS_ANSWER
 
 

@@ -15,7 +15,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | 能力 | 当前实现 |
 |---|---|
 | 模型 | `tju-llm`，通过 OpenAI-compatible Chat Completions 接口进行原生 Function Calling |
-| Agent | 单 Agent、有界 Tool loop、支持一轮多个 Tool Call、按 `tool_call_id` 回填结果 |
+| Agent | 单 Agent、有界 Tool loop、Turn Intent / ToolPolicy、Coverage-based Stop、跨 Turn Evidence 与轻量 Hypothesis |
 | 网络检测 | 六个 allowlisted、只读 Tool；严格参数校验与统一结构化证据 |
 | Provider | 确定性离线 `MockNetworkProvider`；检测运行 NetPilot 主机的 `LocalNetworkProvider` |
 | RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
@@ -88,10 +88,10 @@ Browser / API Client
         v
  FastAPI routes + Web static files
         |
-        +--> SessionStore (有界内存对话上下文)
+        +--> SessionStore (有界文本历史 + SessionTaskState / Evidence Memory)
         |
         v
- AgentOrchestrator <----> TJUClient <----> tju-llm
+ Turn Intent --> ToolPolicy --> AgentOrchestrator <--> TJUClient <--> tju-llm
         |
         v
  ToolRegistry (allowlist + strict schemas)
@@ -151,6 +151,9 @@ Copy-Item .env.example .env
 TJU_API_KEY=你的比赛 API Key
 TJU_API_BASE=比赛平台分配的专属 SDK base URL
 TJU_MODEL=tju-llm
+LLM_MAX_OUTPUT_TOKENS=1600
+LLM_REPORT_MAX_OUTPUT_TOKENS=2800
+MAX_RAG_CALLS_PER_TURN=2
 ```
 
 不要把 `/chat/completions` 附加到 `TJU_API_BASE`；SDK 会自动补充该路径。`.env` 已被 Git 忽略，禁止提交或通过浏览器传递 API Key。
@@ -191,7 +194,7 @@ python scripts/build_knowledge_index.py
 python scripts/build_knowledge_index.py --offline
 ```
 
-流水线从 `knowledge/raw/` 读取带 YAML front matter 的 UTF-8 Markdown/TXT，确定性分块，使用配置的 Embedding 模型生成向量并写入 FAISS。当前仓库内置的校园网、VPN、eduroam 摘要均来自 TJUBOT Wiki，并明确标记为 `community`；当前没有把这些材料宣称为天津大学官方资料。Schema 支持 `official`、`community`、`maintainer`，新增正式资料时必须据实标记并保留原始 URL。检索文本始终作为 untrusted reference data，不能覆盖系统指令或触发任意 Tool。
+流水线从 `knowledge/raw/` 读取带 YAML front matter 的 UTF-8 Markdown/TXT，确定性分块，使用配置的 Embedding 模型生成向量并写入 FAISS。当前仓库内置的校园网、VPN、eduroam 摘要均来自 TJUBOT Wiki，并明确标记为 `community`；当前没有把这些材料宣称为天津大学官方资料。Schema 支持 `official`、`community`、`maintainer`，新增正式资料时必须据实标记并保留原始 URL。检索文本始终作为 untrusted reference data，不能覆盖系统指令或触发任意 Tool。同一 Turn 的检索默认最多两次；格式相同或词集合高度相似的 query 会复用已有结果。API 中 `sources` 是知识操作参考，`diagnosis.evidence` 只包含实时 Network Evidence。
 
 索引缺失、损坏、模型不匹配或本地模型缓存不可用时，`rag_ready=false`，`knowledge_search` 不注册；网络诊断与应用启动继续可用。
 
@@ -221,10 +224,10 @@ GET  /api/scenarios
 python -m pytest -q
 ```
 
-Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 9D 全量回归实测为：
+Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 10D 全量回归实测为：
 
 ```text
-246 passed in 14.83s
+290 passed in 14.80s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
@@ -237,12 +240,20 @@ Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 9D 全量
 
 9B 已为 Chat Session 绑定 `owner_user_id`，诊断历史新记录绑定 `user_id`；会话、聊天、历史、报告、导出需登录，跨用户资源访问返回 404。旧历史迁移后保留为 `user_id=NULL`，普通账号不可见。详见 [9B 验收说明](docs/MILESTONE9B_VALIDATION.md)。9C 已接入同源 Cookie 的 Web 登录/注册、当前用户、退出、修改密码与“我的诊断历史”，详见 [9C 验收说明](docs/MILESTONE9C_VALIDATION.md)。9D 已增加认证 fail-closed 配置、LAN 只读预检及双账号演示手册，并收录两张真实浏览器截图；跨设备 LAN 人工验收和其余截图仍待现场完成。
 
+10A 已增加进程内 `SessionTaskState`、结构化 `EvidenceRecord`、包含默认参数的规范化 Tool Signature，以及同一 Session 的跨 Turn Evidence 复用。相同有效 signature 不会重复执行 Tool。
+
+10B 已增加确定性 `TurnIntent` 分类、`ResponseMode` 和服务端 `ToolPolicy`。`report_request`、`meta_feedback`、`clarify`、`analyze_existing`、`compare`、`followup_action` 与普通问答不向模型暴露 Tool；`knowledge_request` 只暴露 `knowledge_search`；`diagnose` / `state_changed` 只暴露六个只读网络 Tool。状态变化或明确重新检测会提升 `task_version` 并停止复用旧 Evidence。
+
+10C 已移除“任意 abnormal 即停止”条件，改用 `DiagnosticCoverage` 和 `EvidenceSufficiency` 判断是否可以收敛。完整网页故障诊断最低覆盖网络配置、DNS、公网 IP 连通性以及 TCP/HTTP 应用层；单个 DNS abnormal 不再导致提前结束。轻量 `Hypothesis` 会记录 supported / possible / weakened / excluded 及对应 Evidence ID。多个同类结果按 Tool/状态聚合，并移除相邻的完全重复结论。
+
+10D 已增加 RAG query 规范化/近义去重和每 Turn 两次的默认硬上限；`Context Builder` 只向模型提供 CURRENT TASK、分类后的 Network Evidence、Knowledge Sources、未解决假设与已执行 Tool 摘要，不跨 Turn 注入原始 Tool JSON。确定性 fallback 记录 `response_mode` / `fallback_reason`，并分别生成报告、元反馈、已有证据分析或诊断响应。普通输出与报告输出预算由 `LLM_MAX_OUTPUT_TOKENS`、`LLM_REPORT_MAX_OUTPUT_TOKENS` 配置。
+
 - LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
 - 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。
 - 所有网络 Tool 只读；系统命令使用固定参数列表、`shell=False`、超时和输出上限。
 - `http_check` 仅允许 HTTP(S)，校验初始目标及每次重定向，阻止 localhost、metadata、私网、回环和链路本地地址。
 - RAG 文本是不可信参考数据；来源类型必须据实展示，社区材料不能写成官方政策。
-- `SessionStore` 是有界进程内上下文；SQLite 历史会保存用户问题和诊断证据，部署者需设置访问与保留策略。
+- `SessionStore` 在进程内分别保存有界文本历史和最多 200 条结构化 Evidence；重启后消失。SQLite 历史会保存完成诊断快照，部署者需设置访问与保留策略。
 - SSE 只是最终答案的分块传输，不代表上游模型 token streaming。
 - 产品不访问天津大学内部网络运维平台，不执行配置变更，也不能替代学校官方服务通知或人工运维结论。
 - Local 模式只反映运行服务的主机；浏览器所在设备若不同，检测结果不代表浏览器设备自身网络。

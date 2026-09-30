@@ -4,7 +4,7 @@
 
 ## Architecture Overview
 
-TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边界，`AgentOrchestrator` 负责有界 Function Calling，`ToolRegistry` 负责 allowlist 与参数校验，`NetworkToolService` 在 Mock/Local Provider 之间提供稳定契约。RAG、SQLite 历史和报告位于旁路能力，不扩大网络 Tool 权限。
+TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边界，`classify_turn_intent()` 和 `ToolPolicy` 在模型调用前决定当前 Turn 可见能力，`AgentOrchestrator` 负责有界 Function Calling，`ToolRegistry` 负责最终 allowlist 与参数校验，`NetworkToolService` 在 Mock/Local Provider 之间提供稳定契约。RAG、SQLite 历史和报告位于旁路能力，不扩大网络 Tool 权限。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -25,16 +25,16 @@ TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边�
                v                  v                         v
 ┌──────────────────────┐  ┌────────────────────────┐  ┌───────────────────────┐
 │ SessionStore         │  │ SQLiteDiagnosis-      │  │ runtime_lock +       │
-│ bounded in-memory    │  │ Repository            │  │ Mock scenario state  │
-│ owner_user_id       │  │ user_id + snapshots   │  └───────────────────────┘
+│ text + task state   │  │ Repository            │  │ Mock scenario state  │
+│ Evidence Memory     │  │ user_id + snapshots   │  └───────────────────────┘
 └──────────┬───────────┘  └───────────┬────────────┘
-           │ history                  │
+           │ history + task state     │
            │                          └──> build_diagnosis_report()
            │                               Markdown / JSON export
            v
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ AgentOrchestrator                                                            │
-│  messages + tool schemas + MAX_TOOL_ROUNDS + dedupe + evidence fallback     │
+│ TurnIntent -> ToolPolicy -> DiagnosticCoverage -> EvidenceSufficiency        │
+│ AgentOrchestrator + bounded loop + Evidence reuse + Hypothesis tracking      │
 └──────────────┬───────────────────────────────────────────┬───────────────────┘
                │ chat(stream=false)                        │ execute(name,args)
                v                                           v
@@ -78,7 +78,7 @@ agent2026-qa-bot/
 ├── src/netpilot/                # 正式产品 Python 代码
 │   ├── main.py                  # FastAPI composition root
 │   ├── config.py                # Settings、ToolMode、MockScenario
-│   ├── agent/                   # AgentOrchestrator、ToolRegistry、Session、诊断
+│   ├── agent/                   # Orchestrator、Context Builder、Policy、Session、诊断
 │   ├── api/                     # routes、presenters、SSE encoder
 │   ├── auth/                    # 用户、Argon2id、服务端 Auth Session、依赖
 │   ├── llm/                     # TJUClient 与 LLM schemas/errors
@@ -116,13 +116,22 @@ agent2026-qa-bot/
 | 网络 Tool facade | `build_network_tools()` → `NetworkToolService` | 选择 Mock 或 Local Provider |
 | RAG | `load_configured_retriever()` → `FaissRetriever | None` | 离线加载匹配的本地索引与模型缓存 |
 | Registry | `ToolRegistry` | 暴露 allowlist schemas、校验并 dispatch Tool |
-| Agent | `AgentOrchestrator` | 有界 Tool loop、去重、来源聚合与 fallback |
+| Intent | `classify_turn_intent()` | 高置信规则分类十种 Turn Intent，不授予执行权限 |
+| 响应模式 | `ResponseMode` | 为 diagnostic/analysis/knowledge/report/comparison/clarification/meta 注入定向指令 |
+| Tool 策略 | `ToolPolicy` | 在调用模型前过滤 schemas，区分六个网络 Tool、RAG 和零 Tool 路径 |
+| 上下文 | `build_task_context_message()` | 将 TaskState 压缩为七段上下文，并分离 Network Evidence 与 Knowledge Sources |
+| RAG 调用策略 | `find_duplicate_rag_query()` | 规范化/近义 query 复用，并配合 Orchestrator 执行每 Turn 上限 |
+| 诊断覆盖 | `DiagnosticCoverage`、`EvidenceSufficiency` | 将结构化观测映射为分层覆盖，并按本轮诊断目标判断证据是否足够 |
+| 假设跟踪 | `Hypothesis`、`track_hypotheses()` | 以 supported / possible / weakened / excluded 记录轻量故障假设及正反 Evidence ID |
+| Agent | `AgentOrchestrator` | 有界 Tool loop、跨 Turn 去重、RAG 上限、来源聚合与 intent-aware fallback |
 | 认证 | `AuthService`、`UserRepository`、`AuthSessionRepository` | SQLite 用户/Session，HttpOnly Cookie 解析与当前用户依赖 |
-| 会话 | `SessionStore` | 绑定 owner 的有界内存文本历史与 busy 控制 |
+| 会话 | `SessionStore` | 绑定 owner 的有界文本历史、`SessionTaskState` / Evidence Memory 与 busy 控制 |
 | 历史 | `SQLiteDiagnosisRepository | None` | 按用户保存及读取不可变诊断快照 |
 | 并发锁 | `RLock` (`runtime_lock`) | 防止 Agent 运行中切换 Mock 场景 |
 
 应用构造不发起 TJU 模型或网络 Tool 请求。关闭应用时，lifespan 会释放 `TJUClient` 自己持有的 SDK transport。
+
+`clarify` 直接返回确定性澄清问题，不调用模型或 Tool。其它零 Tool 意图在调用 `TJUClient` 时传入 `tools=None`，使真实 SDK 请求省略 Tool 字段；即使上游返回违规 Tool Call，Orchestrator 也不会执行 handler。
 
 ## Request Flow
 
@@ -130,11 +139,11 @@ agent2026-qa-bot/
 
 1. 请求进入 `request_logging_middleware()`，校验/生成 `X-Request-ID` 并写入安全结构化日志上下文。
 2. 受保护路由通过 `require_current_user()` 验证服务端 Auth Session Cookie；未登录返回 401。Pydantic request model 校验 UUID、消息长度、字段白名单和查询参数。
-3. chat 路由确认 `TJUClient.configured`，再通过 `SessionStore.begin_turn(session_id, user.id)` 校验 owner、获取历史并将会话标为 busy；其他用户的 session 返回 404。
-4. `AgentOrchestrator.run()` 在 `runtime_lock` 内执行，避免同一轮诊断观察到两个 Mock 场景。
+3. chat 路由确认 `TJUClient.configured`，再通过 `SessionStore.begin_turn(session_id, user.id)` 校验 owner、获取文本历史并将会话标为 busy；其他用户的 session 返回 404。
+4. 路由另取 `SessionTaskState` 防御性副本。`AgentOrchestrator.run()` 先分类 Turn Intent、选择 Response Mode 并应用 `ToolPolicy`，再由 `Context Builder` 注入紧凑 Task/Evidence/Source 摘要。规范化 Tool Signature 避免同一任务重复取证；RAG query 另做近义去重并受每 Turn 上限约束。每轮观测都会更新 `DiagnosticCoverage`、`EvidenceSufficiency` 与轻量 Hypothesis。状态变化或明确重测先在防御性副本上提升 task version，成功完成 Turn 后才提交到 SessionStore。`runtime_lock` 同时避免同一轮观察到两个 Mock 场景。
 5. `present_chat()` 把 `AgentResult` 转换为公开 `ChatResponse`，包括 diagnosis、metrics、Tool Timeline 和 sources。
 6. 若历史仓库可用，连同 `user.id` 保存快照并把 `record_id` 加入响应；保存失败只记录安全告警，不使聊天失败。
-7. 完成/异常路径分别调用 `finish_turn()`/`abort_turn()`，确保 busy 状态释放。
+7. 完成路径调用 `finish_turn(..., result=result)`，分开追加文本消息与由 Tool Step 转换的 `EvidenceRecord`；异常路径调用 `abort_turn()`，不提交未完成轮的 Evidence，两者都释放 busy 状态。
 
 ### POST /api/chat
 
@@ -143,9 +152,14 @@ ChatRequest
   -> require_current_user() / HttpOnly Cookie
   -> configured check
   -> SessionStore.begin_turn(session_id, user.id)
+  -> SessionStore.task_state(session_id, user.id) [defensive copy]
   -> runtime_lock
-  -> AgentOrchestrator.run(message, history)
-  -> SessionStore.finish_turn(user text, assistant text)
+  -> AgentOrchestrator.run(message, history, task_state)
+       -> classify TurnIntent -> ResponseMode -> ToolPolicy
+       -> Context Builder (compact, separated evidence/source sections)
+       -> reuse equivalent prior Evidence, or execute allowlisted Tool
+       -> update coverage / sufficiency / hypotheses
+  -> SessionStore.finish_turn(user text, assistant text, AgentResult)
   -> present_chat()
   -> SQLiteDiagnosisRepository.save(user.id, ...) [optional, degradable]
   -> ChatResponse
@@ -157,7 +171,7 @@ ChatRequest
 
 ```text
 ChatRequest
-  -> same authentication, prevalidation and SessionStore.begin_turn(session_id, user.id)
+  -> same authentication, prevalidation, begin_turn() and task_state() snapshot
   -> StreamingResponse(text/event-stream)
        -> start event
        -> worker: same Agent turn + session finalization + optional history save
@@ -188,29 +202,50 @@ sequenceDiagram
     API->>Auth: validate HttpOnly Cookie
     Auth-->>API: current user or 401
     API->>S: begin_turn(session_id, user.id)
-    S-->>API: bounded text history
-    API->>A: run(message, history)
+    S-->>API: bounded text history + SessionTaskState snapshot
+    API->>A: run(message, history, task_state)
+    A->>A: classify TurnIntent + select ResponseMode
     A->>R: schemas()
     R-->>A: allowlisted native function schemas
+    A->>A: ToolPolicy filters network / RAG / zero-tool capabilities
+    A->>A: build compact seven-section task context
     A->>L: chat(messages, tools, tool_choice="auto", stream=false)
     L-->>A: assistant tool_calls[]
     loop Up to MAX_TOOL_ROUNDS
-        A->>R: execute(name, JSON arguments)
-        R->>R: allowlist lookup + strict Pydantic validation
-        R->>T: invoke validated read-only handler
-        T-->>R: ToolResult
-        R-->>A: RegistryExecution
-        A->>L: role=tool result correlated by tool_call_id
+        A->>R: normalize_arguments(name, JSON arguments)
+        R-->>A: validated args + defaults
+        A->>A: canonical signature + prior Evidence lookup
+        A->>A: for RAG, near-query dedup + max 2 new calls per Turn
+        alt reusable Evidence exists
+            A->>L: role=tool structured reused Evidence
+        else first execution
+            A->>R: execute(name, validated arguments)
+            R->>T: invoke allowlisted read-only handler
+            T-->>R: ToolResult
+            R-->>A: RegistryExecution
+            A->>L: role=tool result correlated by tool_call_id
+        end
+        A->>A: update coverage, sufficiency and hypotheses
+        alt evidence sufficient for current goal
+            A->>L: aggregated Evidence summary + tool_choice="none"
+        else coverage still missing
+            A->>L: request the smallest missing checks
+        end
         L-->>A: more tool_calls or final answer
     end
     A-->>API: AgentResult + AgentToolStep[] + sources
-    API->>S: finish_turn(user text, answer)
+    API->>S: finish_turn(user text, answer, AgentResult)
+    S->>S: persist EvidenceRecord(s), coverage and hypotheses in memory
     API->>H: save(user.id, immutable snapshot) (if ready)
     H-->>API: record_id
     API-->>U: ChatResponse
 ```
 
-当模型直接给出普通知识答案时，序列中可以没有 Tool 执行。若用户明确点名 Tool，Orchestrator 会追踪未完成的请求；若出现重复 Tool/目标、达到轮次上限或最终响应异常，会停止继续执行，并根据已有证据生成保守 fallback。
+当模型直接给出普通知识答案时，序列中可以没有 Tool 执行。若用户明确点名 Tool，Orchestrator 会追踪未完成的请求。跨 Turn 的等价调用用旧 Evidence 回填当前 `tool_call_id`；RAG query 还会用规范化文本与词集合相似度复用近义查询，默认每 Turn 最多两次新检索。当前 Turn 重复、达到轮次上限或最终响应异常时，fallback 根据 `TurnIntent` / `ResponseMode` 分别生成诊断、报告、元反馈或已有证据分析，并记录 `fallback_reason`。
+
+Tool Signature 在真实调用前通过该 Tool 的 Pydantic input model 校验并补全默认值，再对字段做确定性 JSON 序列化；host/domain 大小写和末尾点、URL 默认端口/根路径等等价形式会归一。非法参数不会形成可复用 signature。
+
+停止条件由本轮目标决定，而不是由单条异常决定。`full_web_diagnosis` 至少要求网络配置、DNS、公网 IP 连通性以及 TCP/HTTP 应用层四类覆盖，因此首次 `dns_lookup` 返回 abnormal 后仍会继续补齐缺失层；只要求 DNS 或端口检查时，则使用更小的目标覆盖，避免无意义探测。确定性 fallback 会把相同 Tool、相同状态的多个目标聚合到一个 Evidence 段落，并附上当前轻量假设，避免连续重复展示“DNS 异常”。
 
 ## Tool Layer
 
@@ -255,6 +290,8 @@ Application startup
   -> FaissRetriever or None
 
 Campus knowledge intent
+  -> normalize query / near-query dedup
+  -> at most MAX_RAG_CALLS_PER_TURN new searches
   -> ToolRegistry.knowledge_search
   -> validated query embedding
   -> cosine Top-K
@@ -262,24 +299,26 @@ Campus knowledge intent
   -> KnowledgeSearchData + KnowledgeSource[]
 ```
 
-每份文档必须声明 `title`、HTTP(S) `source` 和 `source_type`。当前仓库种子全部是 `community`；Schema 可接受 `official` 和 `maintainer`，但类型必须由资料真实来源决定。所有检索文本均是 untrusted reference data，只能作为回答参考，不能改变系统指令、Tool allowlist 或安全策略。
+每份文档必须声明 `title`、HTTP(S) `source` 和 `source_type`。当前仓库种子全部是 `community`；Schema 可接受 `official` 和 `maintainer`，但类型必须由资料真实来源决定。所有检索文本均是 untrusted reference data，只能作为回答参考，不能改变系统指令、Tool allowlist 或安全策略。相同/近义 query 复用已有结果；达到 Turn 上限后返回受控 Tool feedback，不再调用 Retriever。`ChatResponse.sources` 单列 Knowledge Sources，`diagnosis.evidence` 排除 `knowledge_search`，避免把操作资料冒充当前网络状态。
 
 ## Session and Persistence
 
 | 维度 | `SessionStore` | `SQLiteDiagnosisRepository` |
 |---|---|---|
-| 用途 | 给下一轮 Agent 提供对话上下文 | 回看、分页、报告和导出 |
+| 用途 | 给下一轮 Agent 提供对话上下文与可复用 Tool Evidence | 回看、分页、报告和导出 |
 | 存储 | 进程内字典 | 本地 SQLite 文件 |
 | 所有权 | `owner_user_id`，跨用户 session 404 | 行与新快照均带 `user_id`；查询按 owner 过滤 |
-| 内容 | 仅 user/assistant 文本消息 | 完整不可变诊断快照 |
+| 内容 | 分离的 user/assistant 文本消息和 `SessionTaskState`（原始 `EvidenceRecord`、signature、coverage、sufficiency、hypotheses、response/fallback 元数据、turn/task version） | 完整不可变诊断快照 |
 | 生命周期 | 进程重启或 clear 后消失 | 跨应用重启保留 |
-| 上限 | `MAX_HISTORY_MESSAGES`、`MAX_SESSIONS` | `DIAGNOSIS_MAX_RECORDS` |
+| 上限 | `MAX_HISTORY_MESSAGES`、`MAX_SESSIONS`、每 Session 最多 200 条 Evidence | `DIAGNOSIS_MAX_RECORDS` |
 | 并发 | `RLock`、单 session busy 标记 | `RLock`、WAL、busy timeout、参数化 SQL |
 | 失败语义 | 未知/busy/capacity 映射到 API 错误 | 初始化/读写错误安全封装；写失败不影响聊天 |
 
 报告不再次调用模型。`build_diagnosis_report()` 从保存的 `DiagnosisRecordView` 确定性生成 `DiagnosisReportView`，`export_diagnosis_report()` 生成有大小上限、稳定文件名的 Markdown 或 JSON。
 
 现有 v1 历史表通过事务性、幂等迁移增加可空 `user_id`。旧记录保留为 `NULL`，普通用户不可见；新记录带当前用户 ID。`users` 与 `auth_sessions` 位于同一个 `DIAGNOSIS_DB_PATH`，但 Auth Session 与聊天 `SessionStore` 是两类不同状态。
+
+`EvidenceRecord` 保存 Tool 名、已验证参数、signature、结构化 data、状态、摘要、观测 Turn 与 task version。只有成功完成的 `ToolResult`——包括“成功取得不可达观测”这类负面网络证据——可在当前 task version 复用。原始 data 留在 TaskState；`Context Builder` 跨 Turn 只注入 CURRENT TASK、KNOWN FACTS、ABNORMAL/NORMAL EVIDENCE、KNOWLEDGE SOURCES、UNRESOLVED HYPOTHESES 和 ALREADY EXECUTED TOOLS 摘要。完成 Turn 时，`SessionStore` 用实际持久化后的 Evidence ID 重算 coverage、sufficiency 和 hypotheses，供下一轮直接复用。10B 的 `state_changed` 和明确重测表达会调用 `advance_task_version()`，将旧 Evidence 标记为 superseded；其它自动过期策略尚未实现。RAG Evidence 继续视为 untrusted reference data。
 
 ## Web and API
 
@@ -325,8 +364,8 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 
 `Settings` 使用 `pydantic-settings` 读取环境变量和根目录 `.env`。关键配置组：
 
-- LLM：`TJU_API_KEY`、`TJU_API_BASE`、`TJU_MODEL=tju-llm`、超时与重试；
-- Agent/Session：`MAX_TOOL_ROUNDS`、`MAX_HISTORY_MESSAGES`、`MAX_SESSIONS`；
+- LLM：`TJU_API_KEY`、`TJU_API_BASE`、`TJU_MODEL=tju-llm`、超时与重试、`LLM_MAX_OUTPUT_TOKENS`、`LLM_REPORT_MAX_OUTPUT_TOKENS`；
+- Agent/Session：`MAX_TOOL_ROUNDS`、`MAX_RAG_CALLS_PER_TURN`、`MAX_HISTORY_MESSAGES`、`MAX_SESSIONS`；
 - Tool：`TOOL_MODE=mock|local`、`MOCK_SCENARIO`、`NETWORK_TIMEOUT_SECONDS`；
 - Demo：`SCENARIO_SWITCH_ENABLED`、`CUSTOM_SCENARIO_MAX_COUNT`；
 - RAG：`RAG_ENABLED`、`EMBEDDING_MODEL`、Top-K、阈值、chunk 参数；
@@ -343,7 +382,7 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 - `TJUClient` 将认证、限流、超时、连接、HTTP 服务和响应解析错误映射到不泄露内部细节的 typed errors。
 - `ToolRegistry` 吞住不可信 Function name/JSON/schema/handler 错误并返回结构化 Tool failure。
 - `NetworkProvider._execute()` 统一处理输入、预期 provider failure 与未知异常。
-- Agent 在有证据时优先返回 deterministic fallback；达到上限使用 `MAX_TOOL_ROUNDS` 状态。
+- Agent 在有证据或 report/meta/analysis 模式时返回 intent-aware deterministic fallback；`fallback_reason` 写入 AgentResult、公开 metrics 和安全日志，达到工具上限仍使用 `MAX_TOOL_ROUNDS` 状态。
 - API 在发送响应头前使用标准 HTTP 错误；SSE 发送头后只发安全 `error` event。
 - RAG 不就绪时不注册 Tool；History 初始化/写入失败时保持核心聊天可用。
 
@@ -362,6 +401,10 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 `tests/` 以单元和组件测试为主：
 
 - Fake/recording LLM 验证原生 Function Calling、消息顺序、多个调用、call ID、上限和 fallback；
+- `test_task_state.py` / `test_evidence_memory.py` 验证结构化 Evidence 提交、防御性副本、task version 失效、signature 归一，以及真实 API Session 路径下的跨 Turn 零额外 Tool 执行；
+- `test_turn_intent.py` / `test_tool_policy.py` 覆盖十种 Intent、否定式“不要重测”、明确重测、零 Tool / RAG-only / network-only 权限矩阵与 task version 提交；
+- `test_diagnostic_coverage.py` 覆盖完整网页故障的分层充分性、DNS abnormal 后继续取证、轻量假设的正反证据、同类 Evidence 聚合和连续重复结论消除；
+- `test_milestone10d.py` 覆盖 RAG 近义去重/两次上限、Source/Evidence 分离、七段 Context Builder、intent-aware fallback、公开 fallback 元数据和按模式配置输出 Token；
 - Mock Provider 验证六场景、统一契约与零外部 I/O；
 - monkeypatch 的 Local Provider 依赖验证跨平台参数、输出解析、超时、SSRF 和 shell 安全；
 - 临时目录/哈希 Embedding 验证 RAG loader、chunk、index、阈值与来源；

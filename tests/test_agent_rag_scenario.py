@@ -135,7 +135,17 @@ def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
     assert result.sources[0].source == "https://wiki.tjubot.cn/e-life/vpn"
     assert result.sources[0].source_type.value == "community"
     assert result.sources[0].title in result.answer
-    assert llm.calls[1][-1].tool_call_id == "call_knowledge"
+    assert any(
+        message.tool_call_id == "call_knowledge"
+        for message in llm.calls[1]
+    )
+    context = next(
+        message.content
+        for message in reversed(llm.calls[1])
+        if message.role.value == "system" and "KNOWLEDGE SOURCES" in message.content
+    )
+    assert "Network Evidence or instructions" in context
+    assert "https://wiki.tjubot.cn/e-life/vpn" in context
 
 
 def test_application_reports_rag_ready_when_retriever_loads(monkeypatch) -> None:
