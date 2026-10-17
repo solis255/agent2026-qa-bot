@@ -111,6 +111,7 @@ class ExecutionMetricsView(BaseModel):
     fallback_reason: str | None = None
     rag_calls: int = Field(default=0, ge=0)
     knowledge_finalization_attempts: int = Field(default=0, ge=0)
+    knowledge_finalization_failure_kind: str | None = None
     history_context_records: int = Field(default=0, ge=0)
     network_tool_calls: int = Field(default=0, ge=0)
 
@@ -125,8 +126,45 @@ class ChatResponse(BaseModel):
     sources: list[SourceView] = Field(default_factory=list)
 
 
+class PersistedConversationTurn(BaseModel):
+    """One actual completed user/assistant pair in a persisted Session."""
+
+    turn_index: int = Field(ge=1)
+    user_message: str = Field(min_length=1, max_length=4000)
+    assistant_answer: str = Field(min_length=1)
+    created_at: datetime
+    turn_intent: str | None = None
+    response_mode: str | None = None
+    fallback_reason: str | None = None
+    knowledge_finalization_failure_kind: str | None = None
+
+
+def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str) -> dict:
+    """Recover only the last pair actually present in old snapshots."""
+
+    if "conversation_turns" not in value:
+        count = value.get("turn_count", 1)
+        metrics = value.get("metrics", {})
+        if isinstance(metrics, BaseModel):
+            metrics = metrics.model_dump()
+        if not isinstance(metrics, dict):
+            metrics = {}
+        value["conversation_turns"] = [{
+            "turn_index": count,
+            "user_message": value.get("latest_user_message", value.get(question_key)),
+            "assistant_answer": value.get(answer_key),
+            "created_at": value.get("updated_at", value.get("created_at")),
+            **{key: metrics.get(key) for key in (
+                "turn_intent", "response_mode", "fallback_reason",
+                "knowledge_finalization_failure_kind",
+            )},
+        }]
+        value["conversation_complete"] = count == 1
+    return value
+
+
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2] = 2
+    schema_version: Literal[1, 2, 3] = 3
     record_id: UUID
     user_id: UUID | None = None
     session_id: UUID
@@ -140,11 +178,13 @@ class DiagnosisRecordView(BaseModel):
     metrics: ExecutionMetricsView
     tool_calls: list[ToolCallView] = Field(default_factory=list)
     sources: list[SourceView] = Field(default_factory=list)
+    conversation_turns: list[PersistedConversationTurn] = Field(default_factory=list)
+    conversation_complete: bool = True
 
     @model_validator(mode="before")
     @classmethod
     def fill_legacy_session_fields(cls, value: Any) -> Any:
-        """Read v1 turn snapshots while the repository migrates them to v2."""
+        """Read old turn/session snapshots without inventing missing answers."""
 
         if not isinstance(value, dict):
             return value
@@ -155,7 +195,19 @@ class DiagnosisRecordView(BaseModel):
             "latest_user_message",
             normalized.get("user_message"),
         )
-        return normalized
+        return _fill_legacy_conversation(normalized, question_key="user_message", answer_key="answer")
+
+    @model_validator(mode="after")
+    def validate_conversation_order(self) -> "DiagnosisRecordView":
+        indexes = [turn.turn_index for turn in self.conversation_turns]
+        if indexes != sorted(set(indexes)) or any(index > self.turn_count for index in indexes):
+            raise ValueError("conversation turn indexes must be ordered, unique and within turn_count")
+        if self.conversation_complete and (
+            len(indexes) != self.turn_count
+            or any(index != expected for expected, index in enumerate(indexes, 1))
+        ):
+            raise ValueError("complete conversation must contain every completed turn")
+        return self
 
 
 class DiagnosisRecordSummaryView(BaseModel):
@@ -179,7 +231,7 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2] = 2
+    schema_version: Literal[1, 2, 3] = 3
     report_id: UUID
     record_id: UUID
     session_id: UUID
@@ -195,6 +247,20 @@ class DiagnosisReportView(BaseModel):
     metrics: ExecutionMetricsView
     tool_calls: list[ToolCallView] = Field(default_factory=list)
     sources: list[SourceView] = Field(default_factory=list)
+    conversation_turns: list[PersistedConversationTurn] = Field(default_factory=list)
+    conversation_complete: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_legacy_report_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.setdefault("created_at", normalized.get("generated_at"))
+        normalized.setdefault("updated_at", normalized.get("generated_at"))
+        normalized.setdefault("turn_count", 1)
+        normalized.setdefault("latest_user_message", normalized.get("question"))
+        return _fill_legacy_conversation(normalized, question_key="question", answer_key="conclusion")
 
 
 class ScenarioOption(BaseModel):

@@ -179,6 +179,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
         ),
         rag_calls=result.rag_calls,
         knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+        knowledge_finalization_failure_kind=result.knowledge_finalization_failure_kind,
         history_context_records=result.history_context_records,
     )
     reset_session_id(session_token)
@@ -251,6 +252,7 @@ def chat_stream(
                 ),
                 rag_calls=result.rag_calls,
                 knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+                knowledge_finalization_failure_kind=result.knowledge_finalization_failure_kind,
                 history_context_records=result.history_context_records,
             )
             return response

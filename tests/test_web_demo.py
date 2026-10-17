@@ -69,8 +69,8 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert 'rel = "noopener noreferrer"' in javascript
     assert "diagnosis.summary" in javascript
     assert "response.metrics" in javascript
-    assert "record.user_message" in javascript
-    assert "record.latest_user_message" in javascript
+    assert "record.conversation_turns" in javascript
+    assert "record.conversation_complete" in javascript
     assert "item.updated_at" in javascript
     assert "item.turn_count" in javascript
     assert "response.record_id" in javascript
@@ -85,7 +85,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "armInactivityTimeout" in javascript
     assert "流式连接长时间未收到数据" in javascript
     assert "timeoutMs = 180000" not in javascript
-    assert 'src="/app.js?v=knowledge-history-pages"' in html
+    assert 'src="/app.js?v=full-session-transcript"' in html
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:

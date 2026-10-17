@@ -66,6 +66,7 @@ class AgentResult(BaseModel):
     fallback_reason: FallbackReason | None = None
     rag_calls: int = Field(default=0, ge=0)
     knowledge_finalization_attempts: int = Field(default=0, ge=0, le=2)
+    knowledge_finalization_failure_kind: str | None = None
     history_context_records: int = Field(default=0, ge=0, le=10)
     task_version_advanced: bool = False
     coverage: DiagnosticCoverage = Field(default_factory=DiagnosticCoverage)

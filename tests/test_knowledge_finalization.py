@@ -2,7 +2,9 @@ from uuid import uuid4
 
 import pytest
 
-from netpilot.agent import AgentOrchestrator, FallbackReason, ResponseMode, ToolRegistry, TurnIntent
+from netpilot.agent import AgentOrchestrator, FallbackReason, ResponseMode, SessionStore, ToolRegistry, TurnIntent
+from netpilot.agent.knowledge import source_only_answer
+from netpilot.agent.prompts import KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT, NETPILOT_SYSTEM_PROMPT
 from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
 from netpilot.llm import ChatResult, FunctionCall, LLMTimeoutError, ToolCall
@@ -44,7 +46,7 @@ class LLM:
 
 
 def completed(text="请先安装资料中说明的客户端，再按指引访问校内资源。"):
-    return ChatResult(content=text, model="test", duration_ms=1)
+    return ChatResult(content=text, model="test", duration_ms=1, finish_reason="stop")
 
 
 def run(llm):
@@ -131,3 +133,142 @@ def test_two_finalization_failures_return_real_chunks_and_observable_reason(fail
     assert public.metrics.fallback_reason == reason.value
     assert public.metrics.rag_calls == 1
     assert public.metrics.knowledge_finalization_attempts == 2
+
+
+def test_synthesis_uses_knowledge_only_prompt_and_dedicated_token_budget():
+    llm = LLM([completed()])
+    agent = AgentOrchestrator(llm, ToolRegistry(
+        build_network_tools(Settings(_env_file=None)), Retriever()
+    ), max_output_tokens=800, knowledge_max_output_tokens=2300)
+    agent.run("请检索天津大学 VPN 知识库资料。")
+    assert llm.calls[0][1]["max_tokens"] == 800
+    assert llm.calls[1][1]["max_tokens"] == 2300
+    assert llm.calls[1][0][0].content == KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT.strip()
+    assert all(message.content != NETPILOT_SYSTEM_PROMPT for message in llm.calls[1][0])
+
+
+def test_knowledge_followup_reuses_evidence_and_retains_short_text_history():
+    class CampusRetriever:
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query, top_k=None):
+            self.calls += 1
+            return [KnowledgeSearchResult(
+                title=topic, source=f"https://example.test/{index}",
+                source_type=source_type, file=f"topic-{index}.md",
+                chunk_id=f"campus-chunk-{index}", score=0.9,
+                content=f"{topic}：配置可能更新，需要按官方资料再次核验。",
+            ) for index, (topic, source_type) in enumerate([
+                ("VPN", "official"), ("校园网", "community"), ("eduroam", "official"),
+            ])]
+
+    retriever = CampusRetriever()
+    llm = LLM([
+        completed("VPN、校园网与 eduroam 的资料性质如下：校园网为 community，其余为 official。"),
+        completed("community 校园网资料中的配置可能更新，应以官方说明再次核验。"),
+    ])
+    agent = AgentOrchestrator(llm, ToolRegistry(build_network_tools(Settings(_env_file=None)), retriever))
+    sessions = SessionStore()
+    owner = uuid4()
+    session = sessions.create(owner).session_id
+    question = "请检索 VPN、校园网和 eduroam，并标明 source_type。"
+    first = agent.run(question, history=sessions.begin_turn(session, owner),
+                      task_state=sessions.task_state(session, owner))
+    sessions.finish_turn(session, question, first.answer, result=first)
+    followup = "请把 community 来源中可能需要官方再次核验的内容单独列出来。"
+    second = agent.run(followup, history=sessions.begin_turn(session, owner),
+                       task_state=sessions.task_state(session, owner))
+    assert retriever.calls == 1
+    assert second.rag_calls == 0
+    assert second.steps == []
+    assert second.reused_evidence_ids
+    assert second.knowledge_finalization_attempts == 1
+    assert second.fallback_reason is None
+    assert "community 校园网" in second.answer
+    messages, options = llm.calls[-1]
+    assert options["tools"] is None and options["tool_choice"] == "none"
+    assert question in [message.content for message in messages]
+    assert first.answer[:1000] in [message.content for message in messages]
+    assert messages[-1].content == followup
+
+
+@pytest.mark.parametrize("answer,expected", [
+    ("来源：\n- [official] VPN 资料 0 https://example.test/0\n- [community] VPN 资料 1 https://example.test/1", True),
+    ("参考来源：\n- [official] VPN 资料 0 https://example.test/0", True),
+    ("- [official] 另一份标题 https://example.test/new\n- [community] 社区摘要 https://example.test/community", True),
+    ("先认证。", False),
+    ("VPN 需核验。\n来源：[community] VPN 资料 1 https://example.test/1", False),
+    ("根据资料，新生校园网接入应先完成认证。VPN 资料中 community 来源需要进一步以官方说明核验。\n来源：\n- [official] VPN 资料 0 https://example.test/0", False),
+])
+def test_source_only_preserves_short_substantive_chinese(answer, expected):
+    assert source_only_answer(answer, Retriever().search("VPN")) is expected
+
+
+def test_length_retry_shortens_context_and_asks_for_concise_body():
+    truncated = completed("正文尚未完成")
+    truncated.finish_reason = "length"
+    llm = LLM([truncated, completed()])
+    result = run(llm)
+    assert result.fallback_reason is None
+    assert result.knowledge_finalization_attempts == 2
+    assert result.knowledge_finalization_failure_kind == "length"
+    assert "缩短正文" in llm.calls[2][0][2].content
+    assert len(llm.calls[2][0][2].content) < len(llm.calls[1][0][2].content)
+
+
+def test_failure_log_records_each_observation_without_raw_prompt_or_error_secrets(caplog):
+    import json
+    import logging
+    llm = LLM([completed("来源：[official] VPN 资料 0 https://example.test/0")] * 2)
+    with caplog.at_level(logging.INFO, logger="netpilot.agent.orchestrator"):
+        result = run(llm)
+    logs = [json.loads(record.message) for record in caplog.records
+            if record.name == "netpilot.agent.orchestrator"]
+    assert len(logs) == 2
+    assert [item["attempt"] for item in logs] == [1, 2]
+    for item in logs:
+        assert item["failure_kind"] == "source_only_answer"
+        assert item["finish_reason"] == "stop"
+        assert item["has_content"] is True
+        assert item["content_length"] > 0
+        assert item["has_tool_calls"] is False
+        assert item["looks_like_textual_tool_call"] is False
+        assert item["source_only_detected"] is True
+        assert item["selected_chunk_count"] > 0
+        assert item["selected_context_chars"] > 0
+        assert item["llm_error_type"] is None
+    assert "实质正文" in llm.calls[2][0][2].content
+    assert result.knowledge_finalization_failure_kind == "source_only_answer"
+    assert present_chat(uuid4(), result).metrics.knowledge_finalization_failure_kind == "source_only_answer"
+
+
+def test_llm_error_log_records_type_without_error_payload(caplog):
+    import json
+    import logging
+    llm = LLM([LLMTimeoutError("private password=secret-value", retryable=True)] * 2)
+    with caplog.at_level(logging.INFO, logger="netpilot.agent.orchestrator"):
+        result = run(llm)
+    log = json.loads(caplog.records[-1].message)
+    assert log["failure_kind"] == "llm_error"
+    assert log["llm_error_type"] == "LLMTimeoutError"
+    assert "secret-value" not in caplog.text
+    assert result.knowledge_finalization_failure_kind == "llm_error"
+
+
+@pytest.mark.parametrize("bad,kind,retry_text", [
+    (completed('<tool_call>knowledge_search</tool_call>'), "textual_tool_call", "无任何工具"),
+    (completed('{"name":"knowledge_search","arguments":{"query":"VPN"}}'), "textual_tool_call", "无任何工具"),
+    (ChatResult(model="test", duration_ms=1, tool_calls=[ToolCall(id="illegal", function=FunctionCall(
+        name="knowledge_search", arguments='{"query":"VPN"}'
+    ))]), "tool_calls", "禁止函数请求"),
+    (completed("知识库检索已完成，但模型最终整理失败。"), "repeated_fallback", "不重复失败提示"),
+])
+def test_retry_guidance_matches_failed_synthesis(bad, kind, retry_text):
+    result_llm = LLM([bad, completed()])
+    result = run(result_llm)
+    assert result.knowledge_finalization_attempts == 2
+    assert result.knowledge_finalization_failure_kind == kind
+    assert result.fallback_reason is None
+    assert retry_text in result_llm.calls[2][0][2].content
+    assert len(result.steps) == 1

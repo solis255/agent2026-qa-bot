@@ -66,10 +66,38 @@ def result_sources(results: Iterable[KnowledgeSearchResult]) -> list[KnowledgeSo
 def source_only_answer(content: str, results: Iterable[KnowledgeSearchResult]) -> bool:
     """Reject citation lists that contain no substantive answer body."""
 
-    body = content
-    for item in results:
-        body = body.replace(item.title, "").replace(item.chunk_id, "")
-    body = re.sub(r"https?://[^\s)<>]+", "", body)
-    body = re.sub(r"official|community|maintainer|Source[s]?|来源|参考资料|参考文献|检索结果", "", body, flags=re.IGNORECASE)
-    body = re.sub(r"[\W_\d]+", "", body)
-    return len(body) < 6
+    chunks = list(results)
+    for line in content.splitlines():
+        if re.fullmatch(
+            r"(?:参考来源|资料来源|来源|参考资料|参考文献|检索结果|sources?)(?:如下|列表)?\s*[:：]?",
+            line.strip().strip("#* "), flags=re.IGNORECASE,
+        ):
+            continue
+        if re.match(r"\s*(?:[-*+]|\d+[.)、])?\s*\[(?:official|community|maintainer)\]", line, flags=re.IGNORECASE):
+            without_url = re.sub(r"https?://[^\s)<>]+", "", line)
+            if "http" in line and not re.search(r"[。！？；，]", without_url):
+                continue
+        body = line
+        for item in chunks:
+            body = body.replace(item.title, "").replace(item.chunk_id, "")
+        body = re.sub(r"https?://[^\s)<>]+", "", body)
+        body = re.sub(r"\[(?:official|community|maintainer)\]", "", body, flags=re.IGNORECASE)
+        body = re.sub(r"(?:Source[s]?|来源|参考资料|参考文献|检索结果)\s*[:：]?", "", body, flags=re.IGNORECASE)
+        body = re.sub(r"[\W_\d]+", "", body)
+        # Citation headings are not prose, but a short substantive Chinese
+        # instruction such as “先认证。” is still an answer (three characters).
+        if body and body not in {"资料", "标题", "URL", "以下", "如下", "参考来源"}:
+            return False
+    return True
+
+
+def is_knowledge_followup(user_message: str) -> bool:
+    """Recognize filtering/formatting existing sources, not a fresh search."""
+
+    if re.search(r"检索|搜索|查询|查找|查阅|knowledge_search", user_message, flags=re.IGNORECASE):
+        return False
+    return bool(re.search(
+        r"community|official|maintainer|source_type|这些(?:资料|内容|来源)|"
+        r"上述(?:资料|内容|来源)|(?:刚才|之前).{0,8}(?:资料|内容|来源)|其中",
+        user_message, flags=re.IGNORECASE,
+    ))

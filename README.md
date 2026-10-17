@@ -227,7 +227,7 @@ python -m pytest -q
 Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回答整理、持久化历史分析与分页修复后的全量回归实测为：
 
 ```text
-333 passed in 30.39s
+356 passed in 29.26s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
@@ -249,6 +249,8 @@ Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回�
 10D 已增加 RAG query 规范化/近义去重和每 Turn 两次的默认硬上限；`Context Builder` 只向模型提供 CURRENT TASK、分类后的 Network Evidence、Knowledge Sources、未解决假设与已执行 Tool 摘要，不跨 Turn 注入原始 Tool JSON。确定性 fallback 记录 `response_mode` / `fallback_reason`，并分别生成报告、元反馈、已有证据分析或诊断响应。普通输出与报告输出预算由 `LLM_MAX_OUTPUT_TOKENS`、`LLM_REPORT_MAX_OUTPUT_TOKENS` 配置。
 
 知识检索后新增显式 Knowledge Finalization：使用受限 chunk 正文、禁止 Tool，最多整理两次；失败时提供真实原文片段与来源。新增 `history_analysis`，由服务端绑定当前账号读取持久化诊断后比较；“今天”按 `APP_TIMEZONE=Asia/Shanghai` 计算。历史 UI 改为每页 10 条的上一页/下一页。实现与实测记录见 [回答与历史修复验收](docs/answer-history-fixes.md)。
+
+Knowledge Finalization 现使用独立知识 Prompt、最近最多 4 条短历史和 `LLM_KNOWLEDGE_MAX_OUTPUT_TOKENS=2200`；失败可从调试指标和逐次日志查看具体 failure_kind。Session 快照 v3 新增完整 `conversation_turns`，历史详情与报告按顺序展示全部已保存问答；旧多轮记录明确标记不完整。详见 [知识整理与完整会话验收](docs/knowledge-transcript-validation.md)。
 
 - LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
 - 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。

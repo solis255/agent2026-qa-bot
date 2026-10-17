@@ -67,6 +67,7 @@ let currentUser = null;
 let delayNextHistory = false;
 let releaseHistory = null;
 let historyRecords = [];
+let diagnosisDetail = null;
 const calls = [];
 const response = (status, payload) => ({
   ok: status >= 200 && status < 300,
@@ -99,6 +100,7 @@ async function fetch(url, options = {}) {
     });
   }
   if (url === "/api/session") return response(201, { session_id: `${currentUser.id}-session` });
+  if (url.startsWith("/api/diagnoses/") && diagnosisDetail) return response(200, diagnosisDetail);
   if (url.startsWith("/api/diagnoses?")) {
     if (delayNextHistory) {
       delayNextHistory = false;
@@ -157,6 +159,38 @@ const submit = (id) => get(id).handlers.submit({ preventDefault() {} });
   assert.equal(get("password-dialog").open, false);
   assert.equal(get("old-password").value, "");
   assert.ok(calls.some((call) => call.url === "/api/auth/change-password"));
+
+  diagnosisDetail = {
+    record_id: "three-turn-record", session_id: "old-session-no-longer-in-memory",
+    updated_at: "2026-10-17T10:00:00Z", turn_count: 3,
+    user_message: "U1", latest_user_message: "U3", answer: "A3",
+    diagnosis: { status: "completed", summary: "完整会话", tool_rounds: 0, evidence: [] },
+    metrics: {}, sources: [], tool_calls: [], conversation_complete: true,
+    conversation_turns: [1, 2, 3].map((index) => ({
+      turn_index: index, user_message: `U${index}`, assistant_answer: `A${index}`,
+    })),
+  };
+  context.transcriptHistoryItems = [{
+    record_id: diagnosisDetail.record_id, user_message: "U1", updated_at: diagnosisDetail.updated_at,
+    turn_count: 3, primary_issue: "undetermined", confidence: "low", metrics: {},
+  }];
+  vm.runInContext("renderHistoryItems(transcriptHistoryItems)", context);
+  const transcriptButton = get("history-list").querySelectorAll("button")[0];
+  await transcriptButton.handlers.click();
+  assert.deepEqual(get("conversation").querySelectorAll("p").map((item) => item.textContent),
+    ["U1", "A1", "U2", "A2", "U3", "A3"]);
+  assert.equal(vm.runInContext("state.sessionId", context), "alice-id-session");
+  assert.ok(!get("interaction-note").textContent.includes("仍可继续使用"));
+  diagnosisDetail.conversation_complete = false;
+  diagnosisDetail.conversation_turns = [diagnosisDetail.conversation_turns[2]];
+  await vm.runInContext('loadDiagnosisRecord("three-turn-record")', context);
+  assert.deepEqual(get("conversation").querySelectorAll("p").map((item) => item.textContent), ["U3", "A3"]);
+  assert.ok(get("interaction-note").textContent.includes("仅保留部分对话内容"));
+  assert.equal(vm.runInContext("state.sessionId", context), "alice-id-session");
+  context.testMetrics = { response_mode: "knowledge", fallback_reason: "finalization_failed",
+    knowledge_finalization_attempts: 2, knowledge_finalization_failure_kind: "source_only_answer" };
+  vm.runInContext("renderMetrics(testMetrics)", context);
+  assert.ok(get("metrics-debug").textContent.includes("source_only_answer"));
 
   historyRecords = Array.from({ length: 25 }, (_, index) => ({
     record_id: `alice-record-${index}`, user_message: `A 的诊断 ${index}`,

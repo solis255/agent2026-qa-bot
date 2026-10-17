@@ -88,6 +88,7 @@ const elements = {
   llmDuration: document.querySelector("#llm-duration"),
   toolDuration: document.querySelector("#tool-duration"),
   toolCount: document.querySelector("#tool-count"),
+  metricsDebug: document.querySelector("#metrics-debug"),
   toolTimeline: document.querySelector("#tool-timeline"),
   sourceList: document.querySelector("#source-list"),
   historyList: document.querySelector("#history-list"),
@@ -595,6 +596,13 @@ function renderDiagnosis(diagnosis) {
 }
 
 function renderMetrics(metrics) {
+  elements.metricsDebug.textContent = metrics ? JSON.stringify({
+    response_mode: metrics.response_mode,
+    fallback_reason: metrics.fallback_reason,
+    rag_calls: metrics.rag_calls,
+    knowledge_finalization_attempts: metrics.knowledge_finalization_attempts,
+    knowledge_finalization_failure_kind: metrics.knowledge_finalization_failure_kind,
+  }, null, 2) : "暂无调试指标。";
   if (!metrics) {
     elements.tokenUsage.textContent = "--";
     elements.llmDuration.textContent = "--";
@@ -815,17 +823,19 @@ async function loadDiagnosisRecord(recordId) {
     const record = await requestJSON(`/api/diagnoses/${encodeURIComponent(recordId)}`);
     if (state.authEpoch !== authEpoch) return;
     elements.conversation.replaceChildren();
-    appendMessage("user", record.user_message);
-    if (record.latest_user_message && record.latest_user_message !== record.user_message) {
-      appendMessage("user", record.latest_user_message);
+    for (const turn of record.conversation_turns || []) {
+      appendMessage("user", turn.user_message);
+      appendMessage("assistant", turn.assistant_answer);
     }
-    appendMessage("assistant", record.answer);
     renderDiagnosis(record.diagnosis);
     renderMetrics(record.metrics);
     renderTools(record.tool_calls);
     renderSources(record.sources);
     setReportRecord(record.record_id);
-    elements.interactionNote.textContent = `正在查看最近更新于 ${formatHistoryTime(record.updated_at)} 的 Session 诊断记录，共 ${Number(record.turn_count || 1)} 轮；当前会话仍可继续使用。`;
+    const legacyNote = record.conversation_complete === false
+      ? "该记录创建于完整会话持久化功能启用之前，仅保留部分对话内容。"
+      : "";
+    elements.interactionNote.textContent = `${legacyNote}正在查看最近更新于 ${formatHistoryTime(record.updated_at)} 的历史快照，共 ${Number(record.turn_count || 1)} 轮；这不会恢复历史会话。`;
   } catch (error) {
     if (state.authEpoch === authEpoch) elements.interactionNote.textContent = error.message;
   } finally {
@@ -934,6 +944,14 @@ function formatReportPreview(report) {
   lines.push("", "参考知识");
   const sources = report.sources || [];
   lines.push(...(sources.length ? sources.map((source) => `- ${source.title}：${source.source}`) : ["- 本次报告没有使用知识库来源。"]));
+  lines.push("", "会话记录");
+  if (report.conversation_complete === false) {
+    lines.push("该记录创建于完整会话持久化功能启用之前，仅保留部分对话内容。");
+  }
+  for (const turn of report.conversation_turns || []) {
+    lines.push("", `Turn ${turn.turn_index}`, "用户：", turn.user_message,
+      "诊断助手：", turn.assistant_answer);
+  }
   return lines.join("\n");
 }
 

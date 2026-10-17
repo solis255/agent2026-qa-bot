@@ -23,11 +23,12 @@ from netpilot.models import (
     DiagnosisRecordView,
     ExecutionMetricsView,
     TokenUsageView,
+    PersistedConversationTurn,
 )
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 3
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -102,6 +103,15 @@ class SQLiteDiagnosisRepository:
             metrics=response.metrics,
             tool_calls=response.tool_calls,
             sources=response.sources,
+            conversation_turns=[PersistedConversationTurn(
+                turn_index=1, user_message=user_message,
+                assistant_answer=response.answer, created_at=now,
+                turn_intent=response.metrics.turn_intent,
+                response_mode=response.metrics.response_mode,
+                fallback_reason=response.metrics.fallback_reason,
+                knowledge_finalization_failure_kind=response.metrics.knowledge_finalization_failure_kind,
+            )],
+            conversation_complete=True,
         )
         try:
             with self._lock, self._connection() as connection:
@@ -442,6 +452,13 @@ def _merge_session_records(
         metrics=_merge_metrics(existing.metrics, current.metrics, tool_calls),
         tool_calls=tool_calls,
         sources=sources,
+        conversation_turns=[
+            *existing.conversation_turns,
+            *(turn.model_copy(update={
+                "turn_index": existing.turn_count + turn.turn_index,
+            }) for turn in current.conversation_turns),
+        ],
+        conversation_complete=existing.conversation_complete and current.conversation_complete,
     )
 
 
@@ -497,6 +514,7 @@ def _merge_metrics(
             existing.knowledge_finalization_attempts + current.knowledge_finalization_attempts
         ),
         history_context_records=current.history_context_records,
+        knowledge_finalization_failure_kind=current.knowledge_finalization_failure_kind,
     )
 
 

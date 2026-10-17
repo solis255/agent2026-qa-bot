@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     tju_max_retries: int = Field(default=2, ge=0, le=5)
     llm_max_output_tokens: int = Field(default=1600, ge=1, le=32_768)
     llm_report_max_output_tokens: int = Field(default=2800, ge=1, le=32_768)
+    llm_knowledge_max_output_tokens: int = Field(default=2200, ge=1, le=32_768)
 
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
     max_rag_calls_per_turn: int = Field(default=2, ge=1, le=10)

@@ -74,6 +74,8 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         metrics=record.metrics,
         tool_calls=record.tool_calls,
         sources=record.sources,
+        conversation_turns=record.conversation_turns,
+        conversation_complete=record.conversation_complete,
     )
 
 
@@ -203,6 +205,19 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
             )
     else:
         lines.append("- 本次报告没有使用知识库来源。")
+
+    lines.extend(["", "## 会话记录", ""])
+    if not report.conversation_complete:
+        lines.extend([
+            "该记录创建于完整会话持久化功能启用之前，仅保留部分对话内容。",
+            "",
+        ])
+    for turn in report.conversation_turns:
+        lines.extend([
+            f"### Turn {turn.turn_index}", "",
+            "用户：", "", *_blockquote(turn.user_message), "",
+            "诊断助手：", "", _markdown_text(turn.assistant_answer), "",
+        ])
 
     lines.extend(
         [

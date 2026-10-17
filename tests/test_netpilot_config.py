@@ -69,6 +69,8 @@ def test_settings_load_valid_operational_values() -> None:
         ("network_timeout_seconds", 0),
         ("network_timeout_seconds", 31),
         ("max_tool_rounds", 0),
+        ("llm_knowledge_max_output_tokens", 0),
+        ("llm_knowledge_max_output_tokens", 32769),
         ("max_history_messages", 0),
         ("diagnosis_max_records", 0),
         ("diagnosis_report_max_bytes", 1000),

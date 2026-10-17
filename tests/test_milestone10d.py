@@ -265,10 +265,12 @@ def test_application_wires_configured_token_and_rag_limits() -> None:
             diagnosis_history_enabled=False,
             llm_max_output_tokens=1750,
             llm_report_max_output_tokens=2950,
+            llm_knowledge_max_output_tokens=2300,
             max_rag_calls_per_turn=3,
         )
     )
 
     assert application.state.agent.max_output_tokens == 1750
     assert application.state.agent.report_max_output_tokens == 2950
+    assert application.state.agent.knowledge_max_output_tokens == 2300
     assert application.state.agent.max_rag_calls_per_turn == 3

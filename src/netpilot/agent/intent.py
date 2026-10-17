@@ -101,6 +101,7 @@ _EXISTING_TERMS = (
 )
 
 _KNOWLEDGE_TERMS = (
+    "source_type",
     "知识库",
     "校园资料",
     "官方资料",

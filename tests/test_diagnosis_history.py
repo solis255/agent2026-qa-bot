@@ -241,6 +241,9 @@ def test_report_and_meta_turns_preserve_meaningful_diagnosis(tmp_path: Path) -> 
     assert loaded.metrics.turn_intent == "meta_feedback"
     assert loaded.metrics.response_mode == "meta"
 
+    assert loaded.conversation_complete is True
+    assert len(loaded.conversation_turns) == 3
+
 
 def test_sqlite_history_enforces_retention_and_cursor_pagination(
     tmp_path: Path,
@@ -419,7 +422,8 @@ def test_v2_migration_merges_turn_records_once_without_data_loss(
         for record in records:
             legacy_snapshot = record.model_dump(
                 mode="json",
-                exclude={"updated_at", "turn_count", "latest_user_message"},
+                exclude={"updated_at", "turn_count", "latest_user_message",
+                         "conversation_turns", "conversation_complete"},
             )
             connection.execute(
                 """
@@ -466,6 +470,9 @@ def test_v2_migration_merges_turn_records_once_without_data_loss(
     assert loaded.diagnosis.primary_issue == "dns_resolution_failure"
     assert loaded.metrics.response_mode == "meta"
 
+    assert loaded.conversation_complete is True
+    assert len(loaded.conversation_turns) == 4
+    assert [turn.assistant_answer for turn in loaded.conversation_turns] == [record.answer for record in records]
     reopened = SQLiteDiagnosisRepository(database)
     repeated = reopened.get(user_id, record_ids[-1])
     assert repeated == loaded
@@ -534,6 +541,7 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
             "fallback_reason": None,
             "rag_calls": 0,
             "knowledge_finalization_attempts": 0,
+            "knowledge_finalization_failure_kind": None,
             "history_context_records": 0,
             "network_tool_calls": 1,
         }

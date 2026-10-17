@@ -50,6 +50,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             tool_calls=len(tool_calls),
             rag_calls=result.rag_calls,
             knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+            knowledge_finalization_failure_kind=result.knowledge_finalization_failure_kind,
             history_context_records=result.history_context_records,
             network_tool_calls=sum(call.tool_name != "knowledge_search" for call in tool_calls),
             turn_intent=(
