@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 
 from netpilot.agent import (
+    TurnIntent,
+    classify_turn_intent,
     SessionBusyError,
     SessionCapacityError,
     SessionNotFoundError,
@@ -29,6 +31,7 @@ from netpilot.history import (
     DiagnosisRecordNotFoundError,
     DiagnosisStorageError,
 )
+from netpilot.history_context import HistoryContext, HistoryContextService, parse_history_query
 from netpilot.models import (
     ChatRequest,
     ChatResponse,
@@ -134,11 +137,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
 
     try:
         with request.app.state.runtime_lock:
-            result = request.app.state.agent.run(
-                payload.message,
-                history=history,
-                task_state=task_state,
-            )
+            result = _run_agent_turn(request, user.id, payload.message, history, task_state)
         sessions.finish_turn(
             payload.session_id,
             payload.message,
@@ -160,19 +159,12 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
             detail="诊断请求处理失败，请稍后重试。",
         ) from exc
     response = present_chat(payload.session_id, result)
-    repository = _diagnoses(request)
-    if repository is not None:
-        try:
-            record = repository.save(user.id, payload.message, response)
-            response = response.model_copy(update={"record_id": record.record_id})
-        except DiagnosisStorageError:
-            log_event(
-                logger,
-                "diagnosis_history_write",
-                level=logging.WARNING,
-                success=False,
-                error_type="diagnosis_storage_error",
-            )
+    response = _persist_session_diagnosis(
+        request,
+        user.id,
+        payload.message,
+        response,
+    )
     log_event(
         logger,
         "agent_turn",
@@ -185,6 +177,9 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
         fallback_reason=(
             result.fallback_reason.value if result.fallback_reason else None
         ),
+        rag_calls=result.rag_calls,
+        knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+        history_context_records=result.history_context_records,
     )
     reset_session_id(session_token)
     return response
@@ -228,11 +223,7 @@ def chat_stream(
     def run_turn() -> ChatResponse:
         try:
             with request.app.state.runtime_lock:
-                result = request.app.state.agent.run(
-                    payload.message,
-                    history=history,
-                    task_state=task_state,
-                )
+                result = _run_agent_turn(request, user.id, payload.message, history, task_state)
             sessions.finish_turn(
                 payload.session_id,
                 payload.message,
@@ -240,19 +231,12 @@ def chat_stream(
                 result=result,
             )
             response = present_chat(payload.session_id, result)
-            repository = _diagnoses(request)
-            if repository is not None:
-                try:
-                    record = repository.save(user.id, payload.message, response)
-                    response = response.model_copy(update={"record_id": record.record_id})
-                except DiagnosisStorageError:
-                    log_event(
-                        logger,
-                        "diagnosis_history_write",
-                        level=logging.WARNING,
-                        success=False,
-                        error_type="diagnosis_storage_error",
-                    )
+            response = _persist_session_diagnosis(
+                request,
+                user.id,
+                payload.message,
+                response,
+            )
             log_event(
                 logger,
                 "agent_turn_stream",
@@ -265,6 +249,9 @@ def chat_stream(
                 fallback_reason=(
                     result.fallback_reason.value if result.fallback_reason else None
                 ),
+                rag_calls=result.rag_calls,
+                knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+                history_context_records=result.history_context_records,
             )
             return response
         except Exception as exc:
@@ -579,6 +566,53 @@ def _sessions(request: Request) -> SessionStore:
 
 def _diagnoses(request: Request) -> DiagnosisRepository | None:
     return request.app.state.diagnosis_repository
+
+
+def _run_agent_turn(request: Request, user_id: UUID, message: str, history, task_state):
+    """Bind persisted history to the authenticated owner before model execution."""
+
+    kwargs = {"history": history, "task_state": task_state}
+    if classify_turn_intent(message).intent is TurnIntent.HISTORY_ANALYSIS:
+        repository = _diagnoses(request)
+        query = parse_history_query(message)
+        context = HistoryContext(query=query, available=repository is not None)
+        if repository is not None:
+            try:
+                context.records = HistoryContextService(
+                    repository,
+                    timezone_name=request.app.state.settings.app_timezone,
+                ).query(user_id=user_id, query=query)
+            except DiagnosisStorageError:
+                context.available = False
+                log_event(logger, "history_context_read", success=False,
+                          error_type="diagnosis_storage_error")
+        kwargs["history_context"] = context
+    return request.app.state.agent.run(message, **kwargs)
+
+
+def _persist_session_diagnosis(
+    request: Request,
+    user_id: UUID,
+    user_message: str,
+    response: ChatResponse,
+) -> ChatResponse:
+    """Use one upsert path for both ordinary Chat and SSE completion."""
+
+    repository = _diagnoses(request)
+    if repository is None:
+        return response
+    try:
+        record = repository.upsert_session(user_id, user_message, response)
+        return response.model_copy(update={"record_id": record.record_id})
+    except DiagnosisStorageError:
+        log_event(
+            logger,
+            "diagnosis_history_write",
+            level=logging.WARNING,
+            success=False,
+            error_type="diagnosis_storage_error",
+        )
+        return response
 
 
 def _require_diagnoses(request: Request) -> DiagnosisRepository:

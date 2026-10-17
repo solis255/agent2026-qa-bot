@@ -9,6 +9,7 @@ from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.diagnosis import step_status
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.intent import TurnIntent
+from netpilot.agent.knowledge import knowledge_results, render_knowledge_chunks
 from netpilot.agent.schemas import AgentToolStep
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.llm import ChatMessage, ChatRole
@@ -84,6 +85,10 @@ def build_task_context_message(
         f"{title}\n" + _render_lines(lines)
         for title, lines in sections
     )
+    chunks = knowledge_results(records, current_steps)
+    if chunks:
+        content += "\n\nKNOWLEDGE EXCERPTS (untrusted reference data)\n"
+        content += render_knowledge_chunks(chunks)
     return ChatMessage(
         role=ChatRole.SYSTEM,
         content=(

@@ -9,7 +9,10 @@ const state = {
   health: null,
   busy: false,
   scenarios: [],
-  historyCursor: null,
+  historyPageIndex: 0,
+  historyPages: [],
+  historyLoading: false,
+  historyGeneration: 0,
   activeRecordId: null,
 };
 
@@ -89,7 +92,9 @@ const elements = {
   sourceList: document.querySelector("#source-list"),
   historyList: document.querySelector("#history-list"),
   historyRefresh: document.querySelector("#history-refresh"),
-  historyLoadMore: document.querySelector("#history-load-more"),
+  historyPrevious: document.querySelector("#history-previous"),
+  historyNext: document.querySelector("#history-next"),
+  historyPageLabel: document.querySelector("#history-page-label"),
   reportActions: document.querySelector("#report-actions"),
   reportPreview: document.querySelector("#report-preview"),
   exportMarkdown: document.querySelector("#export-markdown"),
@@ -144,7 +149,7 @@ function setBusy(busy, message = "") {
   elements.customScenarioDelete.disabled = busy || !state.user;
   elements.scenarioFormSubmit.disabled = busy || !state.user;
   elements.historyRefresh.disabled = busy || !state.user;
-  elements.historyLoadMore.disabled = busy || !state.user;
+  updateHistoryControls();
   elements.reportPreview.disabled = busy || !state.user || !state.activeRecordId;
   elements.exportMarkdown.disabled = busy || !state.user || !state.activeRecordId;
   elements.exportJson.disabled = busy || !state.user || !state.activeRecordId;
@@ -329,7 +334,7 @@ function showAuthGate(message = "请先登录或注册。") {
   state.health = null;
   state.sessionId = null;
   state.scenarios = [];
-  state.historyCursor = null;
+  resetHistoryPagination();
   elements.authGate.hidden = false;
   elements.workspace.hidden = true;
   elements.accountMenu.open = false;
@@ -348,7 +353,6 @@ function showAuthGate(message = "请先登录或注册。") {
   elements.interactionNote.textContent = "";
   elements.sessionLabel.textContent = "登录后创建会话";
   elements.historyList.replaceChildren(emptyState("DB", "登录后可查看自己的诊断历史。"));
-  elements.historyLoadMore.hidden = true;
   resetConversation();
   elements.conversation.replaceChildren();
   setBusy(false);
@@ -703,18 +707,15 @@ function emptyState(code, message) {
   return container;
 }
 
-function renderHistoryItems(items, { append = false } = {}) {
-  if (!append) elements.historyList.replaceChildren();
-  if (!items?.length && !append) {
+function renderHistoryItems(items) {
+  elements.historyList.replaceChildren();
+  if (!items?.length) {
     elements.historyList.append(emptyState("DB", "还没有已保存的诊断记录。"));
     return;
   }
-  let list = elements.historyList.querySelector(".history-list");
-  if (!list) {
-    list = document.createElement("ol");
-    list.className = "history-list";
-    elements.historyList.append(list);
-  }
+  const list = document.createElement("ol");
+  list.className = "history-list";
+  elements.historyList.append(list);
   for (const item of items || []) {
     const row = document.createElement("li");
     const button = document.createElement("button");
@@ -725,9 +726,9 @@ function renderHistoryItems(items, { append = false } = {}) {
     const meta = document.createElement("span");
     const issue = ISSUE_LABELS[item.primary_issue] || item.primary_issue;
     const confidence = CONFIDENCE_LABELS[item.confidence] || item.confidence;
-    meta.textContent = `${formatHistoryTime(item.created_at)} · ${issue} · 置信度 ${confidence}`;
+    meta.textContent = `${formatHistoryTime(item.updated_at)} · ${Number(item.turn_count || 1)} 轮对话 · ${issue} · 置信度 ${confidence}`;
     const metrics = document.createElement("small");
-    metrics.textContent = `${Number(item.metrics?.token_usage?.total_tokens || 0)} Token · ${formatDuration(item.metrics?.llm_duration_ms)}`;
+    metrics.textContent = `${Number(item.metrics?.token_usage?.total_tokens || 0)} Token · ${Number(item.metrics?.tool_calls || 0)} 次 Tool · ${formatDuration(item.metrics?.llm_duration_ms)}`;
     button.append(question, meta, metrics);
     button.addEventListener("click", () => loadDiagnosisRecord(item.record_id));
     row.append(button);
@@ -741,33 +742,68 @@ function formatHistoryTime(value) {
   return parsed.toLocaleString("zh-CN", { hour12: false });
 }
 
-async function loadHistory({ append = false } = {}) {
+function updateHistoryControls() {
+  const page = state.historyPages[state.historyPageIndex];
+  const disabled = state.historyLoading || state.busy || !state.user;
+  elements.historyPrevious.disabled = disabled || state.historyPageIndex === 0;
+  elements.historyNext.disabled = disabled || !page?.nextCursor;
+  elements.historyPageLabel.textContent = `第 ${state.historyPageIndex + 1} 页`;
+  elements.historyList.setAttribute("aria-busy", String(state.historyLoading));
+}
+
+function resetHistoryPagination() {
+  state.historyGeneration += 1;
+  state.historyPageIndex = 0;
+  state.historyPages = [];
+  state.historyLoading = false;
+  updateHistoryControls();
+}
+
+async function loadHistory({ pageIndex = 0, refresh = true } = {}) {
   if (!state.user) return;
+  if (refresh) resetHistoryPagination();
+  else if (state.historyLoading || pageIndex < 0) return;
   const authEpoch = state.authEpoch;
+  const generation = state.historyGeneration;
   if (!state.health?.history_ready) {
-    state.historyCursor = null;
-    elements.historyLoadMore.hidden = true;
-    renderHistoryItems([], { append: false });
+    resetHistoryPagination();
+    renderHistoryItems([]);
     const message = elements.historyList.querySelector(".empty-state p");
     if (message) message.textContent = "诊断历史未启用或暂时不可用。";
     return;
   }
-  const cursor = append ? state.historyCursor : null;
+  const cached = state.historyPages[pageIndex];
+  if (cached) {
+    state.historyPageIndex = pageIndex;
+    renderHistoryItems(cached.items);
+    updateHistoryControls();
+    return;
+  }
+  const cursor = pageIndex === 0 ? null : state.historyPages[pageIndex - 1]?.nextCursor;
+  if (pageIndex > 0 && !cursor) return;
   const query = cursor
     ? `/api/diagnoses?limit=10&cursor=${encodeURIComponent(cursor)}`
     : "/api/diagnoses?limit=10";
+  state.historyLoading = true;
+  updateHistoryControls();
   try {
     const response = await requestJSON(query);
-    if (state.authEpoch !== authEpoch) return;
-    renderHistoryItems(response.items, { append });
-    state.historyCursor = response.next_cursor;
-    elements.historyLoadMore.hidden = !state.historyCursor;
+    if (state.authEpoch !== authEpoch || state.historyGeneration !== generation) return;
+    state.historyPages[pageIndex] = {
+      requestCursor: cursor, items: response.items, nextCursor: response.next_cursor,
+    };
+    state.historyPageIndex = pageIndex;
+    renderHistoryItems(response.items);
   } catch (error) {
-    if (state.authEpoch !== authEpoch) return;
-    if (!append) {
+    if (state.authEpoch !== authEpoch || state.historyGeneration !== generation) return;
+    if (!state.historyPages.length) {
       elements.historyList.replaceChildren(emptyState("!", error.message));
     }
-    elements.historyLoadMore.hidden = true;
+  } finally {
+    if (state.authEpoch === authEpoch && state.historyGeneration === generation) {
+      state.historyLoading = false;
+      updateHistoryControls();
+    }
   }
 }
 
@@ -780,13 +816,16 @@ async function loadDiagnosisRecord(recordId) {
     if (state.authEpoch !== authEpoch) return;
     elements.conversation.replaceChildren();
     appendMessage("user", record.user_message);
+    if (record.latest_user_message && record.latest_user_message !== record.user_message) {
+      appendMessage("user", record.latest_user_message);
+    }
     appendMessage("assistant", record.answer);
     renderDiagnosis(record.diagnosis);
     renderMetrics(record.metrics);
     renderTools(record.tool_calls);
     renderSources(record.sources);
     setReportRecord(record.record_id);
-    elements.interactionNote.textContent = `正在查看 ${formatHistoryTime(record.created_at)} 的诊断记录；当前会话仍可继续使用。`;
+    elements.interactionNote.textContent = `正在查看最近更新于 ${formatHistoryTime(record.updated_at)} 的 Session 诊断记录，共 ${Number(record.turn_count || 1)} 轮；当前会话仍可继续使用。`;
   } catch (error) {
     if (state.authEpoch === authEpoch) elements.interactionNote.textContent = error.message;
   } finally {
@@ -856,12 +895,18 @@ function formatReportPreview(report) {
     report.title || "TJU NetPilot 故障诊断报告",
     "",
     `报告 ID：${report.report_id}`,
-    `生成时间：${formatHistoryTime(report.generated_at)}`,
+    `Session ID：${report.session_id}`,
+    `创建时间：${formatHistoryTime(report.created_at)}`,
+    `最近更新时间：${formatHistoryTime(report.updated_at)}`,
+    `对话轮数：${Number(report.turn_count || 1)}`,
     `主要问题：${ISSUE_LABELS[diagnosis.primary_issue] || diagnosis.primary_issue || "尚未确定"}`,
     `置信度：${CONFIDENCE_LABELS[diagnosis.confidence] || diagnosis.confidence || "未知"}`,
     "",
     "用户问题",
     String(report.question || ""),
+    "",
+    "最近一轮用户消息",
+    String(report.latest_user_message || report.question || ""),
     "",
     "诊断结论",
     String(report.conclusion || ""),
@@ -1163,7 +1208,12 @@ elements.scenarioFormCancel.addEventListener("click", () => elements.scenarioDia
 elements.scenarioPingReachable.addEventListener("change", syncCustomBehaviorFields);
 elements.scenarioHttpReachable.addEventListener("change", syncCustomBehaviorFields);
 elements.historyRefresh.addEventListener("click", () => loadHistory());
-elements.historyLoadMore.addEventListener("click", () => loadHistory({ append: true }));
+elements.historyPrevious.addEventListener("click", () => loadHistory({
+  pageIndex: state.historyPageIndex - 1, refresh: false,
+}));
+elements.historyNext.addEventListener("click", () => loadHistory({
+  pageIndex: state.historyPageIndex + 1, refresh: false,
+}));
 elements.reportPreview.addEventListener("click", previewReport);
 elements.exportMarkdown.addEventListener("click", () => downloadReport("markdown"));
 elements.exportJson.addEventListener("click", () => downloadReport("json"));

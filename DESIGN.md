@@ -117,7 +117,7 @@ RAG 文档是 **untrusted reference data**。检索文本不得覆盖系统指�
 `SessionStore` 与 SQLite Diagnosis History 解决不同问题：
 
 - `SessionStore` 是进程内、有界、线程安全的会话状态，绑定 `owner_user_id`。user/assistant 文本与 `SessionTaskState` 分开保存；后者保留规范化 Tool Signature 和结构化 `EvidenceRecord`，使同一 Session 的后续 Turn 能复用证据并阻止等价 Tool 重跑。两者在重启或场景清理后消失；同一会话一次只允许一个 active turn，跨用户访问返回 404。
-- `SQLiteDiagnosisRepository` 保存带 `user_id` 的不可变结构化快照，包括问题、回答、诊断、指标、Tool Timeline 和来源；查询、分页、会话筛选与报告导出均按当前用户授权。旧记录迁移为 `user_id=NULL`，保留但对普通用户不可见。
+- `SQLiteDiagnosisRepository` 按 `(user_id, session_id)` 保存一条累计结构化快照，首次聊天插入、后续 upsert 保持 record_id 稳定，累计 Turn/Token/Tool/Source；查询、分页、会话筛选与报告导出均按当前用户授权。`HistoryContextService` 只接收服务端认证的用户 ID，向 HISTORY_ANALYSIS 提供有界摘要。pre-auth 旧记录保留为 `user_id=NULL`，普通用户不可见。
 
 历史写入失败不会回滚已经完成的聊天。持久化内容可能包含用户问题和网络证据，部署者必须设置路径权限、保留策略与备份策略。
 

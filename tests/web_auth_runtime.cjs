@@ -24,8 +24,15 @@ class Element {
   removeAttribute(name) { delete this[name]; }
   replaceChildren(...children) { this.children = children; }
   append(...children) { this.children.push(...children); }
-  querySelectorAll() { return []; }
-  querySelector() { return { textContent: "" }; }
+  querySelectorAll(selector) {
+    const found = [];
+    for (const child of this.children) {
+      if (child.id === selector || (selector.startsWith(".") && child.className === selector.slice(1))) found.push(child);
+      found.push(...child.querySelectorAll(selector));
+    }
+    return found;
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || { textContent: "" }; }
   reportValidity() { return true; }
   reset() {
     const ids = this.id === "auth-form"
@@ -59,6 +66,7 @@ const document = {
 let currentUser = null;
 let delayNextHistory = false;
 let releaseHistory = null;
+let historyRecords = [];
 const calls = [];
 const response = (status, payload) => ({
   ok: status >= 200 && status < 300,
@@ -96,7 +104,10 @@ async function fetch(url, options = {}) {
       delayNextHistory = false;
       return new Promise((resolve) => { releaseHistory = resolve; });
     }
-    return response(200, { items: [], next_cursor: null });
+    const cursor = new URL(url, "http://test").searchParams.get("cursor");
+    const offset = cursor ? Number(cursor) : 0;
+    const items = historyRecords.slice(offset, offset + 10);
+    return response(200, { items, next_cursor: offset + 10 < historyRecords.length ? String(offset + 10) : null });
   }
   throw new Error(`Unexpected request: ${url}`);
 }
@@ -147,17 +158,55 @@ const submit = (id) => get(id).handlers.submit({ preventDefault() {} });
   assert.equal(get("old-password").value, "");
   assert.ok(calls.some((call) => call.url === "/api/auth/change-password"));
 
+  historyRecords = Array.from({ length: 25 }, (_, index) => ({
+    record_id: `alice-record-${index}`, user_message: `A 的诊断 ${index}`,
+    updated_at: "2026-10-17T10:00:00Z", turn_count: 2,
+    primary_issue: "dns_resolution_failure", confidence: "high", metrics: {},
+  }));
+  await get("history-refresh").handlers.click();
+  assert.equal(get("history-list").querySelectorAll("li").length, 10);
+  assert.equal(get("history-page-label").textContent, "第 1 页");
+  assert.equal(get("history-previous").disabled, true);
+  await get("history-next").handlers.click();
+  assert.equal(get("history-list").querySelectorAll("li").length, 10);
+  assert.equal(get("history-page-label").textContent, "第 2 页");
+  await get("history-next").handlers.click();
+  assert.equal(get("history-list").querySelectorAll("li").length, 5);
+  assert.equal(get("history-page-label").textContent, "第 3 页");
+  assert.equal(get("history-next").disabled, true);
+  const requestCount = calls.length;
+  await get("history-previous").handlers.click();
+  assert.equal(calls.length, requestCount);
+  assert.equal(get("history-list").querySelectorAll("li").length, 10);
+  assert.equal(get("history-page-label").textContent, "第 2 页");
+  await get("history-next").handlers.click();
+  assert.equal(get("history-page-label").textContent, "第 3 页");
+
+  // A saved diagnosis uses this same refresh path and invalidates old cursors.
+  await vm.runInContext("loadHistory()", context);
+  assert.equal(vm.runInContext("state.historyPageIndex", context), 0);
+  assert.equal(vm.runInContext("state.historyPages.length", context), 1);
+  assert.equal(get("history-list").querySelectorAll("li").length, 10);
+  await get("history-next").handlers.click();
+  await get("history-next").handlers.click();
+  assert.equal(get("history-page-label").textContent, "第 3 页");
+
   delayNextHistory = true;
   const oldHistoryRequest = get("history-refresh").handlers.click();
   await tick();
   assert.ok(releaseHistory);
+  assert.equal(get("history-previous").disabled, true);
+  assert.equal(get("history-next").disabled, true);
   await get("logout-button").handlers.click();
   assert.equal(get("auth-gate").hidden, false);
   assert.equal(get("workspace").hidden, true);
   assert.equal(vm.runInContext("state.sessionId", context), null);
   assert.equal(get("account-name").textContent, "");
   assert.equal(get("report-content").textContent, "");
+  assert.equal(vm.runInContext("state.historyPageIndex", context), 0);
+  assert.equal(vm.runInContext("state.historyPages.length", context), 0);
 
+  historyRecords = [];
   get("auth-username").value = "bob";
   get("auth-password").value = "test-password-123";
   await submit("auth-form");

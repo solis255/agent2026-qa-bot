@@ -68,6 +68,15 @@ def llm_tool_feedback(tool_name: str, result: Any) -> dict[str, Any]:
     """
 
     data = json_data(result.data)
+    if tool_name == "knowledge_search" and isinstance(data, dict):
+        # Bound only model-facing feedback; ToolResult/Evidence retain full text.
+        limits = {"content": 900, "source": 400, "title": 180,
+                  "file": 160, "chunk_id": 64}
+        data = {"results": [
+            {key: value[:limits.get(key, 100)] if isinstance(value, str) else value
+             for key, value in item.items()}
+            for item in data.get("results", [])[:6] if isinstance(item, dict)
+        ]}
     error_code = None
     if result.error is not None:
         error_code = str(getattr(result.error.code, "value", result.error.code))

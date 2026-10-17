@@ -21,7 +21,9 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
         "token-usage",
         "history-list",
         "history-refresh",
-        "history-load-more",
+        "history-previous",
+        "history-next",
+        "history-page-label",
         "report-actions",
         "report-preview",
         "export-markdown",
@@ -68,6 +70,9 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "diagnosis.summary" in javascript
     assert "response.metrics" in javascript
     assert "record.user_message" in javascript
+    assert "record.latest_user_message" in javascript
+    assert "item.updated_at" in javascript
+    assert "item.turn_count" in javascript
     assert "response.record_id" in javascript
     assert "response.body?.cancel()" in javascript
     assert "link.download" in javascript
@@ -80,7 +85,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "armInactivityTimeout" in javascript
     assert "流式连接长时间未收到数据" in javascript
     assert "timeoutMs = 180000" not in javascript
-    assert 'src="/app.js?v=m9d-sse-idle"' in html
+    assert 'src="/app.js?v=knowledge-history-pages"' in html
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:

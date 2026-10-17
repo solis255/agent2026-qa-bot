@@ -83,10 +83,15 @@ def test_report_generation_is_deterministic_complete_and_markdown_safe(
 
     assert first == second
     assert first.report_id == record.record_id
-    assert first.generated_at == record.created_at
+    assert first.generated_at == record.updated_at
+    assert first.created_at == record.created_at
+    assert first.updated_at == record.updated_at
+    assert first.turn_count == 1
+    assert first.latest_user_message == question
     assert "# TJU NetPilot 故障诊断报告" in markdown
     for section in (
         "## 用户问题",
+        "## 最近一轮用户消息",
         "## 诊断结论",
         "## 执行指标",
         "## 检测证据",
@@ -105,6 +110,34 @@ def test_report_generation_is_deterministic_complete_and_markdown_safe(
     parsed = DiagnosisReportView.model_validate(json.loads(json_text))
     assert parsed == first
     assert parsed.tool_calls[0].arguments == {"domain": "github.com"}
+
+
+def test_report_uses_cumulative_session_snapshot(tmp_path: Path) -> None:
+    repository = SQLiteDiagnosisRepository(tmp_path / "report.db")
+    owner = uuid4()
+    session_id = uuid4()
+    first = repository.upsert_session(
+        owner,
+        "最初问题",
+        present_chat(session_id, _result("第一轮回答")),
+    )
+    second = repository.upsert_session(
+        owner,
+        "生成报告",
+        present_chat(session_id, _result("最新回答")),
+    )
+
+    report = build_diagnosis_report(second)
+
+    assert second.record_id == first.record_id
+    assert report.record_id == first.record_id
+    assert report.question == "最初问题"
+    assert report.latest_user_message == "生成报告"
+    assert report.conclusion == "最新回答"
+    assert report.turn_count == 2
+    assert report.metrics.token_usage.total_tokens == 300
+    assert report.metrics.tool_calls == 1
+    assert len(report.sources) == 1
 
 
 def test_report_artifacts_are_stable_bounded_and_safely_named(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=m9c">
+    <link rel="stylesheet" href="/style.css?v=knowledge-history-pages">
   </head>
   <body>
     <header class="topbar">
@@ -172,9 +172,11 @@
           <div id="history-list" aria-live="polite">
             <div class="empty-state"><span>DB</span><p>正在加载历史诊断记录。</p></div>
           </div>
-          <button type="button" class="history-more" id="history-load-more" hidden>
-            加载更多
-          </button>
+          <nav class="history-pagination" aria-label="诊断历史分页">
+            <button type="button" id="history-previous" disabled>上一页</button>
+            <span id="history-page-label" aria-live="polite">第 1 页</span>
+            <button type="button" id="history-next" disabled>下一页</button>
+          </nav>
         </section>
       </aside>
     </main>
@@ -261,6 +263,6 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=m9d-sse-idle" defer></script>
+    <script src="/app.js?v=knowledge-history-pages" defer></script>
   </body>
 </html>

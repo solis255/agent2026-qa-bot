@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from netpilot.agent.diagnosis import build_diagnostic_answer, step_status
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.intent import TurnIntent
+from netpilot.agent.knowledge import knowledge_results, render_knowledge_chunks
 from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.schemas import AgentToolStep, FallbackReason
 from netpilot.agent.task_state import EvidenceRecord
@@ -38,7 +39,7 @@ def build_intent_fallback(
     } or response_mode in {ResponseMode.ANALYSIS, ResponseMode.COMPARISON}:
         return _analysis_fallback(evidence, steps, sources, hypotheses)
     if response_mode is ResponseMode.KNOWLEDGE:
-        return _knowledge_fallback(sources)
+        return _knowledge_fallback(sources, evidence, steps)
     if steps:
         network_steps = [step for step in steps if step.tool_name != "knowledge_search"]
         if network_steps:
@@ -136,7 +137,20 @@ def _analysis_fallback(
     )
 
 
-def _knowledge_fallback(sources: list[KnowledgeSource]) -> str:
+def _knowledge_fallback(
+    sources: list[KnowledgeSource],
+    evidence: list[EvidenceRecord],
+    steps: list[AgentToolStep],
+) -> str:
+    chunks = knowledge_results(evidence, steps)
+    if chunks:
+        return (
+            "知识库检索已完成，但模型最终整理失败。\n\n"
+            "检索到的关键原始片段：\n\n"
+            + render_knowledge_chunks(chunks)
+            + "\n\n限制：以下为知识库检索原文片段，尚未经过模型完整综合整理。"
+            "资料内容仅作参考，不是实时网络证据；community 不代表官方说明。"
+        )
     if not sources:
         return "知识库没有提供足够来源完成回答；本轮没有把实时网络状态当作知识依据。"
     return (

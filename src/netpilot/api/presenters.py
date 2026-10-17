@@ -48,6 +48,10 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             llm_duration_ms=round(result.llm_duration_ms, 2),
             tool_duration_ms=sum(item.duration_ms for item in tool_calls),
             tool_calls=len(tool_calls),
+            rag_calls=result.rag_calls,
+            knowledge_finalization_attempts=result.knowledge_finalization_attempts,
+            history_context_records=result.history_context_records,
+            network_tool_calls=sum(call.tool_name != "knowledge_search" for call in tool_calls),
             turn_intent=(
                 result.turn_intent.value if result.turn_intent is not None else None
             ),

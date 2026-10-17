@@ -152,6 +152,30 @@ def test_stream_api_emits_versioned_deltas_and_complete_snapshot(tmp_path) -> No
     assert "stream-test-key" not in payload
 
 
+def test_chat_and_stream_share_one_session_history_record(tmp_path) -> None:
+    application = stream_app(tmp_path)
+    with TestClient(application) as client:
+        session_id = create_session(client)
+        ordinary = client.post(
+            "/api/chat",
+            json={"session_id": session_id, "message": "先检查 DNS"},
+        )
+        streamed = client.post(
+            "/api/chat/stream",
+            json={"session_id": session_id, "message": "继续分析"},
+        )
+        listing = client.get(f"/api/diagnoses?session_id={session_id}")
+
+    assert ordinary.status_code == 200
+    assert streamed.status_code == 200
+    events = parse_sse(streamed.text)
+    completed = ChatResponse.model_validate(events[-1]["data"]["response"])
+    assert completed.record_id == UUID(ordinary.json()["record_id"])
+    assert len(listing.json()["items"]) == 1
+    assert listing.json()["items"][0]["turn_count"] == 2
+    assert listing.json()["items"][0]["latest_user_message"] == "继续分析"
+
+
 def test_stream_api_prevalidates_sessions_and_configuration(tmp_path) -> None:
     application = stream_app(tmp_path)
     with TestClient(application) as client:

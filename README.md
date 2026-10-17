@@ -20,7 +20,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | Provider | 确定性离线 `MockNetworkProvider`；检测运行 NetPilot 主机的 `LocalNetworkProvider` |
 | RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
 | Web/API | 中文 Web、登录/注册/改密/退出、当前用户菜单、个人会话与历史、结构化 Tool Timeline、健康检查、Mock 场景控制 |
-| 历史与报告 | 按用户隔离的 SQLite 诊断快照、游标分页、确定性报告、Markdown/JSON 导出 |
+| 历史与报告 | 每个 Session 一条累计 SQLite 诊断记录、账号历史分析、每页 10 条上一页/下一页、确定性报告、Markdown/JSON 导出 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -224,10 +224,10 @@ GET  /api/scenarios
 python -m pytest -q
 ```
 
-Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 10D 全量回归实测为：
+Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回答整理、持久化历史分析与分页修复后的全量回归实测为：
 
 ```text
-290 passed in 14.80s
+333 passed in 30.39s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
@@ -247,6 +247,8 @@ Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；本次 10D 全�
 10C 已移除“任意 abnormal 即停止”条件，改用 `DiagnosticCoverage` 和 `EvidenceSufficiency` 判断是否可以收敛。完整网页故障诊断最低覆盖网络配置、DNS、公网 IP 连通性以及 TCP/HTTP 应用层；单个 DNS abnormal 不再导致提前结束。轻量 `Hypothesis` 会记录 supported / possible / weakened / excluded 及对应 Evidence ID。多个同类结果按 Tool/状态聚合，并移除相邻的完全重复结论。
 
 10D 已增加 RAG query 规范化/近义去重和每 Turn 两次的默认硬上限；`Context Builder` 只向模型提供 CURRENT TASK、分类后的 Network Evidence、Knowledge Sources、未解决假设与已执行 Tool 摘要，不跨 Turn 注入原始 Tool JSON。确定性 fallback 记录 `response_mode` / `fallback_reason`，并分别生成报告、元反馈、已有证据分析或诊断响应。普通输出与报告输出预算由 `LLM_MAX_OUTPUT_TOKENS`、`LLM_REPORT_MAX_OUTPUT_TOKENS` 配置。
+
+知识检索后新增显式 Knowledge Finalization：使用受限 chunk 正文、禁止 Tool，最多整理两次；失败时提供真实原文片段与来源。新增 `history_analysis`，由服务端绑定当前账号读取持久化诊断后比较；“今天”按 `APP_TIMEZONE=Asia/Shanghai` 计算。历史 UI 改为每页 10 条的上一页/下一页。实现与实测记录见 [回答与历史修复验收](docs/answer-history-fixes.md)。
 
 - LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
 - 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。

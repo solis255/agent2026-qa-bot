@@ -156,7 +156,7 @@ def test_legacy_history_migration_preserves_but_hides_old_records(tmp_path: Path
             "SELECT value FROM netpilot_metadata WHERE key = 'schema_version'"
         ).fetchone()[0]
     assert row == (None, "旧问题", legacy_snapshot)
-    assert version == "2"
+    assert version == "3"
 
     app = _app(database)
     with TestClient(app) as client:

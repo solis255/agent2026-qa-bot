@@ -126,7 +126,7 @@ agent2026-qa-bot/
 | Agent | `AgentOrchestrator` | 有界 Tool loop、跨 Turn 去重、RAG 上限、来源聚合与 intent-aware fallback |
 | 认证 | `AuthService`、`UserRepository`、`AuthSessionRepository` | SQLite 用户/Session，HttpOnly Cookie 解析与当前用户依赖 |
 | 会话 | `SessionStore` | 绑定 owner 的有界文本历史、`SessionTaskState` / Evidence Memory 与 busy 控制 |
-| 历史 | `SQLiteDiagnosisRepository | None` | 按用户保存及读取不可变诊断快照 |
+| 历史 | `SQLiteDiagnosisRepository | None`、`HistoryContextService` | 按 user/session upsert 累计快照；向当前账号的历史分析提供有界上下文 |
 | 并发锁 | `RLock` (`runtime_lock`) | 防止 Agent 运行中切换 Mock 场景 |
 
 应用构造不发起 TJU 模型或网络 Tool 请求。关闭应用时，lifespan 会释放 `TJUClient` 自己持有的 SDK transport。
@@ -161,7 +161,7 @@ ChatRequest
        -> update coverage / sufficiency / hypotheses
   -> SessionStore.finish_turn(user text, assistant text, AgentResult)
   -> present_chat()
-  -> SQLiteDiagnosisRepository.save(user.id, ...) [optional, degradable]
+  -> _persist_session_diagnosis() -> SQLiteDiagnosisRepository.upsert_session(user.id, ...) [optional, degradable]
   -> ChatResponse
 ```
 
@@ -308,7 +308,7 @@ Campus knowledge intent
 | 用途 | 给下一轮 Agent 提供对话上下文与可复用 Tool Evidence | 回看、分页、报告和导出 |
 | 存储 | 进程内字典 | 本地 SQLite 文件 |
 | 所有权 | `owner_user_id`，跨用户 session 404 | 行与新快照均带 `user_id`；查询按 owner 过滤 |
-| 内容 | 分离的 user/assistant 文本消息和 `SessionTaskState`（原始 `EvidenceRecord`、signature、coverage、sufficiency、hypotheses、response/fallback 元数据、turn/task version） | 完整不可变诊断快照 |
+| 内容 | 分离的 user/assistant 文本消息和 `SessionTaskState`（原始 `EvidenceRecord`、signature、coverage、sufficiency、hypotheses、response/fallback 元数据、turn/task version） | 每个 user/session 一条累计诊断快照，stable record_id、created/updated_at、turn_count |
 | 生命周期 | 进程重启或 clear 后消失 | 跨应用重启保留 |
 | 上限 | `MAX_HISTORY_MESSAGES`、`MAX_SESSIONS`、每 Session 最多 200 条 Evidence | `DIAGNOSIS_MAX_RECORDS` |
 | 并发 | `RLock`、单 session busy 标记 | `RLock`、WAL、busy timeout、参数化 SQL |
@@ -321,6 +321,8 @@ Campus knowledge intent
 `EvidenceRecord` 保存 Tool 名、已验证参数、signature、结构化 data、状态、摘要、观测 Turn 与 task version。只有成功完成的 `ToolResult`——包括“成功取得不可达观测”这类负面网络证据——可在当前 task version 复用。原始 data 留在 TaskState；`Context Builder` 跨 Turn 只注入 CURRENT TASK、KNOWN FACTS、ABNORMAL/NORMAL EVIDENCE、KNOWLEDGE SOURCES、UNRESOLVED HYPOTHESES 和 ALREADY EXECUTED TOOLS 摘要。完成 Turn 时，`SessionStore` 用实际持久化后的 Evidence ID 重算 coverage、sufficiency 和 hypotheses，供下一轮直接复用。10B 的 `state_changed` 和明确重测表达会调用 `advance_task_version()`，将旧 Evidence 标记为 superseded；其它自动过期策略尚未实现。RAG Evidence 继续视为 untrusted reference data。
 
 ## Web and API
+
+知识最终整理、当前账号持久化历史上下文与 cursor 前端上一页缓存的最新流程和验收，见 [回答与历史修复](answer-history-fixes.md)。这三条路径继续遵守 Session History v3 唯一性和认证边界。
 
 `web/` 由 FastAPI `StaticFiles` 挂载到 `/`。9C 页面先请求 `/api/auth/me`：有效 Cookie 显示主界面并加载个人 Session/History，401 显示登录/注册面板。右上角当前用户菜单提供“我的诊断历史”、改密和退出；退出或登录过期会清空前一账号的会话、诊断与报告 DOM。浏览器用 `credentials: "same-origin"` 调用同源 API，不将密码或 Auth Token 放入本地浏览器存储。聊天、诊断摘要、Tool Timeline、来源、指标、历史、报告与 Mock 场景仍经文本 DOM 接口安全渲染。
 

@@ -250,19 +250,22 @@ def test_secure_cookie_requires_https_and_logout_uses_configured_name(tmp_path: 
 def test_auth_tables_can_be_added_to_existing_diagnosis_database(tmp_path: Path) -> None:
     database = tmp_path / "legacy.db"
     SQLiteDiagnosisRepository(database)
+    timestamp = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(database) as connection:
         connection.execute(
             """
             INSERT INTO diagnosis_records
-                (record_id, schema_version, session_id, created_at, user_message,
-                 answer_preview, status, primary_issue, confidence, snapshot_json)
-            VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                (record_id, schema_version, session_id, created_at, updated_at,
+                 turn_count, user_message, latest_user_message, answer_preview,
+                 status, primary_issue, confidence, snapshot_json)
+            VALUES (?, 1, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "11111111-1111-1111-1111-111111111111",
                 "22222222-2222-2222-2222-222222222222",
-                datetime.now(timezone.utc).isoformat(),
-                "旧问题", "旧回答", "completed", "undetermined", "low", "{}",
+                timestamp,
+                timestamp,
+                "旧问题", "旧问题", "旧回答", "completed", "undetermined", "low", "{}",
             ),
         )
     settings = Settings(

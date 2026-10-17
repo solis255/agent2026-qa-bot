@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from netpilot.agent.schemas import AgentStatus
 from netpilot.config import ToolMode
@@ -109,6 +109,10 @@ class ExecutionMetricsView(BaseModel):
     turn_intent: str | None = None
     response_mode: str | None = None
     fallback_reason: str | None = None
+    rag_calls: int = Field(default=0, ge=0)
+    knowledge_finalization_attempts: int = Field(default=0, ge=0)
+    history_context_records: int = Field(default=0, ge=0)
+    network_tool_calls: int = Field(default=0, ge=0)
 
 
 class ChatResponse(BaseModel):
@@ -122,24 +126,46 @@ class ChatResponse(BaseModel):
 
 
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     record_id: UUID
     user_id: UUID | None = None
     session_id: UUID
     created_at: datetime
+    updated_at: datetime
+    turn_count: int = Field(default=1, ge=1)
     user_message: str = Field(min_length=1, max_length=4000)
+    latest_user_message: str = Field(min_length=1, max_length=4000)
     answer: str
     diagnosis: DiagnosisView
     metrics: ExecutionMetricsView
     tool_calls: list[ToolCallView] = Field(default_factory=list)
     sources: list[SourceView] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_legacy_session_fields(cls, value: Any) -> Any:
+        """Read v1 turn snapshots while the repository migrates them to v2."""
+
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.setdefault("updated_at", normalized.get("created_at"))
+        normalized.setdefault("turn_count", 1)
+        normalized.setdefault(
+            "latest_user_message",
+            normalized.get("user_message"),
+        )
+        return normalized
+
 
 class DiagnosisRecordSummaryView(BaseModel):
     record_id: UUID
     session_id: UUID
     created_at: datetime
+    updated_at: datetime
+    turn_count: int = Field(default=1, ge=1)
     user_message: str
+    latest_user_message: str
     answer_preview: str
     status: AgentStatus
     primary_issue: str
@@ -153,13 +179,17 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     report_id: UUID
     record_id: UUID
     session_id: UUID
     generated_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    turn_count: int = Field(default=1, ge=1)
     title: str = "TJU NetPilot 故障诊断报告"
     question: str = Field(min_length=1, max_length=4000)
+    latest_user_message: str = Field(min_length=1, max_length=4000)
     conclusion: str
     diagnosis: DiagnosisView
     metrics: ExecutionMetricsView

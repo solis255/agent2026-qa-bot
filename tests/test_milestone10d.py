@@ -179,13 +179,9 @@ def test_rag_queries_are_semantically_deduplicated_and_capped_at_two() -> None:
         "knowledge_search",
         "knowledge_search",
     ]
-    feedback = {
-        message.tool_call_id: json.loads(message.content)
-        for message in llm.calls[1]
-        if message.role.value == "tool"
-    }
-    assert feedback["rag-2"]["diagnostic_status"] == "reference_reused"
-    assert feedback["rag-4"]["diagnostic_status"] == "rag_turn_limit"
+    assert result.rag_calls == 2
+    assert result.knowledge_finalization_attempts == 1
+    assert not any(message.tool_calls for message in llm.calls[1])
     public = present_chat(uuid4(), result)
     assert public.diagnosis.evidence == []
     assert len(public.sources) == 2

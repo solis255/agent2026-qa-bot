@@ -57,14 +57,18 @@ class DiagnosisReportArtifact:
 
 
 def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
-    """Build a stable report directly from one immutable diagnosis snapshot."""
+    """Build a stable report from one Session-level diagnosis snapshot."""
 
     return DiagnosisReportView(
         report_id=record.record_id,
         record_id=record.record_id,
         session_id=record.session_id,
-        generated_at=record.created_at,
+        generated_at=record.updated_at,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        turn_count=record.turn_count,
         question=record.user_message,
+        latest_user_message=record.latest_user_message,
         conclusion=record.answer,
         diagnosis=record.diagnosis,
         metrics=record.metrics,
@@ -116,7 +120,10 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         f"- 报告 ID：`{report.report_id}`",
         f"- 诊断记录 ID：`{report.record_id}`",
         f"- 会话 ID：`{report.session_id}`",
-        f"- 生成时间：{_markdown_text(report.generated_at.isoformat())}",
+        f"- 会话创建时间：{_markdown_text(report.created_at.isoformat())}",
+        f"- 最近更新时间：{_markdown_text(report.updated_at.isoformat())}",
+        f"- 成功完成 Turn：{report.turn_count}",
+        f"- 报告快照时间：{_markdown_text(report.generated_at.isoformat())}",
         f"- Agent 状态：{_markdown_text(str(getattr(diagnosis.status, 'value', diagnosis.status)))}",
         f"- 主要问题：{_markdown_text(ISSUE_LABELS.get(diagnosis.primary_issue, diagnosis.primary_issue))}",
         f"- 置信度：{_markdown_text(CONFIDENCE_LABELS.get(diagnosis.confidence, diagnosis.confidence))}",
@@ -124,6 +131,10 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         "## 用户问题",
         "",
         *_blockquote(report.question),
+        "",
+        "## 最近一轮用户消息",
+        "",
+        *_blockquote(report.latest_user_message),
         "",
         "## 诊断结论",
         "",

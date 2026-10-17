@@ -69,6 +69,12 @@ def build_tool_policy(
             blocked_signatures=blocked,
             rationale="knowledge requests may use RAG but not live network tools",
         )
+    if intent is TurnIntent.HISTORY_ANALYSIS:
+        return ToolPolicy(
+            allow_rag=classification.needs_rag,
+            blocked_signatures=blocked,
+            rationale="history analysis cannot run live network checks",
+        )
     return ToolPolicy(
         blocked_signatures=blocked,
         max_new_calls=0,

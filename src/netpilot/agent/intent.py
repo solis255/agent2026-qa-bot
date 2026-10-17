@@ -19,6 +19,7 @@ class TurnIntent(str, Enum):
     META_FEEDBACK = "meta_feedback"
     STATE_CHANGED = "state_changed"
     GENERAL_QUESTION = "general_question"
+    HISTORY_ANALYSIS = "history_analysis"
 
 
 class IntentClassification(BaseModel):
@@ -191,6 +192,16 @@ def classify_turn_intent(
     text = " ".join(message.strip().casefold().split())
     compact = re.sub(r"[\s，。！？,!?;；:：]+", "", text)
 
+    if any(term in text for term in (
+        "诊断历史", "诊断记录", "历史记录", "今天的诊断", "今天已有的",
+        "最近几次诊断", "之前的诊断", "我的诊断",
+    )) or re.search(r"最近.{0,8}(?:次|条|个)?诊断", text):
+        return _classification(
+            TurnIntent.HISTORY_ANALYSIS, 0.98,
+            rag=_reference_requested(text, require_action=True),
+            reason="request to analyze the current account's persisted diagnoses",
+        )
+
     if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _STATE_CHANGE_PATTERNS):
         return _classification(
             TurnIntent.STATE_CHANGED, 0.98, tools=True,
@@ -231,6 +242,23 @@ def classify_turn_intent(
             TurnIntent.REPORT_REQUEST, 0.98,
             reason="request to format existing work as a report",
         )
+    # A comparison may itself be a sourced knowledge question. Select its data
+    # requirement before the evidence-only comparison branch removes all Tools.
+    campus_information = (
+        any(term in text for term in _CAMPUS_TERMS)
+        and any(term in text for term in (
+            *_INFORMATION_TERMS, "比较", "对比", "区别", "差异",
+        ))
+    )
+    if _reference_requested(text) or (
+        campus_information
+        and not any(term in text for term in _EXISTING_TERMS)
+        and not _reference_negated(text)
+    ):
+        return _classification(
+            TurnIntent.KNOWLEDGE_REQUEST, 0.94, rag=True,
+            reason="campus information or sourced documentation request",
+        )
     if any(term in text for term in _COMPARE_TERMS):
         return _classification(
             TurnIntent.COMPARE, 0.9,
@@ -242,14 +270,6 @@ def classify_turn_intent(
         return _classification(
             TurnIntent.ANALYZE_EXISTING, 0.95,
             reason="request explicitly refers to existing observations",
-        )
-    if any(term in text for term in _KNOWLEDGE_TERMS) or (
-        any(term in text for term in _CAMPUS_TERMS)
-        and any(term in text for term in _INFORMATION_TERMS)
-    ):
-        return _classification(
-            TurnIntent.KNOWLEDGE_REQUEST, 0.94, rag=True,
-            reason="campus information or sourced documentation request",
         )
     if compact in _AMBIGUOUS_FAULTS:
         return _classification(
@@ -270,6 +290,29 @@ def classify_turn_intent(
         TurnIntent.GENERAL_QUESTION, 0.72,
         reason="no high-confidence diagnostic or task-control signal",
     )
+
+
+def _reference_negated(text: str) -> bool:
+    return bool(re.search(
+        r"(?:不要|不必|无需|不用|不需要|别|禁止).{0,12}"
+        r"(?:知识库|knowledge_search|资料|文档|来源)",
+        text,
+    ))
+
+
+def _reference_requested(text: str, *, require_action: bool = False) -> bool:
+    # Scope negation to its clause: "不要重新检测，请检索知识库" still asks for RAG.
+    for clause in re.split(r"[，。！？；,!?;\n]", text):
+        if not any(term in clause for term in (*_KNOWLEDGE_TERMS, "knowledge_search")):
+            continue
+        if _reference_negated(clause):
+            continue
+        if require_action and not re.search(
+            r"结合|检索|查询|参考|搜索|查阅|使用|调用|根据|基于", clause
+        ):
+            continue
+        return True
+    return False
 
 
 def _classification(

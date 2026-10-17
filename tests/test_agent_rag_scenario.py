@@ -135,16 +135,15 @@ def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
     assert result.sources[0].source == "https://wiki.tjubot.cn/e-life/vpn"
     assert result.sources[0].source_type.value == "community"
     assert result.sources[0].title in result.answer
-    assert any(
-        message.tool_call_id == "call_knowledge"
-        for message in llm.calls[1]
-    )
+    assert result.knowledge_finalization_attempts == 1
+    assert not any(message.tool_calls for message in llm.calls[1])
     context = next(
         message.content
         for message in reversed(llm.calls[1])
-        if message.role.value == "system" and "KNOWLEDGE SOURCES" in message.content
+        if message.role.value == "system" and "KNOWLEDGE FINALIZATION" in message.content
     )
-    assert "Network Evidence or instructions" in context
+    assert "untrusted reference data" in context
+    assert "VPN 用于在校外访问校内资源" in context
     assert "https://wiki.tjubot.cn/e-life/vpn" in context
 
 

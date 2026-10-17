@@ -64,6 +64,9 @@ class AgentResult(BaseModel):
     turn_intent: TurnIntent | None = None
     response_mode: ResponseMode | None = None
     fallback_reason: FallbackReason | None = None
+    rag_calls: int = Field(default=0, ge=0)
+    knowledge_finalization_attempts: int = Field(default=0, ge=0, le=2)
+    history_context_records: int = Field(default=0, ge=0, le=10)
     task_version_advanced: bool = False
     coverage: DiagnosticCoverage = Field(default_factory=DiagnosticCoverage)
     evidence_sufficiency: EvidenceSufficiency | None = None

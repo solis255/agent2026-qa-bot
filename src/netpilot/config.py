@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -95,8 +96,18 @@ class Settings(BaseSettings):
     rag_model_cache_dir: Path = PROJECT_ROOT / ".cache" / "fastembed"
 
     app_host: str = "127.0.0.1"
+    app_timezone: str = "Asia/Shanghai"
     app_port: int = Field(default=8000, ge=1, le=65535)
     debug: bool = False
+
+    @field_validator("app_timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("APP_TIMEZONE must be a valid IANA timezone") from exc
+        return value
 
     @field_validator("tju_api_base")
     @classmethod
