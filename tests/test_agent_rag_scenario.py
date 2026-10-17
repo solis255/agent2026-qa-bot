@@ -69,9 +69,7 @@ class RAGFakeLLM:
             )
         return ChatResult(
             content=(
-                "参考社区资料，VPN 用于校外访问校内资源。\n"
-                "来源：《校园网 VPN 服务（社区资料测试摘要）》\n"
-                "https://wiki.tjubot.cn/e-life/vpn"
+                "参考社区资料，VPN 用于校外访问校内资源，具体步骤需核验最新官方说明。"
             ),
             model="fake-tju-llm",
             duration_ms=1,
@@ -134,7 +132,8 @@ def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
     assert result.steps[0].tool_name == "knowledge_search"
     assert result.sources[0].source == "https://wiki.tjubot.cn/e-life/vpn"
     assert result.sources[0].source_type.value == "community"
-    assert result.sources[0].title in result.answer
+    assert result.sources[0].title == "校园网 VPN 服务（社区资料测试摘要）"
+    assert "https://wiki.tjubot.cn/e-life/vpn" not in result.answer
     assert result.knowledge_finalization_attempts == 1
     assert not any(message.tool_calls for message in llm.calls[1])
     context = next(

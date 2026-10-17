@@ -42,6 +42,7 @@ env/
 
 # Logs
 *.log
+node_modules/
 
 # Local diagnosis history
 data/*.db

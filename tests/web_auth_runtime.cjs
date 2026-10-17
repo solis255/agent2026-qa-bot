@@ -121,6 +121,13 @@ const window = {
 };
 const context = vm.createContext({
   document, window, fetch, URL, AbortController, TextDecoder, Uint8Array,
+  // Auth-only fake DOM. Real Markdown/sanitizer integration is tested separately
+  // against jsdom and the actual vendored libraries in web_markdown_runtime.cjs.
+  renderAssistantMarkdown(container, text) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    container.replaceChildren(paragraph);
+  },
   console,
 });
 const source = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");

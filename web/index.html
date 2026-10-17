@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=full-session-transcript">
+    <link rel="stylesheet" href="/style.css?v=safe-markdown">
   </head>
   <body>
     <header class="topbar">
@@ -267,6 +267,9 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=full-session-transcript" defer></script>
+    <script src="/vendor/marked.umd.js" defer></script>
+    <script src="/vendor/purify.min.js" defer></script>
+    <script src="/markdown.js?v=safe-markdown" defer></script>
+    <script src="/app.js?v=safe-markdown" defer></script>
   </body>
 </html>

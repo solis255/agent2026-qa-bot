@@ -151,6 +151,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message p { margin: 6px 0 0; color: #50657e; line-height: 1.72; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.user-message p { color: #eaf3ff; }
 .message.error-message p { color: #983f3f; }
+.message > div { min-width: 0; max-width: 100%; }
+.markdown-body { margin-top: 6px; color: #50657e; line-height: 1.72; overflow-wrap: anywhere; }
+.markdown-body.is-streaming { white-space: pre-wrap; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 1em 0 .4em; color: #203b60; line-height: 1.4; }
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.12rem; }
+.markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 1rem; }
+.message .markdown-body p { margin: .6em 0; white-space: normal; }
+.markdown-body ul, .markdown-body ol { margin: .6em 0; padding-left: 1.5em; }
+.markdown-body li { margin: .25em 0; }
+.markdown-body strong { font-weight: 700; color: #203b60; }
+.markdown-body em { font-style: italic; }
+.markdown-body blockquote { margin: .8em 0; padding: .2em .9em; border-left: 3px solid #9dbbe2; background: #e7eff9; }
+.markdown-body code { border-radius: 4px; padding: .1em .3em; font-size: .88em; background: #e2eaf5; }
+.markdown-body pre { max-width: 100%; overflow-x: auto; padding: .9em; border-radius: 8px; background: #e2eaf5; white-space: pre; }
+.markdown-body pre code { padding: 0; overflow-wrap: normal; }
+.markdown-body table { display: block; max-width: 100%; width: 100%; overflow-x: auto; border-collapse: collapse; margin: .8em 0; }
+.markdown-body th, .markdown-body td { padding: .45em .7em; border: 1px solid #cddbeb; text-align: left; }
+.markdown-body th { color: #203b60; background: #e7eff9; }
+.markdown-body a { color: #1458b4; text-decoration: underline; }
 .avatar { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: #fff; font-size: .72rem; font-weight: 800; background: #1759b5; }
 .user-message .avatar { color: #1458b4; background: #fff; }
 .error-message .avatar { background: #b94848; }

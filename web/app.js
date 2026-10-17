@@ -522,13 +522,15 @@ function appendMessage(role, text) {
   const content = document.createElement("div");
   const title = document.createElement("strong");
   title.textContent = role === "user" ? "你" : role === "error" ? "请求提示" : "诊断助手";
-  const paragraph = document.createElement("p");
-  paragraph.textContent = text;
-  content.append(title, paragraph);
+  const body = document.createElement(role === "assistant" ? "div" : "p");
+  body.className = role === "assistant" ? "message-body markdown-body" : "message-body";
+  if (role === "assistant") renderAssistantMarkdown(body, text);
+  else body.textContent = text;
+  content.append(title, body);
   article.append(avatar, content);
   elements.conversation.append(article);
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
-  return paragraph;
+  return body;
 }
 
 function resetConversation() {
@@ -850,6 +852,7 @@ async function submitChat(event) {
   const authEpoch = state.authEpoch;
   appendMessage("user", message);
   const streamedAnswer = appendMessage("assistant", "");
+  streamedAnswer.classList.add("is-streaming");
   elements.messageInput.value = "";
   setBusy(true, "已连接流式诊断，Agent 正在收集证据…");
   try {
@@ -874,7 +877,7 @@ async function submitChat(event) {
     );
     if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
-    streamedAnswer.textContent = response.answer;
+    renderAssistantMarkdown(streamedAnswer, response.answer);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     renderTools(response.tool_calls);

@@ -60,6 +60,9 @@ def test_knowledge_finalization_answers_using_bounded_original_content():
     assert "安装" in result.answer
     assert "模型未能完成最终整理" not in result.answer
     assert len(result.sources) == 3
+    assert result.answer == "请先安装资料中说明的客户端，再按指引访问校内资源。"
+    assert "检索来源（参考资料）" not in result.answer
+    assert not any(source.source in result.answer for source in result.sources)
     assert {s.source_type.value for s in result.sources} == {"official", "community", "maintainer"}
     assert result.knowledge_finalization_attempts == 1
     assert result.rag_calls == 1
@@ -70,6 +73,38 @@ def test_knowledge_finalization_answers_using_bounded_original_content():
     assert len(result.steps[0].result.data.results[0].content) > 900
     assert llm.calls[1][1]["tools"] is None
     assert llm.calls[1][1]["tool_choice"] == "none"
+
+
+def test_synthesis_prompts_separate_answer_from_sources_panel():
+    llm = LLM([completed()])
+    run(llm)
+    prompt = "\n".join(message.content or "" for message in llm.calls[1][0])
+    assert "不要在答案末尾输出" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
+    assert "独立 Sources 面板" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
+    assert "source_type" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
+    assert "再列来源" not in prompt
+    assert "最后列出使用的来源" not in prompt
+    assert "列出真实来源" not in prompt
+    assert "不要重复来源列表" in prompt
+
+
+def test_source_type_question_keeps_substantive_type_comparison_and_metadata():
+    body = (
+        "| 资料 | source_type | 核验建议 |\n|---|---|---|\n"
+        "| VPN 资料 0 | official | 核验更新日期 |\n"
+        "| VPN 资料 1 | community | 需要官方再次核验 |\n"
+        "| VPN 资料 2 | maintainer | 留意维护时间 |"
+    )
+    llm = LLM([completed(body)])
+    registry = ToolRegistry(build_network_tools(Settings(_env_file=None)), Retriever())
+    result = AgentOrchestrator(llm, registry).run(
+        "请检索 VPN 资料，并告诉我每条资料是 official、community 还是 maintainer。"
+    )
+    assert result.answer == body
+    assert len(result.sources) == 3
+    assert "http" not in result.answer
+    assert {source.source_type.value for source in result.sources} == {"official", "community", "maintainer"}
+    assert all(source.file and source.chunk_id and source.score for source in result.sources)
 
 
 def test_knowledge_finalization_retries_once_with_shorter_context():
@@ -84,7 +119,7 @@ def test_knowledge_finalization_retries_once_with_shorter_context():
 
 
 def test_final_sources_prefer_chunks_actually_cited_in_synthesis():
-    result = run(LLM([completed("请先安装客户端。来源 [official] https://example.test/0")]))
+    result = run(LLM([completed("根据 VPN 资料 0，请先安装客户端，并核验后续使用步骤。")]))
     assert [source.source for source in result.sources] == ["https://example.test/0"]
     assert "https://example.test/2" not in result.answer
 

@@ -94,6 +94,8 @@ def test_same_origin_web_account_flow_and_personal_history(tmp_path: Path) -> No
         assert alice.get("/").status_code == 200
         assert alice.get("/app.js").status_code == 200
         assert alice.get("/style.css").status_code == 200
+        for asset in ("/markdown.js", "/vendor/marked.umd.js", "/vendor/purify.min.js"):
+            assert alice.get(asset).status_code == 200
         assert alice.get("/api/auth/me").status_code == 401
         registered = alice.post(
             "/api/auth/register",

@@ -218,6 +218,23 @@ GET  /api/scenarios
 
 ### 测试
 
+Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
+保持纯文本，SSE 增量先显示原文，完成后统一排版。知识回答正文不再固定追加来源列表，
+来源类型与链接保留在独立 Sources 面板；异常 fallback 仍保留片段溯源信息。
+运行应用无需 npm/CDN。首次运行前端 DOM/XSS 回归测试前，请安装测试依赖：
+
+```powershell
+cd web
+npm ci --ignore-scripts
+npm test
+cd ..
+```
+
+需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
+8 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
+本次验证结果与人工检查项见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
+
 在已激活的项目虚拟环境中运行：
 
 ```bash

@@ -1,0 +1,16 @@
+{
+  "name": "netpilot-web-checks",
+  "private": true,
+  "engines": { "node": "^22.13.0 || >=24.0.0" },
+  "scripts": {
+    "vendor": "node ../scripts/vendor_web.cjs",
+    "test": "node ../tests/web_markdown_runtime.cjs"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "marked": "18.1.1"
+  },
+  "devDependencies": {
+    "jsdom": "29.1.1"
+  }
+}

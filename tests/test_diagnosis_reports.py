@@ -70,6 +70,24 @@ def _record(tmp_path: Path, question: str = "github.com 为什么打不开？"):
     return repository.save(uuid4(), question, response)
 
 
+def test_markdown_answer_is_persisted_as_text_not_web_html(tmp_path: Path) -> None:
+    answer = "# VPN 使用\n\n这是 **重点**。\n\n| 类型 | 可信度 |\n|---|---|\n| community | 待核验 |"
+    repository = SQLiteDiagnosisRepository(tmp_path / "markdown.db")
+    record = repository.save(uuid4(), "VPN 怎么使用？", present_chat(uuid4(), _result(answer)))
+    assert record.answer == answer
+    assert record.conversation_turns[0].assistant_answer == answer
+    report = build_diagnosis_report(record)
+    assert report.conclusion == answer
+    payload = json.loads(render_report_json(report))
+    assert payload["conversation_turns"][0]["assistant_answer"] == answer
+    artifact = export_diagnosis_report(report, "markdown")
+    markdown_text = artifact.content.decode("utf-8")
+    assert artifact.media_type.startswith("text/markdown")
+    assert artifact.filename.endswith(".md")
+    assert "# TJU NetPilot" in markdown_text
+    assert not any(tag in markdown_text for tag in ("<h1>", "<strong>", "<table>"))
+
+
 def test_report_generation_is_deterministic_complete_and_markdown_safe(
     tmp_path: Path,
 ) -> None:
