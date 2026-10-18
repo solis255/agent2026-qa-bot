@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 
 from netpilot.agent import (
+    AgentResult,
     TurnIntent,
     classify_turn_intent,
     SessionBusyError,
@@ -24,6 +25,8 @@ from netpilot.auth.models import UserRecord
 from netpilot.api.presenters import present_chat
 from netpilot.api.sse import iter_chat_sse
 from netpilot.config import MockScenario, Settings, ToolMode
+from netpilot.environment import EnvironmentProfile, EnvironmentSource
+from netpilot.models.schemas import BrowserEnvironmentRequest, UserEnvironmentRequest
 from netpilot.llm import TJUClient
 from netpilot.history import (
     DiagnosisCursorError,
@@ -105,7 +108,61 @@ def create_session(request: Request, user: CurrentUser) -> SessionResponse:
     return SessionResponse(
         session_id=snapshot.session_id,
         created_at=snapshot.created_at,
+        environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
     )
+
+
+@router.get("/session/{session_id}", response_model=SessionResponse, tags=["chat"])
+def get_session(session_id: UUID, request: Request, user: CurrentUser, response: Response) -> SessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        snapshot = _sessions(request).get(session_id, user.id)
+        return SessionResponse(
+            session_id=session_id, created_at=snapshot.created_at,
+            environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
+
+
+def _update_environment(
+    payload: BrowserEnvironmentRequest | UserEnvironmentRequest,
+    request: Request, user: UserRecord, *, source: EnvironmentSource,
+) -> EnvironmentProfile:
+    def persist(profile):
+        repository = request.app.state.diagnosis_repository
+        if repository is not None:
+            repository.update_environment_profile(user.id, payload.session_id, profile)
+        elif request.app.state.settings.diagnosis_history_enabled:
+            raise DiagnosisStorageError("诊断历史不可用")
+    try:
+        return _sessions(request).update_environment(
+            payload.session_id, user.id,
+            payload.model_dump(exclude_unset=True, exclude={"session_id"}),
+            source=source, persist=persist,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail="当前会话正在诊断，请完成后修改环境。") from exc
+    except DiagnosisStorageError as exc:
+        raise HTTPException(status_code=503, detail="环境保存失败，请稍后重试。") from exc
+
+
+@router.patch("/session/environment/browser", response_model=EnvironmentProfile, tags=["chat"])
+def browser_environment(payload: BrowserEnvironmentRequest, request: Request, user: CurrentUser) -> EnvironmentProfile:
+    return _update_environment(payload, request, user, source="browser")
+
+
+@router.patch("/session/environment/user", response_model=EnvironmentProfile, tags=["chat"])
+def user_environment(payload: UserEnvironmentRequest, request: Request, user: CurrentUser) -> EnvironmentProfile:
+    return _update_environment(payload, request, user, source="user")
+
+
+def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest, result: AgentResult) -> ChatResponse:
+    response = present_chat(payload.session_id, result)
+    response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
+    return _persist_session_diagnosis(request, owner_id, payload.message, response)
 
 
 @router.post("/chat", response_model=ChatResponse, tags=["chat"])
@@ -139,11 +196,12 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
     try:
         with request.app.state.runtime_lock:
             result = _run_agent_turn(request, user.id, payload.message, history, task_state)
-        sessions.finish_turn(
+        response = sessions.finish_turn(
             payload.session_id,
             payload.message,
             result.answer,
             result=result,
+            after_finish=lambda: _present_and_persist(request, user.id, payload, result),
         )
     except Exception as exc:
         sessions.abort_turn(payload.session_id)
@@ -159,13 +217,6 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="诊断请求处理失败，请稍后重试。",
         ) from exc
-    response = present_chat(payload.session_id, result)
-    response = _persist_session_diagnosis(
-        request,
-        user.id,
-        payload.message,
-        response,
-    )
     log_event(
         logger,
         "agent_turn",
@@ -226,18 +277,12 @@ def chat_stream(
         try:
             with request.app.state.runtime_lock:
                 result = _run_agent_turn(request, user.id, payload.message, history, task_state)
-            sessions.finish_turn(
+            response = sessions.finish_turn(
                 payload.session_id,
                 payload.message,
                 result.answer,
                 result=result,
-            )
-            response = present_chat(payload.session_id, result)
-            response = _persist_session_diagnosis(
-                request,
-                user.id,
-                payload.message,
-                response,
+                after_finish=lambda: _present_and_persist(request, user.id, payload, result),
             )
             log_event(
                 logger,
@@ -489,6 +534,7 @@ def delete_custom_scenario(
         current=current,
         session_id=session_id,
         sessions_cleared=cleared,
+        environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile if session_id else None,
     )
 
 
@@ -538,6 +584,7 @@ def switch_scenario(
         current=current_name,
         session_id=snapshot.session_id,
         sessions_cleared=cleared,
+        environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
     )
 
 

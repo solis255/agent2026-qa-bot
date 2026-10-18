@@ -35,7 +35,7 @@ def test_three_turn_transcript_is_ordered_persisted_and_one_row_after_restart(tm
     assert len({record.record_id for record in records}) == 1
     assert reopened.count(owner) == 1
     assert loaded.turn_count == len(loaded.conversation_turns) == 3
-    assert loaded.schema_version == 4
+    assert loaded.schema_version == 5
     assert loaded.conversation_complete is True
     assert [(turn.user_message, turn.assistant_answer) for turn in loaded.conversation_turns] == [
         ("U1", "A1"), ("U2", "A2"), ("U3", "A3"),
@@ -45,7 +45,7 @@ def test_three_turn_transcript_is_ordered_persisted_and_one_row_after_restart(tm
     assert loaded.metrics.token_usage.total_tokens == 45
     with sqlite3.connect(database) as connection:
         row = connection.execute("SELECT schema_version, snapshot_json FROM diagnosis_records").fetchone()
-        assert row[0] == 4
+        assert row[0] == 5
         assert len(json.loads(row[1])["conversation_turns"]) == 3
         assert connection.execute("SELECT value FROM netpilot_metadata WHERE key='schema_version'").fetchone()[0] == "3"
 
@@ -87,7 +87,7 @@ def test_legacy_multi_turn_is_partial_and_future_append_does_not_invent_answers(
     appended = repository.upsert_session(owner, "U4", _response(session, 4))
     assert appended.record_id == record.record_id
     assert appended.turn_count == 4
-    assert appended.schema_version == 4
+    assert appended.schema_version == 5
     assert appended.conversation_complete is False
     assert [(turn.turn_index, turn.assistant_answer) for turn in appended.conversation_turns] == [(3, "A3"), (4, "A4")]
     assert repository.count(owner) == 1

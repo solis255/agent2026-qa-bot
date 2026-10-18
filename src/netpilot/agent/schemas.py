@@ -14,6 +14,7 @@ from netpilot.agent.intent import TurnIntent
 from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.llm import TokenUsage
+from netpilot.environment import EnvironmentProfile
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
 
@@ -57,6 +58,7 @@ class AgentResult(BaseModel):
     """Final one-shot diagnosis plus its bounded evidence trace."""
 
     answer: str = Field(min_length=1)
+    environment_profile: EnvironmentProfile | None = None
     status: AgentStatus
     tool_rounds: int = Field(ge=0)
     steps: list[AgentToolStep] = Field(default_factory=list)

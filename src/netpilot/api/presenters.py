@@ -7,6 +7,7 @@ from uuid import UUID
 from netpilot.agent import AgentResult, AgentToolStep
 from netpilot.agent.diagnosis import assess_diagnosis, step_status
 from netpilot.agent.evidence import json_data
+from netpilot.environment import EnvironmentProfile
 from netpilot.models import (
     ChatResponse,
     DiagnosisView,
@@ -32,6 +33,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
     ]
     return ChatResponse(
         session_id=session_id,
+        environment_profile=result.environment_profile or EnvironmentProfile(),
         answer=result.answer,
         diagnosis=DiagnosisView(
             status=result.status,

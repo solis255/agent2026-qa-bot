@@ -1,6 +1,9 @@
 """Shared Pydantic request and response models."""
 
 from netpilot.models.schemas import (
+    BrowserEnvironmentRequest,
+    UserEnvironmentRequest,
+    EnvironmentProfile,
     ChatRequest,
     ChatResponse,
     CustomScenarioCreateRequest,
@@ -25,6 +28,9 @@ from netpilot.models.schemas import (
 )
 
 __all__ = [
+    "BrowserEnvironmentRequest",
+    "UserEnvironmentRequest",
+    "EnvironmentProfile",
     "ChatRequest",
     "ChatResponse",
     "CustomScenarioCreateRequest",

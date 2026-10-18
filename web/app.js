@@ -6,6 +6,9 @@ const state = {
   authBusy: false,
   authEpoch: 0,
   sessionId: null,
+  environmentProfile: null,
+  environmentTouched: new Set(),
+  viewingHistory: false,
   health: null,
   busy: false,
   scenarios: [],
@@ -18,6 +21,13 @@ const state = {
 };
 
 const elements = {
+  environmentForm: document.querySelector("#environment-form"),
+  environmentSummary: document.querySelector("#environment-summary"),
+  environmentBrowser: document.querySelector("#environment-browser"),
+  environmentStatus: document.querySelector("#environment-status"),
+  environmentSave: document.querySelector("#environment-save"),
+  environmentScope: document.querySelector("#environment-scope"),
+  environmentServiceLabel: document.querySelector("#environment-service-label"),
   authGate: document.querySelector("#auth-gate"),
   authTitle: document.querySelector("#auth-title"),
   authForm: document.querySelector("#auth-form"),
@@ -145,6 +155,9 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  for (const control of elements.environmentForm.querySelectorAll("select, input, button")) {
+    control.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
+  }
   elements.conversation.setAttribute("aria-busy", String(busy));
   const ready = Boolean(state.user && state.sessionId && state.health?.llm_configured);
   elements.messageInput.disabled = busy || !ready;
@@ -339,6 +352,8 @@ function showAuthGate(message = "请先登录或注册。") {
   state.user = null;
   state.health = null;
   state.sessionId = null;
+  state.environmentProfile = null;
+  state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
   elements.authGate.hidden = false;
@@ -384,7 +399,7 @@ async function enterAuthenticated(user) {
     if (state.authEpoch !== authEpoch) return;
     renderHealth(health);
     await Promise.all([
-      createSession({ announce: false }),
+      createSession({ announce: false, restore: true }),
       loadScenarios(),
       loadHistory(),
     ]);
@@ -539,6 +554,8 @@ function appendMessage(role, text, sources = []) {
 }
 
 function resetConversation() {
+  state.viewingHistory = false;
+  renderEnvironmentProfile(state.environmentProfile);
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -563,16 +580,112 @@ function setReportRecord(recordId) {
   if (!state.activeRecordId && elements.reportDialog.open) elements.reportDialog.close();
 }
 
-async function createSession({ announce = true } = {}) {
+const ENVIRONMENT_OS = {unknown: "未知", windows: "Windows", macos: "macOS", linux: "Linux", android: "Android", ios: "iOS"};
+const ENVIRONMENT_ACCESS = {unknown: "未知", campus_wifi: "校园 WiFi", campus_wired: "校园有线", off_campus: "校外网络", mobile_hotspot: "手机热点"};
+const ENVIRONMENT_SCOPE = {unknown: "未知", all_network: "全部网络", web_only: "仅网页", single_service: "单一服务", internal_resource: "仅校内资源"};
+const environmentBoolLabel = (value) => value === true ? "开启" : value === false ? "关闭" : "未知";
+
+function formatEnvironmentSummary(profile) {
+  const p = profile || {};
+  return `${ENVIRONMENT_OS[p.os_family] || "未知"} · ${ENVIRONMENT_ACCESS[p.network_access] || "未知"} · VPN ${environmentBoolLabel(p.vpn_enabled)} · Proxy ${environmentBoolLabel(p.proxy_enabled)} · ${ENVIRONMENT_SCOPE[p.affected_scope] || "未知"}`;
+}
+
+function renderEnvironmentProfile(profile, { historical = false } = {}) {
+  state.environmentTouched.clear();
+  const p = profile || {};
+  elements.environmentSummary.textContent = (historical ? "历史环境：" : "") + formatEnvironmentSummary(p);
+  elements.environmentBrowser.textContent = `浏览器状态：${p.browser_online === true ? "在线（不等于互联网可达）" : p.browser_online === false ? "离线" : "未知"}；语言：${p.browser_language || "未知"}；模式：${p.client_mode || "unknown"}`;
+  elements.environmentStatus.textContent = historical ? "当前为历史快照，不可在此修改。继续提问时使用当前 Session 环境。" : "用户确认优先于浏览器推断。";
+  for (const name of ["os_family", "network_access", "vpn_enabled", "proxy_enabled", "affected_scope", "affected_service"]) {
+    const control = elements.environmentForm.querySelector(`[name="${name}"]`);
+    const value = p[name] ?? (["os_family", "network_access", "affected_scope"].includes(name) ? "unknown" : "");
+    control.value = String(value);
+  }
+  elements.environmentServiceLabel.hidden = p.affected_scope !== "single_service";
+}
+
+function collectBrowserEnvironment() {
+  const nav = window.navigator;
+  if (!nav) return {};
+  const values = {};
+  if (typeof nav.onLine === "boolean") values.browser_online = nav.onLine;
+  if (typeof nav.language === "string" && /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(nav.language) && nav.language.length <= 35) values.browser_language = nav.language;
+  const platform = String(nav.userAgentData?.platform || nav.platform || "").toLowerCase();
+  values.os_family = /android/.test(platform) ? "android" : /iphone|ipad|ipod|ios/.test(platform) ? "ios" : /win/.test(platform) ? "windows" : /mac/.test(platform) ? "macos" : /linux/.test(platform) ? "linux" : "unknown";
+  const connection = nav.connection;
+  if (connection) {
+    if (["slow-2g", "2g", "3g", "4g"].includes(connection.effectiveType)) values.effective_type = connection.effectiveType;
+    if (Number.isInteger(connection.rtt) && connection.rtt >= 0 && connection.rtt <= 60000) values.estimated_rtt_ms = connection.rtt;
+    if (Number.isFinite(connection.downlink) && connection.downlink >= 0 && connection.downlink <= 100000) values.estimated_downlink_mbps = connection.downlink;
+  }
+  return values;
+}
+
+async function uploadBrowserEnvironment(authEpoch, sessionId) {
+  try {
+    const values = collectBrowserEnvironment();
+    if (!Object.keys(values).length) return;
+    const profile = await requestJSON("/api/session/environment/browser", { method: "PATCH", body: JSON.stringify({session_id: sessionId, ...values}) });
+    if (state.authEpoch !== authEpoch || state.sessionId !== sessionId) return;
+    state.environmentProfile = profile;
+    renderEnvironmentProfile(profile);
+  } catch (_error) {
+    if (state.authEpoch === authEpoch && state.sessionId === sessionId) elements.environmentStatus.textContent = "浏览器环境上报不可用；仍可手动填写环境，不影响诊断。";
+  }
+}
+
+async function saveEnvironment(event) {
+  event.preventDefault();
+  if (!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
+  const authEpoch = state.authEpoch;
+  const sessionId = state.sessionId;
+  const baseline = state.environmentProfile || {};
+  const values = {};
+  for (const name of ["os_family", "network_access", "vpn_enabled", "proxy_enabled", "affected_scope", "affected_service"]) {
+    const raw = elements.environmentForm.querySelector(`[name="${name}"]`).value;
+    const value = ["vpn_enabled", "proxy_enabled"].includes(name) ? (raw === "" ? null : raw === "true") : name === "affected_service" ? (elements.environmentScope.value === "single_service" ? raw.trim() || null : null) : raw;
+    const old = baseline[name] ?? (["os_family", "network_access", "affected_scope"].includes(name) ? "unknown" : null);
+    if (value !== old || state.environmentTouched.has(name)) values[name] = value;
+  }
+  setBusy(true);
+  try {
+    const profile = await requestJSON("/api/session/environment/user", { method: "PATCH", body: JSON.stringify({session_id: sessionId, ...values}) });
+    if (state.authEpoch !== authEpoch || state.sessionId !== sessionId) return;
+    state.environmentProfile = profile;
+    renderEnvironmentProfile(profile);
+    elements.environmentStatus.textContent = "环境已保存到服务端；已有诊断证据保持不变。";
+  } catch (error) {
+    if (state.authEpoch === authEpoch) elements.environmentStatus.textContent = error.message;
+  } finally {
+    if (state.authEpoch === authEpoch) setBusy(false);
+  }
+}
+
+async function createSession({ announce = true, restore = false } = {}) {
   if (!state.user || state.busy) return;
   const authEpoch = state.authEpoch;
   setBusy(true, "正在创建新会话…");
   try {
-    const session = await requestJSON("/api/session", { method: "POST" });
+    let session = null;
+    const reference = restore ? window.location?.hash.match(/^#session=([0-9a-f-]{36})$/i)?.[1] : null;
+    if (reference) {
+      // Server ownership checks are authoritative, including after account changes.
+      try {
+        session = await requestJSON(`/api/session/${encodeURIComponent(reference)}`, {cache: "no-store"});
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+      if (state.authEpoch !== authEpoch) return;
+    }
+    if (!session) session = await requestJSON("/api/session", { method: "POST" });
     if (state.authEpoch !== authEpoch) return;
     state.sessionId = session.session_id;
+    state.environmentProfile = session.environment_profile || null;
+    window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
+    await uploadBrowserEnvironment(authEpoch, session.session_id);
+    if (state.authEpoch !== authEpoch) return;
     elements.interactionNote.textContent = state.health?.llm_configured
       ? "会话已就绪。Enter 发送，Shift + Enter 换行。"
       : "会话已创建，但 TJU LLM 尚未配置。";
@@ -840,6 +953,8 @@ async function loadDiagnosisRecord(recordId) {
   try {
     const record = await requestJSON(`/api/diagnoses/${encodeURIComponent(recordId)}`);
     if (state.authEpoch !== authEpoch) return;
+    state.viewingHistory = true;
+    renderEnvironmentProfile(record.environment_profile, { historical: true });
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
       appendMessage("user", turn.user_message);
@@ -868,6 +983,8 @@ async function submitChat(event) {
   const message = elements.messageInput.value.trim();
   if (!message || !state.user || !state.sessionId || state.busy) return;
   const authEpoch = state.authEpoch;
+  state.viewingHistory = false;
+  renderEnvironmentProfile(state.environmentProfile);
   appendMessage("user", message);
   const streamedAnswer = appendMessage("assistant", "");
   streamedAnswer.classList.add("is-streaming");
@@ -895,6 +1012,8 @@ async function submitChat(event) {
     );
     if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
+    if (response.environment_profile) state.environmentProfile = response.environment_profile;
+    renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
@@ -924,6 +1043,7 @@ function formatReportPreview(report) {
   const usage = metrics.token_usage || {};
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
+    `用户环境：${formatEnvironmentSummary(report.environment_profile)}`,
     "",
     `报告 ID：${report.report_id}`,
     `Session ID：${report.session_id}`,
@@ -1091,11 +1211,15 @@ async function activateScenario(scenario) {
   });
   if (state.authEpoch !== authEpoch) return;
   state.sessionId = response.session_id;
+  state.environmentProfile = response.environment_profile || null;
+  window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   elements.scenarioSelect.value = response.current;
   renderScenarioDescription(response.current, true);
   resetConversation();
   appendMessage("assistant", `已切换到“${elements.scenarioSelect.selectedOptions[0].textContent}”测试场景。`);
+  await uploadBrowserEnvironment(authEpoch, response.session_id);
+  if (state.authEpoch !== authEpoch) return;
   elements.interactionNote.textContent = "场景切换完成，旧会话已清理。";
 }
 
@@ -1200,8 +1324,12 @@ async function deleteCurrentCustomScenario() {
     if (state.authEpoch !== authEpoch) return;
     if (response.session_id) {
       state.sessionId = response.session_id;
+      state.environmentProfile = response.environment_profile || null;
+      window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
+      await uploadBrowserEnvironment(authEpoch, response.session_id);
+      if (state.authEpoch !== authEpoch) return;
     }
     await loadScenarios();
     if (state.authEpoch !== authEpoch) return;
@@ -1241,6 +1369,13 @@ elements.myHistory.addEventListener("click", async () => {
   }
 });
 elements.chatForm.addEventListener("submit", submitChat);
+elements.environmentForm.addEventListener("submit", saveEnvironment);
+elements.environmentForm.addEventListener("change", (event) => {
+  if (event.target.name) state.environmentTouched.add(event.target.name);
+});
+elements.environmentScope.addEventListener("change", () => {
+  elements.environmentServiceLabel.hidden = elements.environmentScope.value !== "single_service";
+});
 elements.newSession.addEventListener("click", () => createSession());
 elements.scenarioSelect.addEventListener("change", switchScenario);
 elements.customScenarioNew.addEventListener("click", openCustomScenarioDialog);

@@ -15,6 +15,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
+from netpilot.environment import EnvironmentProfile
 from netpilot.agent.reasoning_trace import merge_reasoning_trace, trim_reasoning_trace
 
 from netpilot.models import (
@@ -29,7 +30,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 4
+SNAPSHOT_SCHEMA_VERSION = 5
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -50,6 +51,8 @@ class DiagnosisRepository(Protocol):
     def upsert_session(
         self, user_id: UUID, user_message: str, response: ChatResponse
     ) -> DiagnosisRecordView: ...
+
+    def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -97,6 +100,7 @@ class SQLiteDiagnosisRepository:
             record_id=uuid4(),
             user_id=user_id,
             session_id=response.session_id,
+            environment_profile=response.environment_profile,
             created_at=now,
             updated_at=now,
             turn_count=1,
@@ -155,6 +159,23 @@ class SQLiteDiagnosisRepository:
         ) as exc:
             raise DiagnosisStorageError("诊断历史写入失败") from exc
         return record
+
+    def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None:
+        """Update only the latest profile, never invent a diagnosis Turn."""
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM diagnosis_records WHERE user_id = ? AND session_id = ?",
+                    (str(user_id), str(session_id)),
+                ).fetchone()
+                if row is not None:
+                    record = _record_from_row(row).model_copy(update={
+                        "environment_profile": profile, "schema_version": SNAPSHOT_SCHEMA_VERSION,
+                    })
+                    _update_record(connection, record)
+        except (sqlite3.Error, ValueError) as exc:
+            raise DiagnosisStorageError("用户环境保存失败") from exc
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -456,6 +477,7 @@ def _merge_session_records(
         record_id=(current.record_id if keep_latest_record_id else existing.record_id),
         user_id=existing.user_id,
         session_id=existing.session_id,
+        environment_profile=current.environment_profile,
         created_at=min(existing.created_at, current.created_at),
         updated_at=max(existing.updated_at, current.updated_at),
         turn_count=existing.turn_count + current.turn_count,

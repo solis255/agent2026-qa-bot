@@ -18,7 +18,7 @@ from netpilot import __version__
 from netpilot.agent import AgentOrchestrator, SessionStore, ToolRegistry
 from netpilot.api.routes import router as api_router
 from netpilot.api.auth_routes import router as auth_router
-from netpilot.config import Settings
+from netpilot.config import Settings, ToolMode
 from netpilot.llm import TJUClient
 from netpilot.history import DiagnosisStorageError, SQLiteDiagnosisRepository
 from netpilot.observability import (
@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 async def _validation_error_without_auth_secrets(
     request: Request, exc: RequestValidationError
 ) -> Response:
-    """Do not echo rejected auth request bodies (especially passwords)."""
+    """Do not echo rejected auth/environment values (especially secrets)."""
 
-    if not request.url.path.startswith("/api/auth/"):
+    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/")):
         return await request_validation_exception_handler(request, exc)
     details = [
         {key: value for key, value in error.items() if key not in {"input", "ctx"}}
@@ -116,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = SessionStore(
         max_history_messages=app.state.settings.max_history_messages,
         max_sessions=app.state.settings.max_sessions,
+        environment_client_mode="mock" if app.state.settings.tool_mode == ToolMode.MOCK else "remote_browser",
         reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
     )
     # The Mock provider is shared mutable demo state. Serialize Agent runs with

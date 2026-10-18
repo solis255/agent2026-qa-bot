@@ -9,6 +9,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from netpilot.models import DiagnosisRecordView, DiagnosisReportView
+from netpilot.environment import OS_LABELS, ACCESS_LABELS, SCOPE_LABELS, bool_label
 
 
 ReportFormat = Literal["markdown", "json"]
@@ -63,6 +64,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         report_id=record.record_id,
         record_id=record.record_id,
         session_id=record.session_id,
+        environment_profile=record.environment_profile,
         generated_at=record.updated_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -134,6 +136,17 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         "## 用户问题",
         "",
         *_blockquote(report.question),
+        "",
+        "## 用户环境",
+        "",
+        f"- 设备系统：{OS_LABELS[report.environment_profile.os_family]}",
+        f"- 网络接入：{ACCESS_LABELS[report.environment_profile.network_access]}",
+        f"- VPN：{bool_label(report.environment_profile.vpn_enabled)}",
+        f"- Proxy：{bool_label(report.environment_profile.proxy_enabled)}",
+        f"- 影响范围：{SCOPE_LABELS[report.environment_profile.affected_scope]}",
+        f"- 受影响服务：{_markdown_text(report.environment_profile.affected_service or '未知')}",
+        f"- 客户端模式：{report.environment_profile.client_mode}",
+        "- 环境上下文不是实时网络检测证据；未知不等于关闭。Local 仅检测运行 NetPilot 的主机。",
         "",
         "## 最近一轮用户消息",
         "",

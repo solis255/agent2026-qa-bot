@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from netpilot.agent.schemas import AgentStatus
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
+from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
 from netpilot.rag import SourceType
 from netpilot.rag.schemas import StableSourceRef
 from netpilot.tools.custom_scenarios import CustomMockScenario, CustomScenarioBehavior
@@ -32,6 +33,15 @@ class HealthResponse(BaseModel):
 class SessionResponse(BaseModel):
     session_id: UUID
     created_at: datetime
+    environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+
+
+class BrowserEnvironmentRequest(BrowserEnvironmentValues):
+    session_id: UUID
+
+
+class UserEnvironmentRequest(EnvironmentUpdate):
+    session_id: UUID
 
 
 class ChatRequest(BaseModel):
@@ -126,6 +136,7 @@ class ExecutionMetricsView(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: UUID
+    environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     record_id: UUID | None = None
     answer: str
     diagnosis: DiagnosisView
@@ -173,7 +184,8 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4] = 4
+    schema_version: Literal[1, 2, 3, 4, 5] = 5
+    environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
     record_id: UUID
     user_id: UUID | None = None
     session_id: UUID
@@ -241,7 +253,8 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4] = 4
+    schema_version: Literal[1, 2, 3, 4, 5] = 5
+    environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
     report_id: UUID
     record_id: UUID
     session_id: UUID
@@ -293,6 +306,7 @@ class ScenarioListResponse(BaseModel):
 class ScenarioSwitchResponse(BaseModel):
     current: str
     session_id: UUID
+    environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     sessions_cleared: int = Field(ge=0)
 
 
@@ -304,4 +318,5 @@ class CustomScenarioDeleteResponse(BaseModel):
     deleted: str
     current: str
     session_id: UUID | None = None
+    environment_profile: EnvironmentProfile | None = None
     sessions_cleared: int = Field(default=0, ge=0)

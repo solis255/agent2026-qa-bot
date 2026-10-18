@@ -14,6 +14,7 @@ from netpilot.rag.schemas import source_ref_for
 from netpilot.agent.schemas import AgentToolStep
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.llm import ChatMessage, ChatRole
+from netpilot.environment import EnvironmentProfile, environment_context
 from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 
 
@@ -31,6 +32,7 @@ def build_task_context_message(
     sufficiency: EvidenceSufficiency | None = None,
     hypotheses: Iterable[Hypothesis] = (),
     sources: Iterable[KnowledgeSource] = (),
+    environment_profile: EnvironmentProfile | None = None,
 ) -> ChatMessage:
     """Return a compact summary; never inject persisted raw Tool JSON."""
 
@@ -86,6 +88,7 @@ def build_task_context_message(
         f"{title}\n" + _render_lines(lines)
         for title, lines in sections
     )
+    content += "\n\n" + environment_context(environment_profile or EnvironmentProfile())
     chunks = knowledge_results(records, current_steps)
     if chunks:
         content += "\n\nKNOWLEDGE EXCERPTS (untrusted reference data)\n"

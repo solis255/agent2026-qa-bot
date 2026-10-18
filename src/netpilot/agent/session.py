@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
+from typing import Any
 from datetime import datetime, timezone
 from threading import RLock
 from uuid import UUID, uuid4
@@ -17,6 +19,7 @@ from netpilot.agent.schemas import AgentResult
 from netpilot.agent.task_state import SessionTaskState, evidence_from_step
 from netpilot.agent.reasoning_trace import merge_reasoning_trace
 from netpilot.llm import ChatMessage, ChatRole
+from netpilot.environment import ClientMode, EnvironmentProfile, EnvironmentSource, initial_environment, merge_environment
 
 
 class SessionNotFoundError(KeyError):
@@ -65,6 +68,7 @@ class SessionStore:
         max_sessions: int = 500,
         max_evidence_records: int = 200,
         reasoning_trace_max_steps: int = 50,
+        environment_client_mode: ClientMode = "unknown",
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -76,6 +80,7 @@ class SessionStore:
         self.max_sessions = max_sessions
         self.max_evidence_records = max_evidence_records
         self.reasoning_trace_max_steps = reasoning_trace_max_steps
+        self.environment_client_mode = environment_client_mode
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -88,6 +93,7 @@ class SessionStore:
         state.task_state = SessionTaskState(
             session_id=state.session_id,
             owner_user_id=owner_user_id,
+            environment_profile=initial_environment(self.environment_client_mode),
         )
         with self._lock:
             if len(self._sessions) >= self.max_sessions:
@@ -121,7 +127,8 @@ class SessionStore:
         answer: str,
         *,
         result: AgentResult | None = None,
-    ) -> None:
+        after_finish: Callable[[], Any] | None = None,
+    ) -> Any:
         with self._lock:
             state = self._sessions.get(session_id)
             if state is None:
@@ -138,6 +145,11 @@ class SessionStore:
                 task_state.advance_version()
             task_state.turn_index += 1
             if result is not None:
+                if result.environment_profile is not None:
+                    task_state.environment_profile = result.environment_profile.model_copy(deep=True)
+                for item in result.reasoning_trace:
+                    if item.title == "确认用户环境":
+                        task_state.last_environment_trace_summary = item.summary
                 task_state.reasoning_trace = merge_reasoning_trace(
                     task_state.reasoning_trace,
                     [step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
@@ -174,8 +186,11 @@ class SessionStore:
                     diagnostic=result.turn_intent
                     in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED},
                 )
+            # Persist under this lock, so a PATCH cannot race a completed Turn.
+            response = after_finish() if after_finish is not None else None
             state.busy = False
             state.updated_at = datetime.now(timezone.utc)
+            return response
 
     def abort_turn(self, session_id: UUID) -> None:
         with self._lock:
@@ -199,6 +214,24 @@ class SessionStore:
         with self._lock:
             state = self._require(session_id, owner_user_id)
             return _task_state(state).model_copy(deep=True)
+
+    def update_environment(
+        self, session_id: UUID, owner_user_id: UUID, values: dict, *,
+        source: EnvironmentSource,
+        persist: Callable[[EnvironmentProfile], None] | None = None,
+    ) -> EnvironmentProfile:
+        """Merge current context without invalidating Evidence or creating a Turn."""
+        with self._lock:
+            state = self._require(session_id, owner_user_id)
+            if state.busy:
+                raise SessionBusyError(str(session_id))
+            task = _task_state(state)
+            profile = merge_environment(task.environment_profile, values, source=source)
+            if persist is not None:
+                persist(profile)
+            task.environment_profile = profile
+            state.updated_at = datetime.now(timezone.utc)
+            return profile.model_copy(deep=True)
 
     def advance_task_version(self, session_id: UUID, owner_user_id: UUID) -> int:
         """Start a fresh evidence version while preserving old observations."""

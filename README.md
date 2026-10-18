@@ -21,6 +21,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
 | Web/API | 中文 Web、登录/注册/改密/退出、当前用户菜单、个人会话与历史、结构化 Tool Timeline、健康检查、Mock 场景控制 |
 | 历史与报告 | 每个 Session 一条累计 SQLite 诊断记录、账号历史分析、每页 10 条上一页/下一页、确定性报告、Markdown/JSON 导出 |
+| 环境画像 | 每个 Session 一份 EnvironmentProfile；浏览器低风险采集、用户编辑/明确表述更新、来源优先级、跨 Turn 复用、历史与报告保存 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -195,6 +196,9 @@ python scripts/build_knowledge_index.py --offline
 ```text
 GET  /api/health
 POST /api/session
+GET  /api/session/{session_id}
+PATCH /api/session/environment/browser
+PATCH /api/session/environment/user
 POST /api/chat
 POST /api/chat/stream
 GET  /api/diagnoses
@@ -206,6 +210,21 @@ GET  /api/scenarios
 
 `POST /api/chat/stream` 当前是 transport-level SSE：后台先完成一次权威的、非流式 `tju-llm` + Tool loop，再把最终答案按字符块发出 `delta`，最后发送完整 `ChatResponse`。它不是模型 token streaming，也不会为流式显示发起第二次模型请求。
 
+### 当前环境（Milestone 12A）
+
+侧栏“当前环境”可展开查看/编辑操作系统、接入方式、VPN、Proxy、影响范围及受影响服务。
+浏览器只自动提供归一化 OS、在线状态、语言及可选 Network Information API 估计；
+不会自动判断校园 WiFi、VPN 或代理。未知保留为 `unknown` / `null`，不等于关闭。
+用户确认的值优先于浏览器推断。明确陈述（如“我现在用 Windows 11，连校园 WiFi，没开 VPN”）
+可由本地规则更新画像，不额外调用 LLM。
+
+画像是上下文，不是实时 Tool Evidence。Local Tools 仍只检测运行 NetPilot 的主机。
+正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
+Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
+仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
+快照新增 `environment_profile` 并升级到 v5，SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
+
 ### 测试
 
 Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
@@ -214,7 +233,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-快照升级到 v4，SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12A 当前为 v5），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -232,7 +251,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-25 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+33 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -243,10 +262,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回答整理、持久化历史分析与分页修复后的全量回归实测为：
+Milestone 12A 修改前基线为 `420 passed in 62.77s`；2026-10-18 环境画像实现后的全量回归实测为：
 
 ```text
-356 passed in 29.26s
+494 passed in 74.12s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
@@ -257,4 +276,4 @@ Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回�
 
 上游版权与 MIT 许可声明保留在 [`LICENSE`](LICENSE) 中：Copyright (c) 2026 Sif Baksh；Copyright (c) 2026 Packt。使用、修改和分发时须继续保留 MIT attribution。
 
-贡献说明见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+贡献前请运行上述测试，遵守工具与数据安全边界，并保留上游许可声明。

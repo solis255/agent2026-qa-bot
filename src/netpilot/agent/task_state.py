@@ -7,6 +7,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from netpilot.environment import EnvironmentProfile
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -52,6 +53,8 @@ class SessionTaskState(BaseModel):
 
     session_id: UUID
     owner_user_id: UUID
+    environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    last_environment_trace_summary: str | None = None
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     executed_tool_signatures: set[str] = Field(default_factory=set)
     current_issue: str | None = None
