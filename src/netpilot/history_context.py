@@ -10,6 +10,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
+from netpilot.diagnostic_target import DiagnosticTarget, legacy_target, matches_target
 
 if TYPE_CHECKING:
     from netpilot.history import DiagnosisRepository
@@ -38,6 +39,7 @@ def parse_history_query(message: str) -> HistoryQuery:
 
 
 class DiagnosisHistoryContextRecord(BaseModel):
+    diagnostic_target: DiagnosticTarget = Field(default_factory=legacy_target)
     record_id: UUID
     session_id: UUID
     created_at: datetime
@@ -123,7 +125,7 @@ class HistoryContextService:
 
 
 def _compact_record(record: DiagnosisRecordView) -> DiagnosisHistoryContextRecord:
-    network = [call for call in record.tool_calls if call.tool_name != "knowledge_search"]
+    network = [call for call in record.tool_calls if call.tool_name != "knowledge_search" and (record.diagnostic_target.subject == "unknown" or matches_target(call, record.diagnostic_target))]
     # Include abnormal checks first, then normals for exclusions. No raw payloads.
     network.sort(key=lambda call: call.finding_status == "normal")
     tools = [
@@ -137,6 +139,7 @@ def _compact_record(record: DiagnosisRecordView) -> DiagnosisHistoryContextRecor
         for call in network[:4]
     ]
     result = DiagnosisHistoryContextRecord(
+        diagnostic_target=record.diagnostic_target,
         record_id=record.record_id,
         session_id=record.session_id,
         created_at=record.created_at,

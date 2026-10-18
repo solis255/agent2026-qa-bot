@@ -132,7 +132,8 @@ def test_optional_summary_makes_at_most_one_safe_selection_call(bad):
     result = make_agent(llm, reasoning_summary_llm_enabled=True).run(CASE_A)
     assert len(llm.calls) == 4
     assert result.reasoning_summary_llm_used
-    assert result.answer == "依据已有结构化观察整理本轮回答，未验证的原因仍需核验。"
+    assert result.answer.endswith("依据已有结构化观察整理本轮回答，未验证的原因仍需核验。")
+    assert "Mock 模拟终端" in result.answer
     assert "password" not in json.dumps([step.model_dump(mode="json") for step in result.reasoning_trace])
     assert all(CASE_A not in message.content for message in llm.calls[-1][0])
     if not bad:

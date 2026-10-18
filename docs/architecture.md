@@ -4,6 +4,15 @@
 
 ## Architecture Overview
 
+Milestone 12B 增加诊断对象边界：`SessionTaskState.diagnostic_target` 和环境画像独立；
+`evaluate_target_capabilities()` 根据对象与真实 Provider 计算能力，`ToolPolicy.filter_schemas()` 使用
+`ToolSpec.execution_scope` 过滤模型可见工具，`ToolRegistry.execute(target=...)` 再次检查才分派 handler。
+Local 远程 `user_client` 不具备主机网络工具权限；`netpilot_host` 才可使用，Mock 仅作用于 `mock_client`。
+Evidence、Tool Step 与签名均绑定 subject/version，`Context Builder`、Coverage、Hypothesis 只用当前对象观察；
+旧对象对话保留于完整 transcript，但不作为当前模型 history。RAG 是对象无关的参考数据。
+API/History/Report/UI 均返回对象与执行位置；快照 v6、SQLite 表结构 v3。
+当前对象证据与历史对象归档在报告中分开。详细合同与限制见 [12B 验收](MILESTONE12B_VALIDATION.md)。
+
 TJU NetPilot 是一个 Single Agent + Tools 应用。FastAPI 提供 Web/API 边界，`classify_turn_intent()` 和 `ToolPolicy` 在模型调用前决定当前 Turn 可见能力，`AgentOrchestrator` 负责有界 Function Calling，`ToolRegistry` 负责最终 allowlist 与参数校验，`NetworkToolService` 在 Mock/Local Provider 之间提供稳定契约。RAG、SQLite 历史和报告位于旁路能力，不扩大网络 Tool 权限。
 
 ```text

@@ -7,6 +7,7 @@ const state = {
   authEpoch: 0,
   sessionId: null,
   environmentProfile: null,
+  diagnosticTarget: null,
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -21,6 +22,12 @@ const state = {
 };
 
 const elements = {
+  targetForm: document.querySelector("#target-form"),
+  targetSummary: document.querySelector("#target-summary"),
+  targetCapability: document.querySelector("#target-capability"),
+  targetSubject: document.querySelector("#target-subject"),
+  targetSave: document.querySelector("#target-save"),
+  targetStatus: document.querySelector("#target-status"),
   environmentForm: document.querySelector("#environment-form"),
   environmentSummary: document.querySelector("#environment-summary"),
   environmentBrowser: document.querySelector("#environment-browser"),
@@ -155,6 +162,9 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  for (const control of elements.targetForm.querySelectorAll("select, button")) {
+    control.disabled = busy || !state.user || !state.sessionId || state.viewingHistory || state.diagnosticTarget?.subject === "mock_client";
+  }
   for (const control of elements.environmentForm.querySelectorAll("select, input, button")) {
     control.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   }
@@ -353,6 +363,7 @@ function showAuthGate(message = "请先登录或注册。") {
   state.health = null;
   state.sessionId = null;
   state.environmentProfile = null;
+  state.diagnosticTarget = null;
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -556,6 +567,7 @@ function appendMessage(role, text, sources = []) {
 function resetConversation() {
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
+  renderDiagnosticTarget(state.diagnosticTarget);
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -661,6 +673,39 @@ async function saveEnvironment(event) {
   }
 }
 
+const TARGET_LABELS = {user_client:"当前浏览器设备",netpilot_host:"NetPilot 服务主机",mock_client:"Mock 模拟终端",unknown:"未记录 / 未明确"};
+const EXECUTION_LABELS = {netpilot_host:"NetPilot 服务主机",mock_provider:"Mock Provider",unavailable:"不可用 / 未记录"};
+
+function renderDiagnosticTarget(target, {historical = false} = {}) {
+  const t = target || {};
+  elements.targetSummary.textContent = `${historical ? "历史对象：" : ""}${TARGET_LABELS[t.subject] || TARGET_LABELS.unknown}${t.relationship_to_netpilot === "remote" ? "（远程）" : ""}`;
+  const capability = t.limitation_code === "none" ? t.subject === "mock_client" ? "模拟可用" : "可用" : "受限 / 未记录";
+  elements.targetCapability.textContent = `直接检测能力：${capability}；网络工具执行位置：${EXECUTION_LABELS[t.execution_context] || EXECUTION_LABELS.unavailable}`;
+  elements.targetSubject.value = t.subject || "unknown";
+  elements.targetStatus.textContent = historical ? "历史快照只读，不会改变当前 Session 对象。" : t.subject === "mock_client" ? "Mock 模拟终端由系统管理。" : t.subject === "netpilot_host" ? "检测结果只描述 NetPilot 服务主机，不代表浏览器设备。" : "本机网络工具运行在服务主机，不会将服务主机结果当作此设备结果；当前尚不能直接读取远程客户端 DNS、网关和路由。";
+}
+
+async function saveDiagnosticTarget(event) {
+  event.preventDefault();
+  if (!state.user || !state.sessionId || state.busy || state.viewingHistory || state.diagnosticTarget?.subject === "mock_client") return;
+  if (!["user_client","netpilot_host"].includes(elements.targetSubject.value)) return;
+  const epoch = state.authEpoch, sessionId = state.sessionId;
+  setBusy(true);
+  try {
+    const target = await requestJSON("/api/session/diagnostic-target", {method:"PATCH",body:JSON.stringify({session_id:sessionId,subject:elements.targetSubject.value})});
+    if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
+    const changed = state.diagnosticTarget?.target_version !== target.target_version;
+    state.diagnosticTarget = target;
+    renderDiagnosticTarget(target);
+    if (changed) { renderDiagnosis(null); renderTools([]); }
+    elements.targetStatus.textContent = "诊断对象已保存；其他对象的旧检测仅保留于历史，不参与当前结论。";
+  } catch (error) {
+    if (state.authEpoch === epoch) elements.targetStatus.textContent = error.message;
+  } finally {
+    if (state.authEpoch === epoch) setBusy(false);
+  }
+}
+
 async function createSession({ announce = true, restore = false } = {}) {
   if (!state.user || state.busy) return;
   const authEpoch = state.authEpoch;
@@ -681,6 +726,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     if (state.authEpoch !== authEpoch) return;
     state.sessionId = session.session_id;
     state.environmentProfile = session.environment_profile || null;
+    state.diagnosticTarget = session.diagnostic_target || null;
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
@@ -817,6 +863,9 @@ function renderTools(tools) {
     heading.append(name, badge);
     const meta = document.createElement("small");
     meta.textContent = `第 ${tool.round} 轮 · ${tool.duration_ms} ms · ${tool.tool_call_id}`;
+    const location = document.createElement("small");
+    location.className = "tool-execution-context";
+    location.textContent = tool.execution_scope === "target_neutral" ? "对象无关的知识参考（非设备检测）" : `诊断对象：${TARGET_LABELS[tool.target_subject] || TARGET_LABELS.unknown} v${tool.target_version || 1} · 执行位置：${EXECUTION_LABELS[tool.execution_context] || EXECUTION_LABELS.unavailable}`;
     const summary = document.createElement("p");
     summary.textContent = tool.summary;
     const details = document.createElement("details");
@@ -829,7 +878,7 @@ function renderTools(tools) {
       2,
     );
     details.append(detailsTitle, pre);
-    item.append(heading, meta, summary, details);
+    item.append(heading, meta, location, summary, details);
     list.append(item);
   }
   elements.toolTimeline.append(list);
@@ -955,6 +1004,7 @@ async function loadDiagnosisRecord(recordId) {
     if (state.authEpoch !== authEpoch) return;
     state.viewingHistory = true;
     renderEnvironmentProfile(record.environment_profile, { historical: true });
+    renderDiagnosticTarget(record.diagnostic_target, {historical:true});
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
       appendMessage("user", turn.user_message);
@@ -986,6 +1036,7 @@ async function submitChat(event) {
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
   appendMessage("user", message);
+  renderDiagnosticTarget(state.diagnosticTarget);
   const streamedAnswer = appendMessage("assistant", "");
   streamedAnswer.classList.add("is-streaming");
   elements.messageInput.value = "";
@@ -1013,6 +1064,8 @@ async function submitChat(event) {
     if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
     if (response.environment_profile) state.environmentProfile = response.environment_profile;
+    if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
+    renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
     renderDiagnosis(response.diagnosis);
@@ -1044,6 +1097,7 @@ function formatReportPreview(report) {
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
     `用户环境：${formatEnvironmentSummary(report.environment_profile)}`,
+    `诊断对象：${TARGET_LABELS[report.diagnostic_target?.subject] || TARGET_LABELS.unknown}；执行位置：${EXECUTION_LABELS[report.diagnostic_target?.execution_context] || EXECUTION_LABELS.unavailable}`,
     "",
     `报告 ID：${report.report_id}`,
     `Session ID：${report.session_id}`,
@@ -1063,6 +1117,7 @@ function formatReportPreview(report) {
     String(report.conclusion || ""),
     "",
     "执行指标",
+    "以下为 Session 累计指标，含历史对象，不代表当前对象已检测。",
     `Token：${Number(usage.total_tokens || 0)}（输入 ${Number(usage.prompt_tokens || 0)} / 输出 ${Number(usage.completion_tokens || 0)}）`,
     `LLM 耗时：${formatDuration(metrics.llm_duration_ms)}`,
     `Tool 耗时：${formatDuration(metrics.tool_duration_ms)}`,
@@ -1212,6 +1267,7 @@ async function activateScenario(scenario) {
   if (state.authEpoch !== authEpoch) return;
   state.sessionId = response.session_id;
   state.environmentProfile = response.environment_profile || null;
+  state.diagnosticTarget = response.diagnostic_target || null;
   window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   elements.scenarioSelect.value = response.current;
@@ -1325,6 +1381,7 @@ async function deleteCurrentCustomScenario() {
     if (response.session_id) {
       state.sessionId = response.session_id;
       state.environmentProfile = response.environment_profile || null;
+      state.diagnosticTarget = response.diagnostic_target || null;
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
@@ -1369,6 +1426,7 @@ elements.myHistory.addEventListener("click", async () => {
   }
 });
 elements.chatForm.addEventListener("submit", submitChat);
+elements.targetForm.addEventListener("submit", saveDiagnosticTarget);
 elements.environmentForm.addEventListener("submit", saveEnvironment);
 elements.environmentForm.addEventListener("change", (event) => {
   if (event.target.name) state.environmentTouched.add(event.target.name);

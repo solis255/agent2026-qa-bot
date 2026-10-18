@@ -7,18 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from netpilot.agent.intent import IntentClassification, TurnIntent
-
-
-NETWORK_TOOL_NAMES = frozenset(
-    {
-        "get_network_info",
-        "ping_host",
-        "dns_lookup",
-        "tcp_check",
-        "http_check",
-        "traceroute",
-    }
-)
+from netpilot.agent.target_capabilities import TargetCapability
 
 
 class ToolPolicy(BaseModel):
@@ -31,6 +20,7 @@ class ToolPolicy(BaseModel):
     blocked_signatures: set[str] = Field(default_factory=set)
     max_new_calls: int | None = Field(default=None, ge=0)
     rationale: str = Field(min_length=1)
+    target_capability: TargetCapability | None = None
 
     @property
     def allows_any_tool(self) -> bool:
@@ -39,13 +29,17 @@ class ToolPolicy(BaseModel):
     def filter_schemas(
         self,
         schemas: list[dict[str, Any]],
+        *, execution_scopes: dict[str, str],
     ) -> list[dict[str, Any]]:
         allowed: list[dict[str, Any]] = []
         for schema in schemas:
             name = schema["function"]["name"]
-            if name == "knowledge_search" and self.allow_rag:
+            scope = execution_scopes.get(name)
+            if self.target_capability is not None and not self.target_capability.allows_scope(scope):
+                continue
+            if scope == "target_neutral" and self.allow_rag:
                 allowed.append(schema)
-            elif name in NETWORK_TOOL_NAMES and self.allow_network_tools:
+            elif scope in {"execution_host", "mock_target"} and self.allow_network_tools:
                 allowed.append(schema)
         return allowed
 

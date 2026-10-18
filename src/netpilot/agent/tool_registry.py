@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from netpilot.agent.schemas import RegistryExecution
+from netpilot.agent.target_capabilities import evaluate_target_capabilities
+from netpilot.diagnostic_target import DiagnosticTarget, ExecutionScope, derive_diagnostic_target
+from netpilot.environment import EnvironmentProfile
 from netpilot.rag import KnowledgeSearchData, KnowledgeSearchInput, Retriever
 from netpilot.observability import log_event
 from netpilot.tools.schemas import (
@@ -38,6 +41,7 @@ class ToolSpec:
     description: str
     input_model: type[BaseModel]
     handler: ToolHandler
+    execution_scope: ExecutionScope = "execution_host"
 
 
 class ToolRegistry:
@@ -51,6 +55,7 @@ class ToolRegistry:
         strict: bool = True,
     ) -> None:
         self._strict = strict
+        self.provider_kind = service.provider_name if service.provider_name in {"mock", "local"} else "unavailable"
         specs = [
             ToolSpec(
                 "get_network_info",
@@ -96,9 +101,16 @@ class ToolRegistry:
                     "检索带来源的校园网络、VPN、无线网络和 eduroam 参考资料。",
                     KnowledgeSearchInput,
                     lambda query: _search_knowledge(retriever, query),
+                    execution_scope="target_neutral",
                 )
             )
+        if self.provider_kind == "mock":
+            specs = [replace(spec, execution_scope="mock_target") if spec.execution_scope == "execution_host" else spec for spec in specs]
         self._specs = {spec.name: spec for spec in specs}
+
+    @property
+    def execution_scopes(self) -> dict[str, ExecutionScope]:
+        return {name: spec.execution_scope for name, spec in self._specs.items()}
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -119,7 +131,7 @@ class ToolRegistry:
             definitions.append({"type": "function", "function": function})
         return definitions
 
-    def execute(self, tool_name: str, raw_arguments: str) -> RegistryExecution:
+    def execute(self, tool_name: str, raw_arguments: str, *, target: DiagnosticTarget | None = None) -> RegistryExecution:
         """Validate and execute one allowlisted function call without raising."""
 
         started = perf_counter()
@@ -148,6 +160,14 @@ class ToolRegistry:
                     started,
                 )
             ))
+
+        target = target or derive_diagnostic_target(EnvironmentProfile(), self.provider_kind)
+        capability = evaluate_target_capabilities(target, self.provider_kind)
+        if not capability.allows_scope(spec.execution_scope):
+            return finish(RegistryExecution(result=_failure(
+                tool_name, ToolErrorCode.SECURITY_BLOCKED,
+                "诊断对象策略禁止执行此位置的网络工具", started,
+            )))
 
         try:
             payload = json.loads(raw_arguments)

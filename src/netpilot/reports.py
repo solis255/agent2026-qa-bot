@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from netpilot.models import DiagnosisRecordView, DiagnosisReportView
 from netpilot.environment import OS_LABELS, ACCESS_LABELS, SCOPE_LABELS, bool_label
+from netpilot.diagnostic_target import SUBJECT_LABELS, EXECUTION_LABELS, RELATIONSHIP_LABELS, matches_target
 
 
 ReportFormat = Literal["markdown", "json"]
@@ -60,21 +61,31 @@ class DiagnosisReportArtifact:
 def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
     """Build a stable report from one Session-level diagnosis snapshot."""
 
+    target = record.diagnostic_target
+    current_calls = [call for call in record.tool_calls if target.subject == "unknown" or matches_target(call, target)]
+    archived_calls = [call for call in record.tool_calls if call not in current_calls]
+    conclusion = record.answer
+    if record.conversation_turns and target.subject != "unknown":
+        last_turn = record.conversation_turns[-1]
+        if (last_turn.target_subject, last_turn.target_version) != (target.subject, target.target_version):
+            conclusion = "诊断对象已切换，尚无当前对象的直接检测结论；其他对象观察只保留于历史。"
     return DiagnosisReportView(
         report_id=record.record_id,
         record_id=record.record_id,
         session_id=record.session_id,
         environment_profile=record.environment_profile,
+        diagnostic_target=target,
         generated_at=record.updated_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
         turn_count=record.turn_count,
         question=record.user_message,
         latest_user_message=record.latest_user_message,
-        conclusion=record.answer,
+        conclusion=conclusion,
         diagnosis=record.diagnosis,
         metrics=record.metrics,
-        tool_calls=record.tool_calls,
+        tool_calls=current_calls,
+        archived_tool_calls=archived_calls,
         sources=record.sources,
         conversation_turns=record.conversation_turns,
         conversation_complete=record.conversation_complete,
@@ -148,6 +159,15 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         f"- 客户端模式：{report.environment_profile.client_mode}",
         "- 环境上下文不是实时网络检测证据；未知不等于关闭。Local 仅检测运行 NetPilot 的主机。",
         "",
+        "## 诊断对象",
+        "",
+        f"- 对象：{SUBJECT_LABELS[report.diagnostic_target.subject]}",
+        f"- 对象版本：{report.diagnostic_target.target_version}",
+        f"- 与 NetPilot 关系：{RELATIONSHIP_LABELS[report.diagnostic_target.relationship_to_netpilot]}",
+        f"- 工具执行位置：{EXECUTION_LABELS[report.diagnostic_target.execution_context]}",
+        f"- 直接检测能力：{'模拟可用' if report.diagnostic_target.subject == 'mock_client' and report.diagnostic_target.limitation_code == 'none' else '可用' if report.diagnostic_target.limitation_code == 'none' else '受限 / 未记录'}",
+        "- 仅当前对象/版本的网络证据用于当前结论；知识资料不属于设备检测。",
+        "",
         "## 最近一轮用户消息",
         "",
         *_blockquote(report.latest_user_message),
@@ -158,6 +178,7 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         "",
         "## 执行指标",
         "",
+        "以下为 Session 累计指标，包含历史对象；不代表当前对象执行了这些检测。",
         f"- Prompt Token：{usage.prompt_tokens}",
         f"- Completion Token：{usage.completion_tokens}",
         f"- Total Token：{usage.total_tokens}",
@@ -179,6 +200,8 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
                 "",
                 f"- 状态：{_markdown_text(status)}",
                 f"- 执行轮次：{tool.round}",
+                f"- 诊断对象：{SUBJECT_LABELS[tool.target_subject]} v{tool.target_version}",
+                f"- 执行位置：{EXECUTION_LABELS[tool.execution_context] if tool.execution_scope != 'target_neutral' else '对象无关的知识检索'}",
                 f"- 执行成功：{'是' if tool.success else '否'}",
                 f"- 耗时：{tool.duration_ms} ms",
                 f"- 摘要：{_markdown_text(tool.summary)}",
@@ -194,7 +217,12 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
             ]
         )
 
-    lines.extend(["## 诊断思路", ""])
+    if report.archived_tool_calls:
+        lines.extend(["## 其他对象的历史检测（不用于当前结论）", ""])
+        for tool in report.archived_tool_calls:
+            lines.append(f"- {SUBJECT_LABELS[tool.target_subject]} v{tool.target_version} / {EXECUTION_LABELS[tool.execution_context]} / {_markdown_text(tool.tool_name)}：{_markdown_text(tool.summary)}")
+        lines.append("")
+    lines.extend(["## 诊断思路", "", "以下保留 Session 的建立/切换及历史决策，其他对象观察不支持当前对象结论。", ""])
     if report.reasoning_trace:
         for index, step in enumerate(report.reasoning_trace, 1):
             lines.append(f"{index}. **{_markdown_text(step.title)}**：{_markdown_text(step.summary)}")
@@ -236,6 +264,7 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
     for turn in report.conversation_turns:
         lines.extend([
             f"### Turn {turn.turn_index}", "",
+            f"诊断对象：{SUBJECT_LABELS[turn.target_subject]} v{turn.target_version}", "",
             "用户：", "", *_blockquote(turn.user_message), "",
             "诊断助手：", "", _markdown_text(turn.assistant_answer), "",
         ])

@@ -22,6 +22,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | Web/API | 中文 Web、登录/注册/改密/退出、当前用户菜单、个人会话与历史、结构化 Tool Timeline、健康检查、Mock 场景控制 |
 | 历史与报告 | 每个 Session 一条累计 SQLite 诊断记录、账号历史分析、每页 10 条上一页/下一页、确定性报告、Markdown/JSON 导出 |
 | 环境画像 | 每个 Session 一份 EnvironmentProfile；浏览器低风险采集、用户编辑/明确表述更新、来源优先级、跨 Turn 复用、历史与报告保存 |
+| 诊断对象 | 区分浏览器设备 / NetPilot 服务主机 / Mock 模拟终端；按工具执行位置限制能力，证据与去重绑定对象版本 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -199,6 +200,7 @@ POST /api/session
 GET  /api/session/{session_id}
 PATCH /api/session/environment/browser
 PATCH /api/session/environment/user
+PATCH /api/session/diagnostic-target
 POST /api/chat
 POST /api/chat/stream
 GET  /api/diagnoses
@@ -222,8 +224,22 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-快照新增 `environment_profile` 并升级到 v5，SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12B 当前为 v6），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
+
+### 诊断对象（Milestone 12B）
+
+侧栏“诊断对象”显示当前对象、直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，
+**不会调用服务主机的 DNS、Ping、网卡、TCP、HTTP 或路由工具来冒充用户设备检测**。
+当前没有客户端系统级采集能力，这类请求会依据现象/环境给出安全建议或追问；明确知识请求仍可检索 RAG。
+选择“NetPilot 服务主机”，或明确说“检查这台 NetPilot 服务器的 DNS”，才允许 Local 主机工具。
+Mock 模式保持只读的“Mock 模拟终端”，结果明确为模拟，不代表真实校园网络。
+
+对象切换增加 `target_version`，但不增加任务版本、不创建空 Turn；旧网络观察保留作历史，不参与当前对象的
+Evidence、Coverage、Hypothesis、工具去重或模型对话。Timeline 标记对象与执行位置；报告区分当前证据和其他对象历史检测。
+Target API 只接受 `session_id` 与 `subject`，执行位置/限制由服务端计算，沿用账号 ownership。
+快照 v6 保存最新 `diagnostic_target`，旧记录保持“未记录”；完整会话及历史对象证据仍保留。
+实现、DT-01～DT-15、验证记录与四个人工验收状态见 [Milestone 12B](docs/MILESTONE12B_VALIDATION.md)。
 
 ### 测试
 
@@ -233,7 +249,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12A 当前为 v5），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12B 当前为 v6），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -251,7 +267,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-33 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+40 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -262,10 +278,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12A 修改前基线为 `420 passed in 62.77s`；2026-10-18 环境画像实现后的全量回归实测为：
+Milestone 12B 修改前基线为 `494 passed in 91.32s`；2026-10-18 诊断对象感知实现后的全量回归实测为：
 
 ```text
-494 passed in 74.12s
+557 passed in 94.51s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

@@ -12,6 +12,7 @@ from netpilot.agent.schemas import AgentStatus
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
+from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, TargetSubject, legacy_target
 from netpilot.rag import SourceType
 from netpilot.rag.schemas import StableSourceRef
 from netpilot.tools.custom_scenarios import CustomMockScenario, CustomScenarioBehavior
@@ -34,6 +35,13 @@ class SessionResponse(BaseModel):
     session_id: UUID
     created_at: datetime
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
+
+
+class DiagnosticTargetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: UUID
+    subject: Literal["user_client", "netpilot_host"]
 
 
 class BrowserEnvironmentRequest(BrowserEnvironmentValues):
@@ -69,13 +77,13 @@ EvidenceStatus = Literal[
 ]
 
 
-class EvidenceView(BaseModel):
+class EvidenceView(TargetBinding):
     tool: str
     status: EvidenceStatus
     summary: str
 
 
-class ToolCallView(BaseModel):
+class ToolCallView(TargetBinding):
     round: int = Field(ge=1)
     tool_call_id: str
     evidence_id: str | None = None
@@ -137,6 +145,7 @@ class ExecutionMetricsView(BaseModel):
 class ChatResponse(BaseModel):
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
     record_id: UUID | None = None
     answer: str
     diagnosis: DiagnosisView
@@ -150,6 +159,8 @@ class PersistedConversationTurn(BaseModel):
     """One actual completed user/assistant pair in a persisted Session."""
 
     turn_index: int = Field(ge=1)
+    target_subject: TargetSubject = "unknown"
+    target_version: int = Field(default=1, ge=1)
     user_message: str = Field(min_length=1, max_length=4000)
     assistant_answer: str = Field(min_length=1)
     created_at: datetime
@@ -184,8 +195,9 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5] = 5
+    schema_version: Literal[1, 2, 3, 4, 5, 6] = 6
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=legacy_target)
     record_id: UUID
     user_id: UUID | None = None
     session_id: UUID
@@ -253,8 +265,10 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5] = 5
+    schema_version: Literal[1, 2, 3, 4, 5, 6] = 6
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=legacy_target)
+    archived_tool_calls: list[ToolCallView] = Field(default_factory=list)
     report_id: UUID
     record_id: UUID
     session_id: UUID
@@ -307,6 +321,7 @@ class ScenarioSwitchResponse(BaseModel):
     current: str
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
     sessions_cleared: int = Field(ge=0)
 
 
@@ -319,4 +334,5 @@ class CustomScenarioDeleteResponse(BaseModel):
     current: str
     session_id: UUID | None = None
     environment_profile: EnvironmentProfile | None = None
+    diagnostic_target: DiagnosticTarget | None = None
     sessions_cleared: int = Field(default=0, ge=0)

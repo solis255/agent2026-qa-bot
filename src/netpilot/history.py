@@ -16,6 +16,8 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 from netpilot.environment import EnvironmentProfile
+from netpilot.diagnostic_target import DiagnosticTarget
+from netpilot.models import DiagnosisView
 from netpilot.agent.reasoning_trace import merge_reasoning_trace, trim_reasoning_trace
 
 from netpilot.models import (
@@ -30,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 5
+SNAPSHOT_SCHEMA_VERSION = 6
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -53,6 +55,7 @@ class DiagnosisRepository(Protocol):
     ) -> DiagnosisRecordView: ...
 
     def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None: ...
+    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -101,6 +104,7 @@ class SQLiteDiagnosisRepository:
             user_id=user_id,
             session_id=response.session_id,
             environment_profile=response.environment_profile,
+            diagnostic_target=response.diagnostic_target,
             created_at=now,
             updated_at=now,
             turn_count=1,
@@ -115,6 +119,7 @@ class SQLiteDiagnosisRepository:
             sources=response.sources,
             conversation_turns=[PersistedConversationTurn(
                 turn_index=1, user_message=user_message,
+                target_subject=response.diagnostic_target.subject, target_version=response.diagnostic_target.target_version,
                 assistant_answer=response.answer, created_at=now,
                 turn_intent=response.metrics.turn_intent,
                 response_mode=response.metrics.response_mode,
@@ -176,6 +181,20 @@ class SQLiteDiagnosisRepository:
                     _update_record(connection, record)
         except (sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("用户环境保存失败") from exc
+
+    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None:
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute("SELECT * FROM diagnosis_records WHERE user_id=? AND session_id=?", (str(user_id), str(session_id))).fetchone()
+                if row is not None:
+                    existing = _record_from_row(row)
+                    updates = {"diagnostic_target":target, "schema_version":SNAPSHOT_SCHEMA_VERSION}
+                    if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (target.subject, target.target_version):
+                        updates["diagnosis"] = DiagnosisView(status="completed", summary="诊断对象已切换，尚无当前对象的直接网络检测结论。", tool_rounds=0)
+                    _update_record(connection, existing.model_copy(update=updates))
+        except (sqlite3.Error, ValueError) as exc:
+            raise DiagnosisStorageError("诊断对象保存失败") from exc
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -478,6 +497,7 @@ def _merge_session_records(
         user_id=existing.user_id,
         session_id=existing.session_id,
         environment_profile=current.environment_profile,
+        diagnostic_target=current.diagnostic_target,
         created_at=min(existing.created_at, current.created_at),
         updated_at=max(existing.updated_at, current.updated_at),
         turn_count=existing.turn_count + current.turn_count,
@@ -504,6 +524,9 @@ def _merge_session_diagnosis(
     current: DiagnosisRecordView,
 ):
     """Keep the latest meaningful diagnostic/analysis conclusion."""
+
+    if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (current.diagnostic_target.subject, current.diagnostic_target.target_version):
+        return current.diagnosis
 
     mode = current.metrics.response_mode
     meaningful = (
@@ -564,7 +587,7 @@ def _merge_tool_calls(existing, current, *, traced_ids=frozenset()):
     for tool_call in [*existing, *current]:
         # Keep legacy/untraced dedup semantics. Traced observations need durable
         # identities even if a model reuses its transport call ID in a later Turn.
-        identity = tool_call.evidence_id if tool_call.evidence_id in traced_ids else tool_call.tool_call_id
+        identity = (tool_call.target_subject, tool_call.target_version, tool_call.evidence_id if tool_call.evidence_id in traced_ids else tool_call.tool_call_id)
         if identity in seen:
             continue
         seen.add(identity)

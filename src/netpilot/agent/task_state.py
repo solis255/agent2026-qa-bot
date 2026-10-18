@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 from netpilot.environment import EnvironmentProfile
+from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -27,7 +28,7 @@ EvidenceStatus = Literal[
 ]
 
 
-class EvidenceRecord(BaseModel):
+class EvidenceRecord(TargetBinding):
     """One structured observation retained across turns of the same task."""
 
     model_config = ConfigDict(extra="forbid")
@@ -54,6 +55,9 @@ class SessionTaskState(BaseModel):
     session_id: UUID
     owner_user_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
+    last_target_trace_version: int = 0
+    last_target_limit_version: int = 0
     last_environment_trace_summary: str | None = None
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     executed_tool_signatures: set[str] = Field(default_factory=set)
@@ -75,6 +79,7 @@ class SessionTaskState(BaseModel):
             if record.reusable
             and not record.superseded
             and record.task_version == self.task_version
+            and matches_target(record, self.diagnostic_target)
         ]
 
     def advance_version(self) -> None:
@@ -87,6 +92,16 @@ class SessionTaskState(BaseModel):
         self.executed_tool_signatures.clear()
         self.coverage = DiagnosticCoverage()
         self.hypotheses.clear()
+        self.last_evidence_sufficiency = None
+
+    def set_target(self, target: DiagnosticTarget) -> None:
+        self.diagnostic_target = target.model_copy(deep=True)
+        active = self.reusable_evidence()
+        self.executed_tool_signatures = {item.tool_signature for item in active}
+        from netpilot.agent.coverage import coverage_from_observations
+        from netpilot.agent.hypotheses import track_hypotheses
+        self.coverage = coverage_from_observations(evidence=active)
+        self.hypotheses = track_hypotheses(evidence=active)
         self.last_evidence_sufficiency = None
 
 
@@ -122,8 +137,10 @@ def evidence_from_step(
     signature = step.tool_signature or canonical_tool_signature(
         step.tool_name,
         step.arguments,
+        target_subject=step.target_subject, target_version=step.target_version, execution_scope=step.execution_scope,
     )
     return EvidenceRecord(
+        **{key:getattr(step, key) for key in TargetBinding.model_fields},
         evidence_id=step.evidence_id,
         tool_name=step.tool_name,
         arguments=step.arguments,

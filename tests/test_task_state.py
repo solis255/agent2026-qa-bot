@@ -41,7 +41,7 @@ def _dns_result() -> AgentResult:
 
 def test_session_task_state_persists_structured_evidence_separately() -> None:
     owner = uuid4()
-    store = SessionStore()
+    store = SessionStore(provider_kind="mock", environment_client_mode="mock")
     session = store.create(owner)
 
     store.begin_turn(session.session_id, owner)
@@ -74,7 +74,7 @@ def test_session_task_state_persists_structured_evidence_separately() -> None:
 
 def test_new_task_version_supersedes_old_evidence_without_deleting_it() -> None:
     owner = uuid4()
-    store = SessionStore()
+    store = SessionStore(provider_kind="mock", environment_client_mode="mock")
     session = store.create(owner)
     store.begin_turn(session.session_id, owner)
     store.finish_turn(session.session_id, "问题", "回答", result=_dns_result())

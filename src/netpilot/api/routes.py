@@ -26,7 +26,8 @@ from netpilot.api.presenters import present_chat
 from netpilot.api.sse import iter_chat_sse
 from netpilot.config import MockScenario, Settings, ToolMode
 from netpilot.environment import EnvironmentProfile, EnvironmentSource
-from netpilot.models.schemas import BrowserEnvironmentRequest, UserEnvironmentRequest
+from netpilot.diagnostic_target import DiagnosticTarget
+from netpilot.models.schemas import BrowserEnvironmentRequest, UserEnvironmentRequest, DiagnosticTargetRequest
 from netpilot.llm import TJUClient
 from netpilot.history import (
     DiagnosisCursorError,
@@ -109,6 +110,7 @@ def create_session(request: Request, user: CurrentUser) -> SessionResponse:
         session_id=snapshot.session_id,
         created_at=snapshot.created_at,
         environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
+        diagnostic_target=_sessions(request).task_state(snapshot.session_id, user.id).diagnostic_target,
     )
 
 
@@ -120,6 +122,7 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
         return SessionResponse(
             session_id=session_id, created_at=snapshot.created_at,
             environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
+            diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
@@ -159,9 +162,32 @@ def user_environment(payload: UserEnvironmentRequest, request: Request, user: Cu
     return _update_environment(payload, request, user, source="user")
 
 
+@router.patch("/session/diagnostic-target", response_model=DiagnosticTarget, tags=["chat"])
+def update_target(payload: DiagnosticTargetRequest, request: Request, user: CurrentUser) -> DiagnosticTarget:
+    def persist(target):
+        repository = request.app.state.diagnosis_repository
+        if repository is not None:
+            repository.update_diagnostic_target(user.id, payload.session_id, target)
+        elif request.app.state.settings.diagnosis_history_enabled:
+            raise DiagnosisStorageError("诊断历史不可用")
+    try:
+        return _sessions(request).update_diagnostic_target(payload.session_id, user.id, payload.subject, persist=persist)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail="当前会话正在诊断，请完成后切换对象。") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Mock 模式的模拟诊断对象只读。") from exc
+    except DiagnosisStorageError as exc:
+        raise HTTPException(status_code=503, detail="诊断对象保存失败，请稍后重试。") from exc
+
+
 def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest, result: AgentResult) -> ChatResponse:
+    target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
+    result = result.model_copy(update={"diagnostic_target":target})
     response = present_chat(payload.session_id, result)
     response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
+    response.diagnostic_target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
     return _persist_session_diagnosis(request, owner_id, payload.message, response)
 
 
@@ -535,6 +561,7 @@ def delete_custom_scenario(
         session_id=session_id,
         sessions_cleared=cleared,
         environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile if session_id else None,
+        diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target if session_id else None,
     )
 
 
@@ -585,6 +612,7 @@ def switch_scenario(
         session_id=snapshot.session_id,
         sessions_cleared=cleared,
         environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
+        diagnostic_target=_sessions(request).task_state(snapshot.session_id, user.id).diagnostic_target,
     )
 
 

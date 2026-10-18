@@ -72,7 +72,7 @@ def test_tool_signature_materializes_defaults_and_normalizes_targets() -> None:
 
     assert implicit == explicit == {"host": "github.com", "port": 22, "timeout": 3.0}
     assert canonical_tool_signature("tcp_check", implicit) == (
-        'tcp_check:{"host":"github.com","port":22,"timeout":3.0}'
+        'unknown:v1:tcp_check:{"host":"github.com","port":22,"timeout":3.0}'
     )
     assert canonical_tool_signature(
         "http_check", {"url": "https://EXAMPLE.com:443"}
@@ -94,10 +94,10 @@ def test_same_session_reuses_prior_structured_tool_evidence() -> None:
     execute_count = 0
     execute = registry.execute
 
-    def counted_execute(tool_name: str, raw_arguments: str):
+    def counted_execute(tool_name: str, raw_arguments: str, **kwargs):
         nonlocal execute_count
         execute_count += 1
-        return execute(tool_name, raw_arguments)
+        return execute(tool_name, raw_arguments, **kwargs)
 
     registry.execute = counted_execute  # type: ignore[method-assign]
     agent = AgentOrchestrator(llm, registry)

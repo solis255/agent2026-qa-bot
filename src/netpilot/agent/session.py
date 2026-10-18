@@ -20,6 +20,7 @@ from netpilot.agent.task_state import SessionTaskState, evidence_from_step
 from netpilot.agent.reasoning_trace import merge_reasoning_trace
 from netpilot.llm import ChatMessage, ChatRole
 from netpilot.environment import ClientMode, EnvironmentProfile, EnvironmentSource, initial_environment, merge_environment
+from netpilot.diagnostic_target import DiagnosticTarget, ProviderKind, derive_diagnostic_target, merge_diagnostic_target, user_target, binding_for
 
 
 class SessionNotFoundError(KeyError):
@@ -41,6 +42,7 @@ class SessionState:
     created_at: datetime
     updated_at: datetime
     messages: list[ChatMessage] = field(default_factory=list)
+    message_targets: list[tuple[str, int]] = field(default_factory=list)
     task_state: SessionTaskState | None = None
     busy: bool = False
 
@@ -69,6 +71,7 @@ class SessionStore:
         max_evidence_records: int = 200,
         reasoning_trace_max_steps: int = 50,
         environment_client_mode: ClientMode = "unknown",
+        provider_kind: ProviderKind = "unavailable",
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -81,6 +84,7 @@ class SessionStore:
         self.max_evidence_records = max_evidence_records
         self.reasoning_trace_max_steps = reasoning_trace_max_steps
         self.environment_client_mode = environment_client_mode
+        self.provider_kind = provider_kind
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -95,6 +99,7 @@ class SessionStore:
             owner_user_id=owner_user_id,
             environment_profile=initial_environment(self.environment_client_mode),
         )
+        state.task_state.diagnostic_target = derive_diagnostic_target(state.task_state.environment_profile, self.provider_kind)
         with self._lock:
             if len(self._sessions) >= self.max_sessions:
                 idle = [item for item in self._sessions.values() if not item.busy]
@@ -118,7 +123,9 @@ class SessionStore:
                 raise SessionBusyError(str(session_id))
             state.busy = True
             state.updated_at = datetime.now(timezone.utc)
-            return [message.model_copy(deep=True) for message in state.messages]
+            target = _task_state(state).diagnostic_target
+            identity = (target.subject, target.target_version)
+            return [message.model_copy(deep=True) for message, recorded in zip(state.messages, state.message_targets) if recorded == identity]
 
     def finish_turn(
         self,
@@ -133,6 +140,11 @@ class SessionStore:
             state = self._sessions.get(session_id)
             if state is None:
                 raise SessionNotFoundError(str(session_id))
+            task_state = _task_state(state)
+            if result is not None and result.diagnostic_target is not None:
+                task_state.set_target(result.diagnostic_target)
+            target = task_state.diagnostic_target
+            state.message_targets.extend([(target.subject, target.target_version)] * 2)
             state.messages.extend(
                 [
                     ChatMessage(role=ChatRole.USER, content=user_message),
@@ -150,12 +162,19 @@ class SessionStore:
                 for item in result.reasoning_trace:
                     if item.title == "确认用户环境":
                         task_state.last_environment_trace_summary = item.summary
+                    if item.title in {"确认诊断对象", "切换诊断对象"}:
+                        task_state.last_target_trace_version = target.target_version
+                    if item.title == "限制不适用的检测":
+                        task_state.last_target_limit_version = target.target_version
                 task_state.reasoning_trace = merge_reasoning_trace(
                     task_state.reasoning_trace,
                     [step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
                     self.reasoning_trace_max_steps,
                 )
                 for step in result.steps:
+                    if step.target_subject == "unknown" and target.subject != "unknown":
+                        scope = "target_neutral" if step.tool_name == "knowledge_search" else "mock_target" if target.execution_context == "mock_provider" else "execution_host"
+                        step = step.model_copy(update={**binding_for(target, scope), "tool_signature":None})
                     record = evidence_from_step(
                         step,
                         turn_index=task_state.turn_index,
@@ -243,6 +262,21 @@ class SessionStore:
             state.updated_at = datetime.now(timezone.utc)
             return task_state.task_version
 
+    def update_diagnostic_target(self, session_id: UUID, owner_user_id: UUID, subject, *, persist=None) -> DiagnosticTarget:
+        with self._lock:
+            state = self._require(session_id, owner_user_id)
+            if state.busy:
+                raise SessionBusyError(str(session_id))
+            if self.provider_kind == "mock":
+                raise ValueError("Mock 模拟终端由系统管理，不可切换为真实设备。")
+            task = _task_state(state)
+            target = merge_diagnostic_target(task.diagnostic_target, user_target(subject, task.environment_profile, self.provider_kind), self.provider_kind)
+            if persist is not None:
+                persist(target)
+            task.set_target(target)
+            state.updated_at = datetime.now(timezone.utc)
+            return target.model_copy(deep=True)
+
     def clear(self) -> int:
         with self._lock:
             count = len(self._sessions)
@@ -258,17 +292,13 @@ class SessionStore:
     def _trim_complete_turns(self, state: SessionState) -> None:
         while len(state.messages) > self.max_history_messages:
             del state.messages[:2]
+            del state.message_targets[:2]
 
     def _trim_evidence(self, task_state: SessionTaskState) -> None:
         overflow = len(task_state.evidence) - self.max_evidence_records
         if overflow > 0:
             del task_state.evidence[:overflow]
-        task_state.executed_tool_signatures = {
-            record.tool_signature
-            for record in task_state.evidence
-            if record.task_version == task_state.task_version
-            and not record.superseded
-        }
+        task_state.executed_tool_signatures = {record.tool_signature for record in task_state.reusable_evidence()}
 
 
 def _snapshot(state: SessionState) -> SessionSnapshot:

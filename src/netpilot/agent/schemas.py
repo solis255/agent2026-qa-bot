@@ -15,6 +15,7 @@ from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.llm import TokenUsage
 from netpilot.environment import EnvironmentProfile
+from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
 
@@ -42,7 +43,7 @@ class RegistryExecution(BaseModel):
     result: ToolResult[Any]
 
 
-class AgentToolStep(BaseModel):
+class AgentToolStep(TargetBinding):
     """One correlated tool execution exposed to later timeline consumers."""
 
     round: int = Field(ge=1)
@@ -59,6 +60,7 @@ class AgentResult(BaseModel):
 
     answer: str = Field(min_length=1)
     environment_profile: EnvironmentProfile | None = None
+    diagnostic_target: DiagnosticTarget | None = None
     status: AgentStatus
     tool_rounds: int = Field(ge=0)
     steps: list[AgentToolStep] = Field(default_factory=list)

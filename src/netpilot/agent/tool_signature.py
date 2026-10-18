@@ -7,8 +7,11 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
-def canonical_tool_signature(tool_name: str, arguments: dict[str, Any]) -> str:
-    """Return ``tool_name + canonical JSON`` for already validated arguments.
+def canonical_tool_signature(
+    tool_name: str, arguments: dict[str, Any], *, target_subject: str = "unknown",
+    target_version: int = 1, execution_scope: str | None = None,
+) -> str:
+    """Return subject/version + tool_name + canonical JSON for validated calls.
 
     Pydantic input models supply defaults before this function is called.  The
     remaining normalization makes semantically identical hosts, URLs and RAG
@@ -23,7 +26,8 @@ def canonical_tool_signature(tool_name: str, arguments: dict[str, Any]) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-    return f"{name}:{payload}"
+    namespace = "target_neutral:v1" if execution_scope == "target_neutral" or name == "knowledge_search" else f"{target_subject}:v{target_version}"
+    return f"{namespace}:{name}:{payload}"
 
 
 def _normalize_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:

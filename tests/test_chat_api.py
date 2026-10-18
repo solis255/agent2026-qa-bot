@@ -93,7 +93,8 @@ def test_chat_api_returns_structured_timeline_and_sources() -> None:
     assert body["session_id"] == session_id
     assert body["diagnosis"]["status"] == "completed"
     assert body["diagnosis"]["evidence"] == [
-        {"tool": "dns_lookup", "status": "abnormal", "summary": "域名解析失败"}
+        {"tool": "dns_lookup", "status": "abnormal", "summary": "域名解析失败",
+         "target_subject":"mock_client", "target_version":1, "execution_context":"mock_provider", "execution_scope":"mock_target"}
     ]
     tool = body["tool_calls"][0]
     assert tool["tool_call_id"] == "call_dns_web"

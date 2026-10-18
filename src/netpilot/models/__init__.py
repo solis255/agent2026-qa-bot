@@ -2,6 +2,8 @@
 
 from netpilot.models.schemas import (
     BrowserEnvironmentRequest,
+    DiagnosticTargetRequest,
+    DiagnosticTarget,
     UserEnvironmentRequest,
     EnvironmentProfile,
     ChatRequest,
@@ -29,6 +31,8 @@ from netpilot.models.schemas import (
 
 __all__ = [
     "BrowserEnvironmentRequest",
+    "DiagnosticTargetRequest",
+    "DiagnosticTarget",
     "UserEnvironmentRequest",
     "EnvironmentProfile",
     "ChatRequest",

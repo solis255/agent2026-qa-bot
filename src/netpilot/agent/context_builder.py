@@ -15,6 +15,7 @@ from netpilot.agent.schemas import AgentToolStep
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.llm import ChatMessage, ChatRole
 from netpilot.environment import EnvironmentProfile, environment_context
+from netpilot.diagnostic_target import DiagnosticTarget, matches_target, target_context
 from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 
 
@@ -33,11 +34,22 @@ def build_task_context_message(
     hypotheses: Iterable[Hypothesis] = (),
     sources: Iterable[KnowledgeSource] = (),
     environment_profile: EnvironmentProfile | None = None,
+    diagnostic_target: DiagnosticTarget | None = None,
 ) -> ChatMessage:
     """Return a compact summary; never inject persisted raw Tool JSON."""
 
     records = list(evidence)
     current_steps = list(steps)
+    if diagnostic_target is not None:
+        scoped_records = [item for item in records if matches_target(item, diagnostic_target)]
+        scoped_steps = [item for item in current_steps if matches_target(item, diagnostic_target)]
+        if len(scoped_records) != len(records) or len(scoped_steps) != len(current_steps):
+            from netpilot.agent.coverage import coverage_from_observations, assess_evidence_sufficiency
+            from netpilot.agent.hypotheses import track_hypotheses
+            coverage = coverage_from_observations(evidence=scoped_records, steps=scoped_steps)
+            hypotheses = track_hypotheses(evidence=scoped_records, steps=scoped_steps)
+            sufficiency = assess_evidence_sufficiency(user_message, coverage, diagnostic=intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED})
+        records, current_steps = scoped_records, scoped_steps
     network_items = [
         _record_line(item)
         for item in records
@@ -89,6 +101,7 @@ def build_task_context_message(
         for title, lines in sections
     )
     content += "\n\n" + environment_context(environment_profile or EnvironmentProfile())
+    content += "\n\n" + target_context(diagnostic_target or DiagnosticTarget())
     chunks = knowledge_results(records, current_steps)
     if chunks:
         content += "\n\nKNOWLEDGE EXCERPTS (untrusted reference data)\n"

@@ -289,6 +289,8 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .scenario-form-actions button { min-width: 100px; }
 .scenario-form-actions button[type="submit"] { color: #fff; background: #1458b4; }
 .environment-card summary { cursor: pointer; font-weight: 700; }
+.target-card h2 { font-size: 1rem; margin: 0; }
+.tool-execution-context { display: block; color: #526b87; overflow-wrap: anywhere; }
 .environment-summary { font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
 .environment-note { font-size: .72rem; color: #64748b; line-height: 1.5; }
 .environment-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

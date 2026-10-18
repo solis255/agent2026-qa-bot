@@ -8,6 +8,7 @@ from netpilot.agent import AgentResult, AgentToolStep
 from netpilot.agent.diagnosis import assess_diagnosis, step_status
 from netpilot.agent.evidence import json_data
 from netpilot.environment import EnvironmentProfile
+from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, binding_for, matches_target
 from netpilot.models import (
     ChatResponse,
     DiagnosisView,
@@ -20,20 +21,24 @@ from netpilot.models import (
 
 
 def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
-    tool_calls = [_present_tool_call(step) for step in result.steps]
-    assessment = assess_diagnosis(result.steps)
+    tool_calls = [_present_tool_call(step, result.diagnostic_target) for step in result.steps]
+    current_steps = [_scope_step(step, result.diagnostic_target) for step in result.steps]
+    assessment = assess_diagnosis([step for step in current_steps if result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(step, result.diagnostic_target)])
     evidence = [
         EvidenceView(
+            **{key:getattr(tool_call, key) for key in TargetBinding.model_fields},
             tool=tool_call.tool_name,
             status=tool_call.finding_status,
             summary=tool_call.summary,
         )
         for tool_call in tool_calls
         if tool_call.tool_name != "knowledge_search"
+        and (result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(tool_call, result.diagnostic_target))
     ]
     return ChatResponse(
         session_id=session_id,
         environment_profile=result.environment_profile or EnvironmentProfile(),
+        diagnostic_target=result.diagnostic_target or DiagnosticTarget(),
         answer=result.answer,
         diagnosis=DiagnosisView(
             status=result.status,
@@ -77,13 +82,22 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
     )
 
 
-def _present_tool_call(step: AgentToolStep) -> ToolCallView:
+def _scope_step(step: AgentToolStep, target: DiagnosticTarget | None = None) -> AgentToolStep:
+    if step.target_subject == "unknown" and target is not None and target.subject != "unknown":
+        scope = "target_neutral" if step.tool_name == "knowledge_search" else "mock_target" if target.execution_context == "mock_provider" else "execution_host"
+        step = step.model_copy(update=binding_for(target, scope))
+    return step
+
+
+def _present_tool_call(step: AgentToolStep, target: DiagnosticTarget | None = None) -> ToolCallView:
+    step = _scope_step(step, target)
     result = step.result
     data = json_data(result.data)
     error_code = None
     if result.error is not None:
         error_code = str(getattr(result.error.code, "value", result.error.code))
     return ToolCallView(
+        **{key:getattr(step, key) for key in TargetBinding.model_fields},
         round=step.round,
         tool_call_id=step.tool_call_id,
         evidence_id=step.evidence_id,

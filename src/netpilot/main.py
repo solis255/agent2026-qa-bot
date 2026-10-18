@@ -40,7 +40,7 @@ async def _validation_error_without_auth_secrets(
 ) -> Response:
     """Do not echo rejected auth/environment values (especially secrets)."""
 
-    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/")):
+    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target")):
         return await request_validation_exception_handler(request, exc)
     details = [
         {key: value for key, value in error.items() if key not in {"input", "ctx"}}
@@ -117,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_history_messages=app.state.settings.max_history_messages,
         max_sessions=app.state.settings.max_sessions,
         environment_client_mode="mock" if app.state.settings.tool_mode == ToolMode.MOCK else "remote_browser",
+        provider_kind=app.state.network_tools.provider_name,
         reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
     )
     # The Mock provider is shared mutable demo state. Serialize Agent runs with

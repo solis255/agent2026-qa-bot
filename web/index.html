@@ -146,6 +146,23 @@
           <p id="environment-status" class="environment-note" role="status" aria-live="polite"></p>
         </details>
 
+        <section class="status-card target-card" id="target-card">
+          <h2>诊断对象</h2>
+          <p id="target-summary" class="environment-summary" aria-live="polite">未记录 / 未明确</p>
+          <p id="target-capability" class="environment-note">直接检测能力：未知</p>
+          <form id="target-form" class="environment-form">
+            <label>选择对象<select id="target-subject" name="subject">
+              <option value="unknown" disabled>请选择</option>
+              <option value="user_client">当前浏览器设备</option>
+              <option value="netpilot_host">NetPilot 服务主机</option>
+              <option value="mock_client" disabled>Mock 模拟终端（只读）</option>
+            </select></label>
+            <button id="target-save" type="submit" disabled>切换对象</button>
+          </form>
+          <p class="environment-note">切换后，其他设备的旧检测证据不会用于当前结论。Mock 为模拟结果，不代表真实校园网络。</p>
+          <p id="target-status" class="environment-note" role="status" aria-live="polite"></p>
+        </section>
+
         <section class="status-card diagnosis-card" id="diagnosis-card">
           <div class="section-heading compact">
             <div>
