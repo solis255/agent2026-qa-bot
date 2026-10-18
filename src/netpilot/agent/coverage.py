@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Iterable, Sequence
 
@@ -113,12 +114,23 @@ def normalize_observations(
     for record in evidence:
         if getattr(record, "reusable", True) is False:
             continue
+        if getattr(record, "evidence_origin", "tool") == "client_snapshot":
+            expires = getattr(record, "expires_at", None)
+            if getattr(record, "stale", False) or getattr(record, "clock_skew_suspected", False) or (expires and datetime.now(timezone.utc) > expires):
+                continue
         data = getattr(record, "data", {})
+        arguments = dict(getattr(record, "arguments", {}))
+        # Internal semantic view only: preserve the measured target for hypothesis
+        # aggregation, without creating a Tool step or renaming stored Evidence.
+        if record.tool_name == "client_snapshot.dns_check":
+            arguments = {"domain": data.get("target")}
+        elif record.tool_name == "client_snapshot.tcp_connectivity":
+            arguments = {"host": data.get("target"), "port": data.get("port")}
         observations.append(
             Observation(
                 evidence_id=str(getattr(record, "evidence_id", "unknown")),
-                tool_name=str(record.tool_name),
-                arguments=dict(getattr(record, "arguments", {})),
+                tool_name={"client_snapshot.network_config":"get_network_info", "client_snapshot.dns_check":"dns_lookup", "client_snapshot.tcp_connectivity":"tcp_check"}.get(str(record.tool_name), str(record.tool_name)),
+                arguments=arguments,
                 status=str(record.status),
                 data=dict(data) if isinstance(data, dict) else {},
                 summary=str(getattr(record, "summary", "")),
@@ -176,6 +188,8 @@ def coverage_from_observations(
             coverage.path_checked = True
         elif item.tool_name == "knowledge_search":
             coverage.knowledge_checked = True
+        elif item.tool_name == "client_snapshot.gateway_reachability":
+            coverage.gateway_checked = True
     return coverage
 
 

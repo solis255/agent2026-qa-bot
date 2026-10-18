@@ -69,12 +69,24 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         last_turn = record.conversation_turns[-1]
         if (last_turn.target_subject, last_turn.target_version) != (target.subject, target.target_version):
             conclusion = "诊断对象已切换，尚无当前对象的直接检测结论；其他对象观察只保留于历史。"
+    from netpilot.client_snapshot.schemas import refresh_summary
+    summary = refresh_summary(record.client_snapshot_summary)
+    if summary:
+        summary.applicable = summary.applicable and target.subject == "user_client" and summary.target_version == target.target_version
+        if summary.applicable and summary.snapshot_id == record.analyzed_snapshot_id:
+            conclusion = record.diagnosis.summary
+    if summary and summary.applicable and summary.snapshot_id != record.analyzed_snapshot_id:
+        conclusion = "客户端快照已更新，尚待分析；旧快照结论不代表当前状态。"
+    if summary and summary.applicable and (summary.stale or summary.clock_skew_suspected):
+        conclusion = "快照已过期或疑似时钟偏差；以下仅为历史采集状态，不代表现在。\n\n" + conclusion
     return DiagnosisReportView(
         report_id=record.record_id,
         record_id=record.record_id,
         session_id=record.session_id,
         environment_profile=record.environment_profile,
         diagnostic_target=target,
+        client_snapshot_summary=summary,
+        client_evidence=record.client_evidence,
         generated_at=record.updated_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -189,6 +201,24 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         "## 检测证据",
         "",
     ]
+    if report.client_snapshot_summary:
+        snapshot = report.client_snapshot_summary
+        lines.extend([
+            "## 客户端诊断快照", "",
+            f"- 快照：{snapshot.snapshot_id} / 序号 {snapshot.snapshot_sequence}",
+            f"- 采集时间：{snapshot.generated_at.isoformat()}",
+            f"- 时效：{'已过期（历史）' if snapshot.stale else '疑似时钟偏差' if snapshot.clock_skew_suspected else '采集时点证据'}",
+            f"- 系统：Windows {_markdown_text(snapshot.os.version or '版本未知')}",
+            "- 来源：用户主动上传，未签名；非实时检测、非远程执行，不增加 Tool 调用次数。", "",
+        ])
+        from netpilot.client_snapshot.service import snapshot_answer
+        current_client = [item for item in report.client_evidence if not item.superseded and matches_target(item, report.diagnostic_target)]
+        if current_client:
+            lines.extend([_markdown_text(snapshot_answer(current_client, "report_request")), ""])
+        for item in report.client_evidence:
+            archived = item.superseded or not matches_target(item, report.diagnostic_target)
+            lines.append(f"- {'历史归档（不用于当前结论）' if archived else '采集证据'} / user_client v{item.target_version} / {_markdown_text(item.tool_name)} / {item.observed_at.isoformat()}：{_markdown_text(item.summary)}")
+        lines.extend(["", "## 网络与知识 Tool 调用", ""])
     if not report.tool_calls:
         lines.append("- 本次诊断没有调用网络或知识工具。")
     for index, tool in enumerate(report.tool_calls, start=1):

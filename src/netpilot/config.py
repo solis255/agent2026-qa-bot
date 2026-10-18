@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     max_rag_calls_per_turn: int = Field(default=2, ge=1, le=10)
     max_history_messages: int = Field(default=20, ge=1, le=200)
     max_sessions: int = Field(default=500, ge=1, le=10_000)
+    client_snapshot_max_bytes: int = Field(default=262144, ge=1024, le=1_048_576)
+    client_snapshot_freshness_minutes: int = Field(default=15, ge=1, le=1440)
     reasoning_trace_enabled: bool = True
     reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
     reasoning_summary_llm_enabled: bool = False

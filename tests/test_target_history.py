@@ -34,7 +34,7 @@ def test_dt12_history_report_switch_archive_and_chat_sse_match_after_restart(tmp
         assert "DNS 正常" not in response["answer"]
     repository = SQLiteDiagnosisRepository(tmp_path / "target.db")
     record = repository.get(owner,UUID(rid))
-    assert record.schema_version == 6 and repository.count(owner) == 1
+    assert record.schema_version == 7 and repository.count(owner) == 1
     assert record.turn_count == len(record.conversation_turns) == 2
     assert record.diagnostic_target.subject == "user_client"
     assert record.tool_calls[0].target_subject == "netpilot_host"  # Archive preserved.
@@ -52,7 +52,7 @@ def test_dt12_history_report_switch_archive_and_chat_sse_match_after_restart(tmp
     assert counts["dns_lookup"] == 1
 
 
-@pytest.mark.parametrize("version", [1,2,3,4,5])
+@pytest.mark.parametrize("version", [1,2,3,4,5,6])
 def test_dt13_legacy_defaults_do_not_infer_target_from_old_network_tools(tmp_path,version):
     app,_ = local_app(tmp_path)
     with TestClient(app) as client:

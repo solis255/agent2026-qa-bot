@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-18T04:00:00Z",
+  "client": {"client_instance_id": "8e228724-916a-4c0a-8658-ecbbdf883186", "hostname": null},
+  "os": {"family": "windows", "version": "10.0.26100", "build": "26100", "architecture": "x64"},
+  "adapters": [{"adapter_id": "if-1", "name": "if-1", "interface_alias": null, "status": "up", "interface_type": "wifi", "ipv4_addresses": ["192.168.10.20"], "ipv6_addresses": [], "has_default_gateway": true}],
+  "active_adapter_id": "if-1",
+  "default_gateway": "192.168.10.1",
+  "dns_servers": ["192.168.10.1"],
+  "dns_servers_scope": "active_adapter",
+  "connection_profile": {"network_category": "private", "ipv4_connectivity": "Internet", "ipv6_connectivity": "NoTraffic"},
+  "proxy": {"winhttp_proxy_enabled": false, "winhttp_proxy": null},
+  "route_summary": [{"destination": "0.0.0.0/0", "next_hop": "192.168.10.1", "interface_id": "if-1", "metric": 25}],
+  "checks": [
+    {"check_id": "dns-tju", "type": "dns", "target": "www.tju.edu.cn", "status": "normal", "latency_ms": 12.5, "result": {"addresses": ["192.0.2.10"]}},
+    {"check_id": "dns-baidu", "type": "dns", "target": "www.baidu.com", "status": "normal", "latency_ms": 8.0, "result": {"addresses": ["192.0.2.11"]}},
+    {"check_id": "gateway", "type": "gateway_reachability", "target": "192.168.10.1", "status": "normal", "latency_ms": 3.0, "result": {"reachable": true}},
+    {"check_id": "tcp-443", "type": "tcp_connectivity", "target": "1.1.1.1", "status": "normal", "latency_ms": 20.0, "result": {"reachable": true, "port": 443}}
+  ],
+  "redaction": {"hostname_redacted": true, "mac_removed": true, "ssid_removed": true, "secrets_removed": true}
+}

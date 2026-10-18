@@ -85,6 +85,7 @@ def health(request: Request) -> HealthResponse:
     llm_client: TJUClient = request.app.state.llm_client
     return HealthResponse(
         reasoning_trace_max_steps=settings.reasoning_trace_max_steps,
+        client_snapshot_max_bytes=settings.client_snapshot_max_bytes,
         llm_configured=llm_client.configured,
         tool_mode=settings.tool_mode,
         rag_ready=bool(request.app.state.rag_ready),
@@ -123,6 +124,8 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
             session_id=session_id, created_at=snapshot.created_at,
             environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
             diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
+            client_snapshot_summary=_sessions(request).task_state(session_id, user.id).client_snapshot_summary,
+            client_evidence=[item for item in _sessions(request).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
@@ -188,6 +191,12 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     response = present_chat(payload.session_id, result)
     response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
     response.diagnostic_target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
+    task = _sessions(request).task_state(payload.session_id, owner_id)
+    response.client_snapshot_summary = task.client_snapshot_summary
+    response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
+    if result.reused_evidence_ids and result.response_mode is not None and result.response_mode.value in {"diagnostic", "analysis", "report"}:
+        from netpilot.client_snapshot.service import apply_snapshot_diagnosis
+        apply_snapshot_diagnosis(response, task.reusable_evidence())
     return _persist_session_diagnosis(request, owner_id, payload.message, response)
 
 

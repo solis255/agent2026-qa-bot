@@ -118,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_sessions=app.state.settings.max_sessions,
         environment_client_mode="mock" if app.state.settings.tool_mode == ToolMode.MOCK else "remote_browser",
         provider_kind=app.state.network_tools.provider_name,
+        reasoning_trace_enabled=app.state.settings.reasoning_trace_enabled,
         reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
     )
     # The Mock provider is shared mutable demo state. Serialize Agent runs with
@@ -128,6 +129,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(api_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
+    from netpilot.api.client_snapshot_routes import router as snapshot_router
+    app.include_router(snapshot_router)
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 

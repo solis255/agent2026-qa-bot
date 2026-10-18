@@ -163,6 +163,21 @@
           <p id="target-status" class="environment-note" role="status" aria-live="polite"></p>
         </section>
 
+        <section class="status-card snapshot-card" id="snapshot-card">
+          <h2>客户端诊断快照</h2>
+          <p class="environment-note">Windows 10/11：下载并检查脚本，在本机 Windows PowerShell 以普通用户手动运行，生成 netpilot-client-diagnostic.json，再主动上传。无需管理员权限；不修改网络，不自动执行或上传。</p>
+          <a href="/static/scripts/client_diagnostic_windows.ps1" download="client_diagnostic_windows.ps1">下载只读 Windows 脚本</a>
+          <p class="environment-note">运行：<code>.\client_diagnostic_windows.ps1</code>。如本机策略不允许运行，请按本单位规定处理；不要为演示降低执行策略。</p>
+          <form id="snapshot-form">
+            <label for="snapshot-file">选择 JSON（默认上限 256 KiB）</label>
+            <input id="snapshot-file" name="file" type="file" accept=".json,application/json" disabled>
+            <button id="snapshot-upload" type="submit" disabled>上传 / 替换快照</button>
+          </form>
+          <p id="snapshot-summary" class="environment-summary" aria-live="polite">尚未导入</p>
+          <p id="snapshot-status" class="environment-note" role="status"></p>
+          <ul id="snapshot-evidence" class="environment-note"></ul>
+        </section>
+
         <section class="status-card diagnosis-card" id="diagnosis-card">
           <div class="section-heading compact">
             <div>

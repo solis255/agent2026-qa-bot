@@ -8,6 +8,8 @@ const state = {
   sessionId: null,
   environmentProfile: null,
   diagnosticTarget: null,
+  clientSnapshotSummary: null,
+  clientEvidence: [],
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -22,6 +24,12 @@ const state = {
 };
 
 const elements = {
+  snapshotForm: document.querySelector("#snapshot-form"),
+  snapshotFile: document.querySelector("#snapshot-file"),
+  snapshotUpload: document.querySelector("#snapshot-upload"),
+  snapshotSummary: document.querySelector("#snapshot-summary"),
+  snapshotStatus: document.querySelector("#snapshot-status"),
+  snapshotEvidence: document.querySelector("#snapshot-evidence"),
   targetForm: document.querySelector("#target-form"),
   targetSummary: document.querySelector("#target-summary"),
   targetCapability: document.querySelector("#target-capability"),
@@ -162,6 +170,9 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  const snapshotDisabled = busy || !state.user || !state.sessionId || state.viewingHistory || state.diagnosticTarget?.subject !== "user_client" || state.diagnosticTarget?.relationship_to_netpilot !== "remote";
+  elements.snapshotFile.disabled = snapshotDisabled;
+  elements.snapshotUpload.disabled = snapshotDisabled;
   for (const control of elements.targetForm.querySelectorAll("select, button")) {
     control.disabled = busy || !state.user || !state.sessionId || state.viewingHistory || state.diagnosticTarget?.subject === "mock_client";
   }
@@ -216,7 +227,7 @@ async function requestJSON(url, options = {}, timeoutMs = 15000) {
       signal: controller.signal,
       headers: {
         Accept: "application/json",
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.body && !(typeof FormData !== "undefined" && options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
         ...(options.headers || {}),
       },
     });
@@ -364,6 +375,8 @@ function showAuthGate(message = "请先登录或注册。") {
   state.sessionId = null;
   state.environmentProfile = null;
   state.diagnosticTarget = null;
+  state.clientSnapshotSummary = null;
+  state.clientEvidence = [];
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -568,6 +581,8 @@ function resetConversation() {
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
   renderDiagnosticTarget(state.diagnosticTarget);
+  renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+  elements.snapshotFile.value = "";
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -679,10 +694,63 @@ const EXECUTION_LABELS = {netpilot_host:"NetPilot 服务主机",mock_provider:"M
 function renderDiagnosticTarget(target, {historical = false} = {}) {
   const t = target || {};
   elements.targetSummary.textContent = `${historical ? "历史对象：" : ""}${TARGET_LABELS[t.subject] || TARGET_LABELS.unknown}${t.relationship_to_netpilot === "remote" ? "（远程）" : ""}`;
-  const capability = t.limitation_code === "none" ? t.subject === "mock_client" ? "模拟可用" : "可用" : "受限 / 未记录";
+  const capability = t.limitation_code === "client_snapshot_available" ? "采集时点证据可用，实时直接检测仍受限" : t.limitation_code === "none" ? t.subject === "mock_client" ? "模拟可用" : "可用" : "受限 / 未记录";
   elements.targetCapability.textContent = `直接检测能力：${capability}；网络工具执行位置：${EXECUTION_LABELS[t.execution_context] || EXECUTION_LABELS.unavailable}`;
   elements.targetSubject.value = t.subject || "unknown";
   elements.targetStatus.textContent = historical ? "历史快照只读，不会改变当前 Session 对象。" : t.subject === "mock_client" ? "Mock 模拟终端由系统管理。" : t.subject === "netpilot_host" ? "检测结果只描述 NetPilot 服务主机，不代表浏览器设备。" : "本机网络工具运行在服务主机，不会将服务主机结果当作此设备结果；当前尚不能直接读取远程客户端 DNS、网关和路由。";
+}
+
+function renderClientSnapshot(summary, evidence = [], {historical = false, target = state.diagnosticTarget} = {}) {
+  elements.snapshotEvidence.replaceChildren();
+  const inScope = summary && summary.applicable !== false && target?.subject === "user_client" && summary.target_version === target.target_version;
+  if (!summary) {
+    elements.snapshotSummary.textContent = "尚未导入";
+    elements.snapshotStatus.textContent = "快照只用于远程当前浏览器设备；不会解除服务主机工具限制。";
+    return;
+  }
+  const stale = summary.stale || Date.now() > Date.parse(summary.expires_at);
+  const timing = stale ? "已过期（历史证据）" : summary.clock_skew_suspected ? "疑似时钟偏差" : "已导入（采集时点证据）";
+  elements.snapshotSummary.textContent = `${historical ? "历史快照：" : ""}${timing} · Windows ${summary.os?.version || "版本未知"} · ${summary.active_interface_type || "接口未知"} · #${summary.snapshot_sequence} · ${summary.evidence_count} 条证据`;
+  elements.snapshotStatus.textContent = `采集时间：${formatHistoryTime(summary.generated_at)}。${!inScope ? "其他对象/版本的历史快照，不用于当前结论。" : "非实时远程检测；上传会替换当前快照，旧证据保留归档。"}${historical ? "当前为只读历史。" : ""}`;
+  for (const item of evidence.filter((item) => item.snapshot_id === summary.snapshot_id)) {
+    const line = document.createElement("li");
+    line.textContent = `${item.tool_name} [${item.status}]：${item.summary}`;
+    elements.snapshotEvidence.append(line);
+  }
+}
+
+async function uploadClientSnapshot(event) {
+  event.preventDefault();
+  if (!state.user || !state.sessionId || state.busy || state.viewingHistory || state.diagnosticTarget?.subject !== "user_client" || state.diagnosticTarget?.relationship_to_netpilot !== "remote") return;
+  const file = elements.snapshotFile.files?.[0];
+  if (!file || !file.name.toLowerCase().endsWith(".json") || file.size > (state.health?.client_snapshot_max_bytes || 262144)) {
+    elements.snapshotStatus.textContent = "请选择符合大小限制的 .json 文件。";
+    return;
+  }
+  const epoch = state.authEpoch, sessionId = state.sessionId;
+  const form = new FormData();
+  form.append("session_id", sessionId);
+  form.append("file", file);
+  setBusy(true);
+  try {
+    const result = await requestJSON("/api/session/client-snapshot", {method:"POST", body:form});
+    if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
+    state.clientSnapshotSummary = result.client_snapshot_summary;
+    state.clientEvidence = result.client_evidence || [];
+    state.environmentProfile = result.environment_profile;
+    state.diagnosticTarget = result.diagnostic_target;
+    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+    renderEnvironmentProfile(state.environmentProfile);
+    renderDiagnosticTarget(state.diagnosticTarget);
+    appendTurnReasoningTrace(result.reasoning_trace || []);
+    if (!result.duplicate) renderDiagnosis(null);
+    elements.snapshotFile.value = "";
+    elements.snapshotStatus.textContent += result.duplicate ? " 相同快照，未重复创建证据或轨迹。" : " 上传成功，可继续提问分析。";
+  } catch (error) {
+    if (state.authEpoch === epoch && state.sessionId === sessionId) elements.snapshotStatus.textContent = error.message;
+  } finally {
+    if (state.authEpoch === epoch) setBusy(false);
+  }
 }
 
 async function saveDiagnosticTarget(event) {
@@ -697,6 +765,8 @@ async function saveDiagnosticTarget(event) {
     const changed = state.diagnosticTarget?.target_version !== target.target_version;
     state.diagnosticTarget = target;
     renderDiagnosticTarget(target);
+    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+    elements.snapshotFile.value = "";
     if (changed) { renderDiagnosis(null); renderTools([]); }
     elements.targetStatus.textContent = "诊断对象已保存；其他对象的旧检测仅保留于历史，不参与当前结论。";
   } catch (error) {
@@ -727,6 +797,8 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.sessionId = session.session_id;
     state.environmentProfile = session.environment_profile || null;
     state.diagnosticTarget = session.diagnostic_target || null;
+    state.clientSnapshotSummary = session.client_snapshot_summary || null;
+    state.clientEvidence = session.client_evidence || [];
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
@@ -1005,6 +1077,8 @@ async function loadDiagnosisRecord(recordId) {
     state.viewingHistory = true;
     renderEnvironmentProfile(record.environment_profile, { historical: true });
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
+    renderClientSnapshot(record.client_snapshot_summary, record.client_evidence || [], {historical:true, target:record.diagnostic_target});
+    elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
       appendMessage("user", turn.user_message);
@@ -1037,6 +1111,7 @@ async function submitChat(event) {
   renderEnvironmentProfile(state.environmentProfile);
   appendMessage("user", message);
   renderDiagnosticTarget(state.diagnosticTarget);
+  renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
   const streamedAnswer = appendMessage("assistant", "");
   streamedAnswer.classList.add("is-streaming");
   elements.messageInput.value = "";
@@ -1065,6 +1140,9 @@ async function submitChat(event) {
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
     if (response.environment_profile) state.environmentProfile = response.environment_profile;
     if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
+    state.clientSnapshotSummary = response.client_snapshot_summary || null;
+    state.clientEvidence = response.client_evidence || [];
+    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
@@ -1094,8 +1172,10 @@ function formatReportPreview(report) {
   const diagnosis = report.diagnosis || {};
   const metrics = report.metrics || {};
   const usage = metrics.token_usage || {};
+  const snapshot = report.client_snapshot_summary;
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
+    ...(snapshot ? [`客户端诊断快照：#${snapshot.snapshot_sequence}，${formatHistoryTime(snapshot.generated_at)}，${snapshot.stale || Date.now() > Date.parse(snapshot.expires_at) ? "已过期（历史）" : snapshot.clock_skew_suspected ? "疑似时钟偏差" : "采集时点证据"}，非远程执行。`, ...(report.client_evidence || []).map(item => `${item.superseded ? "历史归档" : "采集证据"}：${item.summary}`)] : []),
     `用户环境：${formatEnvironmentSummary(report.environment_profile)}`,
     `诊断对象：${TARGET_LABELS[report.diagnostic_target?.subject] || TARGET_LABELS.unknown}；执行位置：${EXECUTION_LABELS[report.diagnostic_target?.execution_context] || EXECUTION_LABELS.unavailable}`,
     "",
@@ -1268,6 +1348,8 @@ async function activateScenario(scenario) {
   state.sessionId = response.session_id;
   state.environmentProfile = response.environment_profile || null;
   state.diagnosticTarget = response.diagnostic_target || null;
+  state.clientSnapshotSummary = null;
+  state.clientEvidence = [];
   window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   elements.scenarioSelect.value = response.current;
@@ -1382,6 +1464,8 @@ async function deleteCurrentCustomScenario() {
       state.sessionId = response.session_id;
       state.environmentProfile = response.environment_profile || null;
       state.diagnosticTarget = response.diagnostic_target || null;
+      state.clientSnapshotSummary = null;
+      state.clientEvidence = [];
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
@@ -1428,6 +1512,12 @@ elements.myHistory.addEventListener("click", async () => {
 elements.chatForm.addEventListener("submit", submitChat);
 elements.targetForm.addEventListener("submit", saveDiagnosticTarget);
 elements.environmentForm.addEventListener("submit", saveEnvironment);
+elements.snapshotForm.addEventListener("submit", uploadClientSnapshot);
+window.setInterval?.(() => {
+  if (state.user && state.clientSnapshotSummary && !state.viewingHistory && !state.busy) {
+    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+  }
+}, 30000);
 elements.environmentForm.addEventListener("change", (event) => {
   if (event.target.name) state.environmentTouched.add(event.target.name);
 });

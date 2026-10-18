@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
+from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -45,6 +46,13 @@ class EvidenceRecord(TargetBinding):
     task_version: int = Field(default=1, ge=1)
     reusable: bool = True
     superseded: bool = False
+    evidence_origin: Literal["tool", "client_snapshot", "user", "knowledge"] = "tool"
+    snapshot_id: str | None = None
+    snapshot_sequence: int | None = None
+    ingested_at: datetime | None = None
+    expires_at: datetime | None = None
+    stale: bool = False
+    clock_skew_suspected: bool = False
 
 
 class SessionTaskState(BaseModel):
@@ -71,10 +79,15 @@ class SessionTaskState(BaseModel):
     task_version: int = Field(default=1, ge=1)
     turn_index: int = Field(default=0, ge=0)
     reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    client_snapshot_summary: ClientSnapshotSummary | None = None
+    client_snapshot_id: str | None = None
+    snapshot_sequence: int = 0
+    pending_snapshot_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
     def reusable_evidence(self) -> list[EvidenceRecord]:
+        now = datetime.now(timezone.utc)
         return [
-            record
+            record.model_copy(update={"stale": now > record.expires_at}) if record.expires_at else record
             for record in self.evidence
             if record.reusable
             and not record.superseded
@@ -89,6 +102,10 @@ class SessionTaskState(BaseModel):
             if record.task_version == self.task_version:
                 record.superseded = True
         self.task_version += 1
+        if self.client_snapshot_summary:
+            self.client_snapshot_summary.applicable = False
+        if self.diagnostic_target.limitation_code == "client_snapshot_available":
+            self.diagnostic_target.limitation_code = "remote_client_not_directly_observable"
         self.executed_tool_signatures.clear()
         self.coverage = DiagnosticCoverage()
         self.hypotheses.clear()
@@ -97,7 +114,12 @@ class SessionTaskState(BaseModel):
     def set_target(self, target: DiagnosticTarget) -> None:
         self.diagnostic_target = target.model_copy(deep=True)
         active = self.reusable_evidence()
-        self.executed_tool_signatures = {item.tool_signature for item in active}
+        has_snapshot = any(item.evidence_origin == "client_snapshot" for item in active)
+        if self.client_snapshot_summary:
+            self.client_snapshot_summary.applicable = has_snapshot
+        if not has_snapshot and self.diagnostic_target.limitation_code == "client_snapshot_available":
+            self.diagnostic_target.limitation_code = "remote_client_not_directly_observable"
+        self.executed_tool_signatures = {item.tool_signature for item in active if item.evidence_origin in {"tool", "knowledge"}}
         from netpilot.agent.coverage import coverage_from_observations
         from netpilot.agent.hypotheses import track_hypotheses
         self.coverage = coverage_from_observations(evidence=active)
@@ -151,4 +173,5 @@ def evidence_from_step(
         turn_index=turn_index,
         task_version=task_version,
         reusable=bool(step.result.success),
+        evidence_origin="knowledge" if step.tool_name == "knowledge_search" else "tool",
     )

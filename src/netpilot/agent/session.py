@@ -18,6 +18,7 @@ from netpilot.agent.intent import TurnIntent
 from netpilot.agent.schemas import AgentResult
 from netpilot.agent.task_state import SessionTaskState, evidence_from_step
 from netpilot.agent.reasoning_trace import merge_reasoning_trace
+from netpilot.client_snapshot.schemas import refresh_summary
 from netpilot.llm import ChatMessage, ChatRole
 from netpilot.environment import ClientMode, EnvironmentProfile, EnvironmentSource, initial_environment, merge_environment
 from netpilot.diagnostic_target import DiagnosticTarget, ProviderKind, derive_diagnostic_target, merge_diagnostic_target, user_target, binding_for
@@ -70,6 +71,7 @@ class SessionStore:
         max_sessions: int = 500,
         max_evidence_records: int = 200,
         reasoning_trace_max_steps: int = 50,
+        reasoning_trace_enabled: bool = True,
         environment_client_mode: ClientMode = "unknown",
         provider_kind: ProviderKind = "unavailable",
     ) -> None:
@@ -83,6 +85,7 @@ class SessionStore:
         self.max_sessions = max_sessions
         self.max_evidence_records = max_evidence_records
         self.reasoning_trace_max_steps = reasoning_trace_max_steps
+        self.reasoning_trace_enabled = reasoning_trace_enabled
         self.environment_client_mode = environment_client_mode
         self.provider_kind = provider_kind
         self._sessions: dict[UUID, SessionState] = {}
@@ -168,7 +171,7 @@ class SessionStore:
                         task_state.last_target_limit_version = target.target_version
                 task_state.reasoning_trace = merge_reasoning_trace(
                     task_state.reasoning_trace,
-                    [step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
+                    [step if step.event_origin == "client_snapshot" else step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
                     self.reasoning_trace_max_steps,
                 )
                 for step in result.steps:
@@ -207,6 +210,7 @@ class SessionStore:
                 )
             # Persist under this lock, so a PATCH cannot race a completed Turn.
             response = after_finish() if after_finish is not None else None
+            task_state.pending_snapshot_trace.clear()
             state.busy = False
             state.updated_at = datetime.now(timezone.utc)
             return response
@@ -232,7 +236,42 @@ class SessionStore:
 
         with self._lock:
             state = self._require(session_id, owner_user_id)
-            return _task_state(state).model_copy(deep=True)
+            task = _task_state(state).model_copy(deep=True)
+            task.client_snapshot_summary = refresh_summary(task.client_snapshot_summary)
+            now = datetime.now(timezone.utc)
+            for item in task.evidence:
+                if item.expires_at:
+                    item.stale = now > item.expires_at
+            return task
+
+    def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None):
+        """Atomic owner-scoped import. A snapshot is not an Agent Turn/Tool Call."""
+        from netpilot.client_snapshot.service import normalize_snapshot
+        with self._lock:
+            state = self._require(session_id, owner_user_id)
+            if state.busy:
+                raise SessionBusyError(str(session_id))
+            current = _task_state(state)
+            target = current.diagnostic_target
+            if target.subject != "user_client" or target.relationship_to_netpilot != "remote" or self.provider_kind == "mock":
+                raise ValueError("snapshot_requires_remote_user_client")
+            summary = current.client_snapshot_summary
+            if summary and summary.snapshot_digest == digest and summary.target_version == target.target_version and summary.task_version == current.task_version:
+                return self.task_state(session_id, owner_user_id), True, []
+            draft = current.model_copy(deep=True)
+            records, events = normalize_snapshot(snapshot, digest, draft, freshness_minutes=freshness_minutes, trace_enabled=self.reasoning_trace_enabled)
+            # Preserve replaced snapshot observations for audit while bounding memory.
+            # Reserve some slots for actual Tool evidence; reject rather than lose audit.
+            if sum(item.evidence_origin == "client_snapshot" for item in draft.evidence) > max(1, self.max_evidence_records * 4 // 5):
+                raise SessionCapacityError("snapshot_archive_full")
+            draft.reasoning_trace = merge_reasoning_trace([], draft.reasoning_trace, self.reasoning_trace_max_steps)
+            persisted = persist(draft) if persist is not None else False
+            if not persisted:
+                draft.pending_snapshot_trace.extend(events)
+            state.task_state = draft
+            self._trim_evidence(draft)
+            state.updated_at = datetime.now(timezone.utc)
+            return self.task_state(session_id, owner_user_id), False, events
 
     def update_environment(
         self, session_id: UUID, owner_user_id: UUID, values: dict, *,
@@ -297,8 +336,9 @@ class SessionStore:
     def _trim_evidence(self, task_state: SessionTaskState) -> None:
         overflow = len(task_state.evidence) - self.max_evidence_records
         if overflow > 0:
-            del task_state.evidence[:overflow]
-        task_state.executed_tool_signatures = {record.tool_signature for record in task_state.reusable_evidence()}
+            removable = [item.evidence_id for item in task_state.evidence if item.evidence_origin != "client_snapshot"][:overflow]
+            task_state.evidence = [item for item in task_state.evidence if item.evidence_id not in removable]
+        task_state.executed_tool_signatures = {record.tool_signature for record in task_state.reusable_evidence() if record.evidence_origin in {"tool", "knowledge"}}
 
 
 def _snapshot(state: SessionState) -> SessionSnapshot:

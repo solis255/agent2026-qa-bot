@@ -136,6 +136,10 @@ class AgentOrchestrator:
         if task_state is not None:
             task_state = task_state.model_copy(deep=True)
             task_state.set_target(target)
+            from netpilot.client_snapshot.service import snapshot_evidence
+            if snapshot_evidence(task_state) and target.subject == "user_client" and target.relationship_to_netpilot == "remote":
+                target.limitation_code = "client_snapshot_available"
+                task_state.set_target(target)
         if (initial_target.subject, initial_target.target_version) != (target.subject, target.target_version):
             history = ()
         trace = ReasoningTraceBuilder(
@@ -148,6 +152,8 @@ class AgentOrchestrator:
             user_message, history=history, task_state=task_state,
             history_context=history_context, trace=trace, environment=environment, target=target,
         )
+        if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
+            target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
         if self.reasoning_summary_llm_enabled:
             result = trace.optional_summary(self.llm, result)
@@ -156,7 +162,8 @@ class AgentOrchestrator:
             or any(step.execution_scope != "target_neutral" for step in result.steps)
         ):
             result = result.model_copy(update={"answer":scoped_answer(result.answer, target)})
-        return result.model_copy(update={"reasoning_trace": list(trace.steps), "environment_profile": environment, "diagnostic_target":target})
+        pending = task_state.pending_snapshot_trace if task_state is not None else []
+        return result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target})
 
     def _run_turn(
         self, user_message: str, *, history: Sequence[ChatMessage],
@@ -200,7 +207,8 @@ class AgentOrchestrator:
             classification,
             blocked_signatures=set(existing_evidence),
         )
-        capabilities = evaluate_target_capabilities(target, self.registry.provider_kind)
+        client_records = [item for item in existing_records if item.evidence_origin == "client_snapshot"]
+        capabilities = evaluate_target_capabilities(target, self.registry.provider_kind, has_client_snapshot_evidence=bool(client_records))
         policy.target_capability = capabilities
         policy.allow_network_tools = policy.allow_network_tools and (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools)
         steps: list[AgentToolStep] = []
@@ -246,6 +254,12 @@ class AgentOrchestrator:
                 trace.append("decision", "限制不适用的检测", "当前是 Mock Provider，不能检测真实 NetPilot 服务主机；不会用模拟结果冒充主机检测。")
                 return AgentResult(answer="当前为 Mock 模拟终端，不能检测真实 NetPilot 服务主机。请在服务端启用 Local Provider 后选择服务主机。", status=AgentStatus.COMPLETED, tool_rounds=0, **result_metadata)
             if not (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools):
+                if capabilities.can_use_client_snapshot_evidence:
+                    from netpilot.client_snapshot.service import snapshot_answer
+                    trace.append("decision", "分析客户端快照", "复用当前对象与任务版本的用户上传快照；按采集时间解释，不执行服务主机网络工具。", evidence_ids=[item.evidence_id for item in client_records])
+                    return AgentResult(answer=snapshot_answer(client_records, classification.intent.value),
+                                       reused_evidence_ids=[item.evidence_id for item in client_records],
+                                       status=AgentStatus.COMPLETED, tool_rounds=0, **result_metadata)
                 if (task_state.last_target_limit_version if task_state else 0) != target.target_version:
                     trace.append("decision", "限制不适用的检测", "当前诊断对象不能被现有网络 Provider 直接观察；已阻止服务主机网络工具，不会创建客户端检测证据。")
                 if target.subject == "unknown":

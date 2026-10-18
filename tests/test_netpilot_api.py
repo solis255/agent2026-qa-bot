@@ -30,6 +30,7 @@ def test_health_reports_milestone_one_readiness() -> None:
         "rag_ready": False,
         "history_ready": False,
         "reasoning_trace_max_steps": 50,
+        "client_snapshot_max_bytes": 262144,
     }
     assert secret not in response.text
     assert "api_key" not in response.text.lower()

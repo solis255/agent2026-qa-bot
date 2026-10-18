@@ -15,7 +15,7 @@ ProviderKind = Literal["local", "mock", "unavailable"]
 TargetSource = Literal["user", "environment", "system", "mock", "inferred"]
 TARGET_PRECEDENCE = {"inferred": 0, "system": 1, "environment": 2, "mock": 3, "user": 4}
 SUBJECT_LABELS = {"user_client":"当前浏览器设备", "netpilot_host":"NetPilot 服务主机", "mock_client":"Mock 模拟终端", "unknown":"未记录 / 未明确"}
-EXECUTION_LABELS = {"netpilot_host":"NetPilot 服务主机", "mock_provider":"Mock Provider", "unavailable":"不可用 / 未记录"}
+EXECUTION_LABELS = {"netpilot_host":"NetPilot 服务主机", "mock_provider":"Mock Provider", "unavailable":"不可用 / 未记录", "user_client_snapshot":"用户上传的采集时点快照"}
 RELATIONSHIP_LABELS = {"same_host":"同一主机", "remote":"远程", "simulated":"模拟", "unknown":"未知"}
 
 
@@ -27,7 +27,7 @@ class DiagnosticTarget(BaseModel):
     source: TargetSource = "system"
     confidence: Literal["high", "medium", "low"] = "low"
     target_version: int = Field(default=1, ge=1, strict=True)
-    limitation_code: Literal["none", "remote_client_not_directly_observable", "unknown_target", "provider_target_mismatch"] = "unknown_target"
+    limitation_code: Literal["none", "remote_client_not_directly_observable", "unknown_target", "provider_target_mismatch", "client_snapshot_available"] = "unknown_target"
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -35,8 +35,8 @@ class TargetBinding(BaseModel):
     """Unknown defaults read legacy data without inventing an observation site."""
     target_subject: TargetSubject = "unknown"
     target_version: int = Field(default=1, ge=1, strict=True)
-    execution_context: ExecutionContext = "unavailable"
-    execution_scope: ExecutionScope = "execution_host"
+    execution_context: Literal["netpilot_host", "mock_provider", "unavailable", "user_client_snapshot"] = "unavailable"
+    execution_scope: Literal["execution_host", "target_neutral", "mock_target", "client_snapshot"] = "execution_host"
 
 
 def legacy_target() -> DiagnosticTarget:

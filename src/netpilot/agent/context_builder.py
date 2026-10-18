@@ -53,7 +53,7 @@ def build_task_context_message(
     network_items = [
         _record_line(item)
         for item in records
-        if item.tool_name != "knowledge_search"
+        if item.tool_name != "knowledge_search" and item.evidence_origin != "client_snapshot"
     ] + [
         _step_line(item)
         for item in current_steps
@@ -83,7 +83,7 @@ def build_task_context_message(
         if item.status in {"possible", "supported"}
     ]
     executed = _unique(
-        [_record_execution(item) for item in records]
+        [_record_execution(item) for item in records if item.evidence_origin != "client_snapshot"]
         + [_step_execution(item) for item in current_steps]
     )
 
@@ -102,6 +102,8 @@ def build_task_context_message(
     )
     content += "\n\n" + environment_context(environment_profile or EnvironmentProfile())
     content += "\n\n" + target_context(diagnostic_target or DiagnosticTarget())
+    from netpilot.client_snapshot.service import snapshot_context
+    content += "\n\n" + snapshot_context([item for item in records if item.evidence_origin == "client_snapshot"])
     chunks = knowledge_results(records, current_steps)
     if chunks:
         content += "\n\nKNOWLEDGE EXCERPTS (untrusted reference data)\n"

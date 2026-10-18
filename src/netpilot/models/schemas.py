@@ -9,6 +9,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from netpilot.agent.schemas import AgentStatus
+from netpilot.agent.task_state import EvidenceRecord
+from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
@@ -29,6 +31,7 @@ class HealthResponse(BaseModel):
     rag_ready: bool
     history_ready: bool
     reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
+    client_snapshot_max_bytes: int = Field(default=262144, ge=1024)
 
 
 class SessionResponse(BaseModel):
@@ -36,6 +39,8 @@ class SessionResponse(BaseModel):
     created_at: datetime
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
+    client_snapshot_summary: ClientSnapshotSummary | None = None
+    client_evidence: list[EvidenceRecord] = Field(default_factory=list)
 
 
 class DiagnosticTargetRequest(BaseModel):
@@ -78,6 +83,8 @@ EvidenceStatus = Literal[
 
 
 class EvidenceView(TargetBinding):
+    evidence_origin: Literal["tool", "client_snapshot", "user", "knowledge"] = "tool"
+    observed_at: datetime | None = None
     tool: str
     status: EvidenceStatus
     summary: str
@@ -146,6 +153,8 @@ class ChatResponse(BaseModel):
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
+    client_snapshot_summary: ClientSnapshotSummary | None = None
+    client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     record_id: UUID | None = None
     answer: str
     diagnosis: DiagnosisView
@@ -195,7 +204,10 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5, 6] = 6
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7] = 7
+    client_snapshot_summary: ClientSnapshotSummary | None = None
+    client_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    analyzed_snapshot_id: str | None = None
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
     diagnostic_target: DiagnosticTarget = Field(default_factory=legacy_target)
     record_id: UUID
@@ -245,6 +257,7 @@ class DiagnosisRecordView(BaseModel):
 
 
 class DiagnosisRecordSummaryView(BaseModel):
+    client_snapshot_summary: ClientSnapshotSummary | None = None
     record_id: UUID
     session_id: UUID
     created_at: datetime
@@ -265,7 +278,9 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5, 6] = 6
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7] = 7
+    client_snapshot_summary: ClientSnapshotSummary | None = None
+    client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)
     diagnostic_target: DiagnosticTarget = Field(default_factory=legacy_target)
     archived_tool_calls: list[ToolCallView] = Field(default_factory=list)

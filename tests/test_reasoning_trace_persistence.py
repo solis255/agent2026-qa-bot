@@ -37,7 +37,7 @@ def test_rt10_three_turn_trace_reopens_from_sqlite_with_full_conversation(tmp_pa
     assert len(record.conversation_turns) == record.turn_count == 3
     assert {step.turn_index for step in record.reasoning_trace} == {1, 2, 3}
     assert record.metrics.reasoning_trace_steps == expected_count
-    assert record.schema_version == 6
+    assert record.schema_version == 7
     with sqlite3.connect(reopened.path) as connection:
         assert connection.execute("SELECT value FROM netpilot_metadata WHERE key='schema_version'").fetchone()[0] == "3"
 

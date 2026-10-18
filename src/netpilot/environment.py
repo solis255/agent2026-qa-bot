@@ -14,8 +14,8 @@ OSFamily = Literal["windows", "macos", "linux", "android", "ios", "unknown"]
 ClientMode = Literal["server_local", "remote_browser", "mock", "unknown"]
 NetworkAccess = Literal["campus_wifi", "campus_wired", "off_campus", "mobile_hotspot", "unknown"]
 AffectedScope = Literal["all_network", "web_only", "single_service", "internal_resource", "unknown"]
-EnvironmentSource = Literal["browser", "user", "server", "mock", "inferred"]
-PRECEDENCE = {"inferred": 0, "server": 1, "browser": 2, "mock": 3, "user": 4}
+EnvironmentSource = Literal["browser", "user", "snapshot", "server", "mock", "inferred"]
+PRECEDENCE = {"inferred": 0, "server": 1, "browser": 2, "mock": 3, "snapshot": 4, "user": 5}
 BROWSER_FIELDS = frozenset({"os_family", "browser_online", "browser_language", "effective_type", "estimated_rtt_ms", "estimated_downlink_mbps"})
 USER_FIELDS = frozenset({"os_family", "os_version", "network_access", "vpn_enabled", "proxy_enabled", "affected_scope", "affected_service"})
 
@@ -122,7 +122,7 @@ def legacy_environment() -> EnvironmentProfile:
 def merge_environment(profile: EnvironmentProfile, values: dict, *, source: EnvironmentSource) -> EnvironmentProfile:
     if source not in PRECEDENCE:
         raise ValueError("unknown environment source")
-    allowed = BROWSER_FIELDS if source == "browser" else USER_FIELDS if source == "user" else BROWSER_FIELDS | USER_FIELDS | {"client_mode"}
+    allowed = {"os_family", "os_version"} if source == "snapshot" else BROWSER_FIELDS if source == "browser" else USER_FIELDS if source == "user" else BROWSER_FIELDS | USER_FIELDS | {"client_mode"}
     if set(values) - allowed:
         raise ValueError("environment update contains fields not allowed for its source")
     data = profile.model_dump()
@@ -133,7 +133,7 @@ def merge_environment(profile: EnvironmentProfile, values: dict, *, source: Envi
             continue
         if source == "browser" and name == "os_family" and value == "unknown":
             continue
-        confidence = "high" if source in {"user", "mock"} else "low" if source == "inferred" or name in {"effective_type", "estimated_rtt_ms", "estimated_downlink_mbps"} else "medium"
+        confidence = "high" if source in {"user", "mock", "snapshot"} else "low" if source == "inferred" or name in {"effective_type", "estimated_rtt_ms", "estimated_downlink_mbps"} else "medium"
         provenance = {"source": source, "confidence": confidence}
         if data[name] != value or data["field_sources"].get(name) != provenance:
             data[name] = value

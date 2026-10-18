@@ -23,6 +23,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | 历史与报告 | 每个 Session 一条累计 SQLite 诊断记录、账号历史分析、每页 10 条上一页/下一页、确定性报告、Markdown/JSON 导出 |
 | 环境画像 | 每个 Session 一份 EnvironmentProfile；浏览器低风险采集、用户编辑/明确表述更新、来源优先级、跨 Turn 复用、历史与报告保存 |
 | 诊断对象 | 区分浏览器设备 / NetPilot 服务主机 / Mock 模拟终端；按工具执行位置限制能力，证据与去重绑定对象版本 |
+| 客户端快照 | Windows 只读脚本 → 手动 JSON 上传 → 客户端 Evidence；校验/脱敏/时效/去重/替换归档，不启用远程执行 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -224,14 +225,14 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12B 当前为 v6），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12C 当前为 v7），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
 ### 诊断对象（Milestone 12B）
 
 侧栏“诊断对象”显示当前对象、直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，
 **不会调用服务主机的 DNS、Ping、网卡、TCP、HTTP 或路由工具来冒充用户设备检测**。
-当前没有客户端系统级采集能力，这类请求会依据现象/环境给出安全建议或追问；明确知识请求仍可检索 RAG。
+未上传客户端快照时，这类请求会依据现象/环境给出安全建议或追问；明确知识请求仍可检索 RAG。
 选择“NetPilot 服务主机”，或明确说“检查这台 NetPilot 服务器的 DNS”，才允许 Local 主机工具。
 Mock 模式保持只读的“Mock 模拟终端”，结果明确为模拟，不代表真实校园网络。
 
@@ -241,6 +242,22 @@ Target API 只接受 `session_id` 与 `subject`，执行位置/限制由服务�
 快照 v6 保存最新 `diagnostic_target`，旧记录保持“未记录”；完整会话及历史对象证据仍保留。
 实现、DT-01～DT-15、验证记录与四个人工验收状态见 [Milestone 12B](docs/MILESTONE12B_VALIDATION.md)。
 
+### 客户端诊断快照（Milestone 12C）
+
+Local 部署的远程“当前浏览器设备”可在侧栏下载 [Windows 只读脚本](scripts/client_diagnostic_windows.ps1)，
+审阅后在允许运行脚本的 Windows 10/11 普通用户 PowerShell 执行 `./client_diagnostic_windows.ps1`，
+得到 `netpilot-client-diagnostic.json`，再主动上传。不提供一键执行、自动上传、提权或降低执行策略。
+
+服务端校验 Snapshot v1、敏感字段与大小（默认 256 KiB），只保存脱敏摘要和规范化 Evidence。
+证据属于 `user_client` 的采集时点，不是 NetPilot Tool Call，也不允许服务主机网络 Tool 冒充客户端检测。
+超过 15 分钟按历史快照解释，未来超过 5 分钟提示时钟偏差；重新上传替换当前快照，旧证据保留归档，
+相同快照不重复生成 Evidence/Trace。历史 JSON 升级 v7，SQLite 结构仍 v3，不清除既有记录。
+
+上传后可问“根据快照分析我的电脑网络”或“生成诊断报告”。DNS 同类证据聚合展示；
+unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器代理，Wi-Fi 不等于校园 Wi-Fi。
+真实 Windows 普通用户运行尚待验收：本环境执行策略为 Restricted，未绕过策略，也未声称真实采集成功。
+完整契约、CS-01～CS-18 与四个人工 Case 状态见 [12C 验收记录](docs/MILESTONE12C_VALIDATION.md)。
+
 ### 测试
 
 Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
@@ -249,7 +266,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12B 当前为 v6），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12C 当前为 v7），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -267,7 +284,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-40 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+48 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -278,10 +295,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12B 修改前基线为 `494 passed in 91.32s`；2026-10-18 诊断对象感知实现后的全量回归实测为：
+Milestone 12C 修改前基线为 `557 passed in 101.74s`；2026-10-18 客户端诊断快照实现后的全量回归实测为：
 
 ```text
-557 passed in 94.51s
+631 passed in 104.88s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

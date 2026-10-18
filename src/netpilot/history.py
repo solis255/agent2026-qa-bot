@@ -32,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 6
+SNAPSHOT_SCHEMA_VERSION = 7
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -56,6 +56,7 @@ class DiagnosisRepository(Protocol):
 
     def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None: ...
     def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None: ...
+    def update_client_snapshot(self, user_id: UUID, session_id: UUID, task) -> bool: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -105,6 +106,9 @@ class SQLiteDiagnosisRepository:
             session_id=response.session_id,
             environment_profile=response.environment_profile,
             diagnostic_target=response.diagnostic_target,
+            client_snapshot_summary=response.client_snapshot_summary,
+            client_evidence=response.client_evidence,
+            analyzed_snapshot_id=response.client_snapshot_summary.snapshot_id if response.client_snapshot_summary and any(item.evidence_origin == "client_snapshot" for item in response.diagnosis.evidence) else None,
             created_at=now,
             updated_at=now,
             turn_count=1,
@@ -203,6 +207,32 @@ class SQLiteDiagnosisRepository:
 
         return self.upsert_session(user_id, user_message, response)
 
+    def update_client_snapshot(self, user_id, session_id, task) -> bool:
+        """Persist only sanitized summary/Evidence; never create a fake chat Turn."""
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute("SELECT * FROM diagnosis_records WHERE user_id=? AND session_id=?", (str(user_id), str(session_id))).fetchone()
+                if row is None:
+                    return False
+                record = _record_from_row(row)
+                trace = merge_reasoning_trace(record.reasoning_trace, task.reasoning_trace, self.reasoning_trace_max_steps)
+                record = record.model_copy(update={
+                    "schema_version":SNAPSHOT_SCHEMA_VERSION,
+                    "client_snapshot_summary":task.client_snapshot_summary,
+                    "client_evidence":[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
+                    "environment_profile":task.environment_profile,
+                    "diagnostic_target":task.diagnostic_target,
+                    "reasoning_trace":trace,
+                    "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)}),
+                    "diagnosis":DiagnosisView(status="completed", summary="客户端快照已更新，尚待分析；旧快照结论不代表当前状态。", tool_rounds=0),
+                    "updated_at":datetime.now(timezone.utc),
+                })
+                _update_record(connection, record)
+                return True
+        except (sqlite3.Error, ValueError) as exc:
+            raise DiagnosisStorageError("客户端快照保存失败") from exc
+
     def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView:
         try:
             with self._lock, self._connection() as connection:
@@ -282,6 +312,7 @@ class SQLiteDiagnosisRepository:
                         primary_issue=row["primary_issue"],
                         confidence=row["confidence"],
                         metrics=snapshot.metrics,
+                        client_snapshot_summary=snapshot.client_snapshot_summary,
                     )
                 )
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
@@ -488,7 +519,7 @@ def _merge_session_records(
     sources = _merge_sources(existing.sources, current.sources)
     trace = merge_reasoning_trace(existing.reasoning_trace, [
         step.model_copy(update={"turn_index": existing.turn_count + step.turn_index})
-        if step.turn_index <= current.turn_count else step
+        if step.turn_index <= current.turn_count and step.event_origin != "client_snapshot" else step
         for step in current.reasoning_trace
     ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
@@ -498,6 +529,9 @@ def _merge_session_records(
         session_id=existing.session_id,
         environment_profile=current.environment_profile,
         diagnostic_target=current.diagnostic_target,
+        client_snapshot_summary=current.client_snapshot_summary,
+        client_evidence=current.client_evidence,
+        analyzed_snapshot_id=current.analyzed_snapshot_id or existing.analyzed_snapshot_id,
         created_at=min(existing.created_at, current.created_at),
         updated_at=max(existing.updated_at, current.updated_at),
         turn_count=existing.turn_count + current.turn_count,
@@ -526,6 +560,11 @@ def _merge_session_diagnosis(
     """Keep the latest meaningful diagnostic/analysis conclusion."""
 
     if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (current.diagnostic_target.subject, current.diagnostic_target.target_version):
+        return current.diagnosis
+    if (existing.client_snapshot_summary and current.client_snapshot_summary
+            and existing.client_snapshot_summary.applicable and not current.client_snapshot_summary.applicable):
+        # A changed task invalidates the client's old observations even when the
+        # physical target/version stays the same. Do not retain its diagnosis.
         return current.diagnosis
 
     mode = current.metrics.response_mode
@@ -661,7 +700,17 @@ def _record_from_row(row: sqlite3.Row) -> DiagnosisRecordView:
             ),
         }
     )
-    return DiagnosisRecordView.model_validate(payload)
+    record = DiagnosisRecordView.model_validate(payload)
+    from netpilot.client_snapshot.schemas import refresh_summary
+    record.client_snapshot_summary = refresh_summary(record.client_snapshot_summary)
+    if record.client_snapshot_summary:
+        summary = record.client_snapshot_summary
+        summary.applicable = summary.applicable and record.diagnostic_target.subject == "user_client" and summary.target_version == record.diagnostic_target.target_version
+    now = datetime.now(timezone.utc)
+    for item in record.client_evidence:
+        if item.expires_at:
+            item.stale = now > item.expires_at
+    return record
 
 
 def _insert_record(
