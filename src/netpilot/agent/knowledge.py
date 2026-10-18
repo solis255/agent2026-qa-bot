@@ -7,6 +7,23 @@ from typing import TYPE_CHECKING
 import re
 
 from netpilot.rag import KnowledgeSearchData, KnowledgeSearchResult, KnowledgeSource
+from netpilot.rag.schemas import source_ref_for
+
+
+CITATION_MARKER = re.compile(r"\[\[cite:([^\]\n]*)\]\]")
+
+
+def citation_refs(content: str) -> set[str]:
+    return {
+        ref.strip()
+        for match in CITATION_MARKER.finditer(content)
+        for ref in match[1].split(",")
+    }
+
+
+def _fallback_excerpt(content: str) -> str:
+    # Reference text cannot introduce its own citation protocol, even unfinished.
+    return excerpt(re.sub(r"\[\[cite:[^\]\n]*(?:\]\]|$)", "", content))
 
 if TYPE_CHECKING:
     from netpilot.agent.schemas import AgentToolStep
@@ -49,9 +66,19 @@ def render_knowledge_chunks(
     results: Iterable[KnowledgeSearchResult], *, chunk_chars: int = 900
 ) -> str:
     return "\n\n".join(
-        f"[{item.source_type.value}] {item.title[:200]}\n"
-        f"chunk={item.chunk_id}; score={item.score:.3f}\n"
-        f"{excerpt(item.content, chunk_chars)}\n来源：{item.source}"
+        f"[SOURCE]\nsource_ref={source_ref_for(item.source, item.chunk_id)}\n"
+        f"source_type={item.source_type.value}\ntitle={item.title[:200]}\n"
+        f"content=\n{excerpt(item.content, chunk_chars)}"
+        for item in results
+    )
+
+
+def render_knowledge_fallback_chunks(results: Iterable[KnowledgeSearchResult]) -> str:
+    """Attach provenance to each excerpt, never a fabricated paragraph mapping."""
+
+    return "\n\n".join(
+        f"[{item.source_type.value}] {item.title[:200]}\n\n"
+        f"{_fallback_excerpt(item.content)}[[cite:{source_ref_for(item.source, item.chunk_id)}]]"
         for item in results
     )
 
@@ -67,6 +94,7 @@ def source_only_answer(content: str, results: Iterable[KnowledgeSearchResult]) -
     """Reject citation lists that contain no substantive answer body."""
 
     chunks = list(results)
+    content = CITATION_MARKER.sub("", content)
     for line in content.splitlines():
         if re.fullmatch(
             r"(?:参考来源|资料来源|来源|参考资料|参考文献|检索结果|sources?)(?:如下|列表)?\s*[:：]?",

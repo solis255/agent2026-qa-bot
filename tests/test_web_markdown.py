@@ -10,7 +10,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("case", ["MD-01", "MD-02", "MD-03", "MD-04", "MD-05", "MD-06", "MD-07", "SRC-04"])
+@pytest.mark.parametrize("case", [
+    *[f"MD-{index:02d}" for index in range(1, 8)],
+    *[f"UI-{index:02d}" for index in range(1, 4)],
+    *[f"CIT-{index:02d}" for index in range(1, 11)],
+])
 def test_markdown_dom_runtime(case):
     node = shutil.which("node")
     if node is None or not (ROOT / "web/node_modules/jsdom/package.json").is_file():

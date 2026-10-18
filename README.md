@@ -50,7 +50,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 
 `success=true` 表示 Tool 成功产生了诊断证据，并不表示网络一定健康。例如 `reachable=false` 是一次执行成功的异常观察；超时、执行错误与安全阻止会被单独分类。
 
-## 比赛 Demo
+## 测试 Demo
 
 以下 Demo 建议使用 `TOOL_MODE=mock` 与 `SCENARIO_SWITCH_ENABLED=true`，以获得稳定、可复现的结构化结果。模型措辞可能变化，验收以 Tool Timeline、诊断分类和来源字段为准。
 
@@ -77,8 +77,6 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 > 天津大学 VPN 怎么使用？请先调用 knowledge_search，只依据知识库回答，并标出资料类型、标题和原始 URL。
 
 预期：时间线显示知识参考，来源区展示 `community`、标题、相关度与原始 URL；回答明确社区资料不等于学校当前官方规定。
-
-更多统一验收场景见[比赛测试用例矩阵](docs/test-cases.md)。[真实截图清单](screenshots/README.md)已收录两个测试账号的页面截图，其他场景仍待采集；未提交伪造占位图。
 
 ## 架构
 
@@ -166,7 +164,7 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 
 打开 <http://127.0.0.1:8000/>，注册专用演示账号或登录后即可创建个人会话；右上角菜单提供“我的诊断历史”、修改密码和退出。健康检查位于 <http://127.0.0.1:8000/api/health>。没有 `TJU_API_KEY` 时应用仍会启动并返回 `llm_configured=false`，但聊天接口不可用；Tool Provider 构造阶段不会发出网络请求。
 
-### Mock 比赛演示
+### Mock 演示
 
 ```powershell
 $env:TOOL_MODE="mock"
@@ -176,15 +174,7 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 
 内置场景：`healthy`、`dns_failure`、`gateway_unreachable`、`tcp_ssh_blocked`、`http_failure`、`partial_connectivity`。Mock Provider 不执行系统命令、Socket 或 HTTP 请求。
 
-### 可信 LAN 双账号演示
 
-完整配置、安全边界、预检、demo-a/demo-b 历史隔离脚本和真实截图清单见 [Milestone 9D LAN 演示手册](docs/MILESTONE9D_LAN_DEMO.md)。本机默认仍只监听 `127.0.0.1`；仅在确认防火墙限制到可信演示网段后，才在私有 `.env` 中设置 `APP_HOST=0.0.0.0`，并通过 `python -m netpilot.main` 启动。运行 `python scripts/check_lan_demo.py` 可先做不接触密钥的只读配置预检。
-
-认证始终开启，`AUTH_ENABLED=false` 会拒绝启动。直接 HTTP LAN 演示用 `AUTH_COOKIE_SECURE=false`，只允许专用测试账号和不复用的非敏感密码；正式 HTTPS 环境必须改为 `true`。远端用户应访问同一服务端私网 IP，不能保证校园 Wi-Fi 或所有网段互通。已收录 [`demo1` 历史/报告入口](screenshots/05-history-report.png)与 [`demo2` 空历史](screenshots/06-multiuser-isolation.png)的真实截图；登录、DNS、SSH 等其余画面仍待采集。
-
-### Local 本机检测
-
-将 `TOOL_MODE=local` 后启动同一应用。Local Provider 只检测运行 TJU NetPilot 的主机及该主机到用户指定目标的连通性；它不登录校园网络设备，不访问天津大学内部运维平台，也不能修改任何网络配置。系统缺少 traceroute 等能力时会安全降级并返回结构化不确定结果。
 
 ### RAG 索引
 
@@ -218,9 +208,20 @@ GET  /api/scenarios
 
 ### 测试
 
+Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
+候选原因状态和停止条件本地生成，不是模型隐藏思维链，也不复制 Tool Timeline。
+API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有界的 Session 累计条目。
+默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
+`REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
+显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
+快照升级到 v4，SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
+
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
-保持纯文本，SSE 增量先显示原文，完成后统一排版。知识回答正文不再固定追加来源列表，
-来源类型与链接保留在独立 Sources 面板；异常 fallback 仍保留片段溯源信息。
+保持纯文本，SSE 增量先显示原文，完成后统一排版。知识回答使用稳定 `source_ref` 的
+行内尾标引用 `[1][2]`，直接打开对应来源，hover/focus 可查看来源类型与标题。
+独立来源面板已移除；异常 fallback 同样按片段引用。报告/导出的独立来源区保留。
+诊断时间线采用原生折叠区，初始/新 Session 默认收起，同 Session 更新步骤不改变展开状态。
 运行应用无需 npm/CDN。首次运行前端 DOM/XSS 回归测试前，请安装测试依赖：
 
 ```powershell
@@ -231,9 +232,10 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-8 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+25 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
-本次验证结果与人工检查项见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
+最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
+上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
 
 在已激活的项目虚拟环境中运行：
 
@@ -248,36 +250,6 @@ Milestone 8 修改前的历史基线为 `214 passed in 8.80s`；2026-10-17 回�
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
-
-## 安全与限制
-
-### Milestone 9A–9D 当前状态
-
-已增加 SQLite 用户表/服务端认证 Session、Argon2id 密码哈希，以及 `/api/auth/register`、`/api/auth/login`、`/api/auth/logout`、`/api/auth/me`、`/api/auth/change-password`。详见 [9A 验收说明](docs/MILESTONE9A_VALIDATION.md)。
-
-9B 已为 Chat Session 绑定 `owner_user_id`，诊断历史新记录绑定 `user_id`；会话、聊天、历史、报告、导出需登录，跨用户资源访问返回 404。旧历史迁移后保留为 `user_id=NULL`，普通账号不可见。详见 [9B 验收说明](docs/MILESTONE9B_VALIDATION.md)。9C 已接入同源 Cookie 的 Web 登录/注册、当前用户、退出、修改密码与“我的诊断历史”，详见 [9C 验收说明](docs/MILESTONE9C_VALIDATION.md)。9D 已增加认证 fail-closed 配置、LAN 只读预检及双账号演示手册，并收录两张真实浏览器截图；跨设备 LAN 人工验收和其余截图仍待现场完成。
-
-10A 已增加进程内 `SessionTaskState`、结构化 `EvidenceRecord`、包含默认参数的规范化 Tool Signature，以及同一 Session 的跨 Turn Evidence 复用。相同有效 signature 不会重复执行 Tool。
-
-10B 已增加确定性 `TurnIntent` 分类、`ResponseMode` 和服务端 `ToolPolicy`。`report_request`、`meta_feedback`、`clarify`、`analyze_existing`、`compare`、`followup_action` 与普通问答不向模型暴露 Tool；`knowledge_request` 只暴露 `knowledge_search`；`diagnose` / `state_changed` 只暴露六个只读网络 Tool。状态变化或明确重新检测会提升 `task_version` 并停止复用旧 Evidence。
-
-10C 已移除“任意 abnormal 即停止”条件，改用 `DiagnosticCoverage` 和 `EvidenceSufficiency` 判断是否可以收敛。完整网页故障诊断最低覆盖网络配置、DNS、公网 IP 连通性以及 TCP/HTTP 应用层；单个 DNS abnormal 不再导致提前结束。轻量 `Hypothesis` 会记录 supported / possible / weakened / excluded 及对应 Evidence ID。多个同类结果按 Tool/状态聚合，并移除相邻的完全重复结论。
-
-10D 已增加 RAG query 规范化/近义去重和每 Turn 两次的默认硬上限；`Context Builder` 只向模型提供 CURRENT TASK、分类后的 Network Evidence、Knowledge Sources、未解决假设与已执行 Tool 摘要，不跨 Turn 注入原始 Tool JSON。确定性 fallback 记录 `response_mode` / `fallback_reason`，并分别生成报告、元反馈、已有证据分析或诊断响应。普通输出与报告输出预算由 `LLM_MAX_OUTPUT_TOKENS`、`LLM_REPORT_MAX_OUTPUT_TOKENS` 配置。
-
-知识检索后新增显式 Knowledge Finalization：使用受限 chunk 正文、禁止 Tool，最多整理两次；失败时提供真实原文片段与来源。新增 `history_analysis`，由服务端绑定当前账号读取持久化诊断后比较；“今天”按 `APP_TIMEZONE=Asia/Shanghai` 计算。历史 UI 改为每页 10 条的上一页/下一页。实现与实测记录见 [回答与历史修复验收](docs/answer-history-fixes.md)。
-
-Knowledge Finalization 现使用独立知识 Prompt、最近最多 4 条短历史和 `LLM_KNOWLEDGE_MAX_OUTPUT_TOKENS=2200`；失败可从调试指标和逐次日志查看具体 failure_kind。Session 快照 v3 新增完整 `conversation_turns`，历史详情与报告按顺序展示全部已保存问答；旧多轮记录明确标记不完整。详见 [知识整理与完整会话验收](docs/knowledge-transcript-validation.md)。
-
-- LLM 只能调用 `ToolRegistry` 注册的 allowlisted tools；未知 Tool 和非法 JSON 参数不会执行。
-- 实时问题先取证再下结论；普通概念/知识问题不为展示效果无意义调用网络 Tool。
-- 所有网络 Tool 只读；系统命令使用固定参数列表、`shell=False`、超时和输出上限。
-- `http_check` 仅允许 HTTP(S)，校验初始目标及每次重定向，阻止 localhost、metadata、私网、回环和链路本地地址。
-- RAG 文本是不可信参考数据；来源类型必须据实展示，社区材料不能写成官方政策。
-- `SessionStore` 在进程内分别保存有界文本历史和最多 200 条结构化 Evidence；重启后消失。SQLite 历史会保存完成诊断快照，部署者需设置访问与保留策略。
-- SSE 只是最终答案的分块传输，不代表上游模型 token streaming。
-- 产品不访问天津大学内部网络运维平台，不执行配置变更，也不能替代学校官方服务通知或人工运维结论。
-- Local 模式只反映运行服务的主机；浏览器所在设备若不同，检测结果不代表浏览器设备自身网络。
 
 ## 上游来源与许可证
 

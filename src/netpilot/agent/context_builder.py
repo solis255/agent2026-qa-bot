@@ -10,6 +10,7 @@ from netpilot.agent.diagnosis import step_status
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.intent import TurnIntent
 from netpilot.agent.knowledge import knowledge_results, render_knowledge_chunks
+from netpilot.rag.schemas import source_ref_for
 from netpilot.agent.schemas import AgentToolStep
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.llm import ChatMessage, ChatRole
@@ -163,7 +164,7 @@ def _source_lines_from_data(data: object) -> list[str]:
     except (TypeError, ValueError):
         return []
     return [
-        f"[{item.source_type.value}] {item.title} | {item.source} | chunk={item.chunk_id}"
+        f"[{item.source_type.value}] {item.title} | {item.source} | chunk={item.chunk_id} | source_ref={source_ref_for(item.source, item.chunk_id)}"
         for item in results
     ]
 
@@ -171,7 +172,7 @@ def _source_lines_from_data(data: object) -> list[str]:
 def _source_line(source: KnowledgeSource) -> str:
     return (
         f"[{source.source_type.value}] {source.title} | {source.source} | "
-        f"chunk={source.chunk_id}"
+        f"chunk={source.chunk_id} | source_ref={source.source_ref}"
     )
 
 

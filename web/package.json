@@ -4,7 +4,7 @@
   "engines": { "node": "^22.13.0 || >=24.0.0" },
   "scripts": {
     "vendor": "node ../scripts/vendor_web.cjs",
-    "test": "node ../tests/web_markdown_runtime.cjs"
+    "test": "node ../tests/web_markdown_runtime.cjs && node ../tests/web_reasoning_runtime.cjs"
   },
   "dependencies": {
     "dompurify": "3.4.17",

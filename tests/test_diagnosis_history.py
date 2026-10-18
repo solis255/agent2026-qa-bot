@@ -528,6 +528,10 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
     body = chat.json()
     assert body["record_id"] is not None
     assert body["metrics"] == {
+        "reasoning_trace_steps": 0,
+        "reasoning_summary_llm_used": False,
+        "reasoning_summary_prompt_tokens": 0,
+        "reasoning_summary_completion_tokens": 0,
         "token_usage": {
             "prompt_tokens": 17,
             "completion_tokens": 5,

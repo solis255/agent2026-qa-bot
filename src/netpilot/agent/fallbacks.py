@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from netpilot.agent.diagnosis import build_diagnostic_answer, step_status
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.intent import TurnIntent
-from netpilot.agent.knowledge import knowledge_results, render_knowledge_chunks
+from netpilot.agent.knowledge import knowledge_results, render_knowledge_fallback_chunks
 from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.schemas import AgentToolStep, FallbackReason
 from netpilot.agent.task_state import EvidenceRecord
@@ -147,7 +147,7 @@ def _knowledge_fallback(
         return (
             "知识库检索已完成，但模型最终整理失败。\n\n"
             "检索到的关键原始片段：\n\n"
-            + render_knowledge_chunks(chunks)
+            + render_knowledge_fallback_chunks(chunks)
             + "\n\n限制：以下为知识库检索原文片段，尚未经过模型完整综合整理。"
             "资料内容仅作参考，不是实时网络证据；community 不代表官方说明。"
         )
@@ -155,7 +155,7 @@ def _knowledge_fallback(
         return "知识库没有提供足够来源完成回答；本轮没有把实时网络状态当作知识依据。"
     return (
         "已找到以下知识库 Source，但模型未能完成最终整理。它们仅作操作参考：\n"
-        + _bullets([_source_line(item) for item in sources])
+        + _bullets([f"[{item.source_type.value}] {item.title}[[cite:{item.source_ref}]]" for item in sources])
     )
 
 

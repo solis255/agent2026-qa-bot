@@ -9,8 +9,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from netpilot.agent.schemas import AgentStatus
+from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.rag import SourceType
+from netpilot.rag.schemas import StableSourceRef
 from netpilot.tools.custom_scenarios import CustomMockScenario, CustomScenarioBehavior
 
 
@@ -24,6 +26,7 @@ class HealthResponse(BaseModel):
     tool_mode: ToolMode
     rag_ready: bool
     history_ready: bool
+    reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
 
 
 class SessionResponse(BaseModel):
@@ -65,6 +68,7 @@ class EvidenceView(BaseModel):
 class ToolCallView(BaseModel):
     round: int = Field(ge=1)
     tool_call_id: str
+    evidence_id: str | None = None
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
     success: bool
@@ -75,7 +79,7 @@ class ToolCallView(BaseModel):
     duration_ms: int = Field(ge=0)
 
 
-class SourceView(BaseModel):
+class SourceView(StableSourceRef):
     title: str
     source: str
     source_type: SourceType
@@ -114,6 +118,10 @@ class ExecutionMetricsView(BaseModel):
     knowledge_finalization_failure_kind: str | None = None
     history_context_records: int = Field(default=0, ge=0)
     network_tool_calls: int = Field(default=0, ge=0)
+    reasoning_trace_steps: int = Field(default=0, ge=0)
+    reasoning_summary_llm_used: bool = False
+    reasoning_summary_prompt_tokens: int = Field(default=0, ge=0)
+    reasoning_summary_completion_tokens: int = Field(default=0, ge=0)
 
 
 class ChatResponse(BaseModel):
@@ -124,6 +132,7 @@ class ChatResponse(BaseModel):
     metrics: ExecutionMetricsView = Field(default_factory=ExecutionMetricsView)
     tool_calls: list[ToolCallView] = Field(default_factory=list)
     sources: list[SourceView] = Field(default_factory=list)
+    reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
 
 class PersistedConversationTurn(BaseModel):
@@ -164,7 +173,7 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2, 3] = 3
+    schema_version: Literal[1, 2, 3, 4] = 4
     record_id: UUID
     user_id: UUID | None = None
     session_id: UUID
@@ -180,6 +189,7 @@ class DiagnosisRecordView(BaseModel):
     sources: list[SourceView] = Field(default_factory=list)
     conversation_turns: list[PersistedConversationTurn] = Field(default_factory=list)
     conversation_complete: bool = True
+    reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -231,7 +241,7 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2, 3] = 3
+    schema_version: Literal[1, 2, 3, 4] = 4
     report_id: UUID
     record_id: UUID
     session_id: UUID
@@ -249,6 +259,7 @@ class DiagnosisReportView(BaseModel):
     sources: list[SourceView] = Field(default_factory=list)
     conversation_turns: list[PersistedConversationTurn] = Field(default_factory=list)
     conversation_complete: bool = True
+    reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

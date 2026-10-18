@@ -57,7 +57,7 @@ _INSTRUCTIONS = {
     ),
     ResponseMode.KNOWLEDGE: (
         "当前是知识问答模式。若提供 knowledge_search，只可使用其检索参考资料；"
-        "不得调用网络状态检测工具。依据真实资料回答，来源链接由独立 Sources 面板展示，"
+        "不得调用网络状态检测工具。依据真实资料回答，使用提供的 source_ref 在相关句段末尾插入 [[cite:<source_ref>]]，"
         "正文末尾不要重复来源列表；无资料时明确说明。"
     ),
     ResponseMode.REPORT: (

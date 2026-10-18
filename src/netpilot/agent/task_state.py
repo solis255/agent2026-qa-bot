@@ -12,6 +12,7 @@ from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.schemas import AgentToolStep
+from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.agent.tool_signature import canonical_tool_signature
 
 
@@ -62,6 +63,7 @@ class SessionTaskState(BaseModel):
     last_evidence_sufficiency: EvidenceSufficiency | None = None
     task_version: int = Field(default=1, ge=1)
     turn_index: int = Field(default=0, ge=0)
+    reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
     def reusable_evidence(self) -> list[EvidenceRecord]:
         return [
@@ -119,6 +121,7 @@ def evidence_from_step(
         step.arguments,
     )
     return EvidenceRecord(
+        evidence_id=step.evidence_id,
         tool_name=step.tool_name,
         arguments=step.arguments,
         tool_signature=signature,

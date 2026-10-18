@@ -64,6 +64,8 @@ class Observation(BaseModel):
 
 
 _FULL_DIAGNOSIS_TERMS = (
+    "完整排查",
+    "全面排查",
     "完整诊断",
     "全面诊断",
     "全面检查",
@@ -132,7 +134,7 @@ def normalize_observations(
             )
         observations.append(
             Observation(
-                evidence_id=f"tool_call:{step.tool_call_id}",
+                evidence_id=getattr(step, "evidence_id", f"tool_call:{step.tool_call_id}"),
                 tool_name=step.tool_name,
                 arguments=dict(step.arguments),
                 status=finding_status(

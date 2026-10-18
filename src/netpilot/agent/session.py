@@ -15,6 +15,7 @@ from netpilot.agent.hypotheses import track_hypotheses
 from netpilot.agent.intent import TurnIntent
 from netpilot.agent.schemas import AgentResult
 from netpilot.agent.task_state import SessionTaskState, evidence_from_step
+from netpilot.agent.reasoning_trace import merge_reasoning_trace
 from netpilot.llm import ChatMessage, ChatRole
 
 
@@ -63,6 +64,7 @@ class SessionStore:
         max_history_messages: int = 20,
         max_sessions: int = 500,
         max_evidence_records: int = 200,
+        reasoning_trace_max_steps: int = 50,
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -73,6 +75,7 @@ class SessionStore:
         self.max_history_messages = max_history_messages
         self.max_sessions = max_sessions
         self.max_evidence_records = max_evidence_records
+        self.reasoning_trace_max_steps = reasoning_trace_max_steps
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -135,6 +138,11 @@ class SessionStore:
                 task_state.advance_version()
             task_state.turn_index += 1
             if result is not None:
+                task_state.reasoning_trace = merge_reasoning_trace(
+                    task_state.reasoning_trace,
+                    [step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
+                    self.reasoning_trace_max_steps,
+                )
                 for step in result.steps:
                     record = evidence_from_step(
                         step,

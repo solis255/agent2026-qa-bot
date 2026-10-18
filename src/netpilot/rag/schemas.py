@@ -4,10 +4,33 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
+from hashlib import sha256
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def source_ref_for(source: str, chunk_id: str) -> str:
+    """Stable across retrieval ranking, Session unions and legacy snapshot loads."""
+
+    return sha256(f"{source}|{chunk_id}".encode("utf-8")).hexdigest()[:12]
+
+
+class StableSourceRef(BaseModel):
+    source_ref: str = Field(default="", pattern=r"^[a-f0-9]{12}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonical_source_ref(cls, value: Any) -> Any:
+        if (
+            isinstance(value, dict)
+            and isinstance(value.get("source"), str)
+            and isinstance(value.get("chunk_id"), str)
+        ):
+            # Never trust a caller-supplied ref that redirects an existing marker.
+            return {**value, "source_ref": source_ref_for(value["source"], value["chunk_id"])}
+        return value
 
 
 def _require_web_source(value: str) -> str:
@@ -111,8 +134,8 @@ class KnowledgeSearchData(BaseModel):
     results: list[KnowledgeSearchResult] = Field(default_factory=list)
 
 
-class KnowledgeSource(BaseModel):
-    """Compact citation exposed by AgentResult and the future Web API."""
+class KnowledgeSource(StableSourceRef):
+    """Stable citation metadata shared by AgentResult, Web and persisted history."""
 
     title: str
     source: str

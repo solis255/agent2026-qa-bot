@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,7 @@ from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.hypotheses import Hypothesis
 from netpilot.agent.intent import TurnIntent
 from netpilot.agent.response_modes import ResponseMode
+from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.llm import TokenUsage
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
@@ -47,6 +49,7 @@ class AgentToolStep(BaseModel):
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
     tool_signature: str | None = None
+    evidence_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
     result: ToolResult[Any]
 
 
@@ -72,3 +75,7 @@ class AgentResult(BaseModel):
     coverage: DiagnosticCoverage = Field(default_factory=DiagnosticCoverage)
     evidence_sufficiency: EvidenceSufficiency | None = None
     hypotheses: list[Hypothesis] = Field(default_factory=list)
+    reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    reasoning_summary_llm_used: bool = False
+    reasoning_summary_prompt_tokens: int = Field(default=0, ge=0)
+    reasoning_summary_completion_tokens: int = Field(default=0, ge=0)

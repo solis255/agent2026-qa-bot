@@ -14,6 +14,7 @@ const state = {
   historyLoading: false,
   historyGeneration: 0,
   activeRecordId: null,
+  reasoningTrace: [],
 };
 
 const elements = {
@@ -90,7 +91,11 @@ const elements = {
   toolCount: document.querySelector("#tool-count"),
   metricsDebug: document.querySelector("#metrics-debug"),
   toolTimeline: document.querySelector("#tool-timeline"),
-  sourceList: document.querySelector("#source-list"),
+  timelineSection: document.querySelector("#timeline-section"),
+  timelineCount: document.querySelector("#timeline-count"),
+  reasoningSection: document.querySelector("#reasoning-section"),
+  reasoningCount: document.querySelector("#reasoning-count"),
+  reasoningTrace: document.querySelector("#reasoning-trace"),
   historyList: document.querySelector("#history-list"),
   historyRefresh: document.querySelector("#history-refresh"),
   historyPrevious: document.querySelector("#history-previous"),
@@ -513,7 +518,7 @@ function renderHealthError(error) {
   elements.interactionNote.textContent = error.message;
 }
 
-function appendMessage(role, text) {
+function appendMessage(role, text, sources = []) {
   const article = document.createElement("article");
   article.className = `message ${role}-message`;
   const avatar = document.createElement("span");
@@ -524,7 +529,7 @@ function appendMessage(role, text) {
   title.textContent = role === "user" ? "你" : role === "error" ? "请求提示" : "诊断助手";
   const body = document.createElement(role === "assistant" ? "div" : "p");
   body.className = role === "assistant" ? "message-body markdown-body" : "message-body";
-  if (role === "assistant") renderAssistantMarkdown(body, text);
+  if (role === "assistant") renderAssistantMarkdown(body, text, sources);
   else body.textContent = text;
   content.append(title, body);
   article.append(avatar, content);
@@ -542,7 +547,10 @@ function resetConversation() {
   renderDiagnosis(null);
   renderMetrics(null);
   renderTools([]);
-  renderSources([]);
+  elements.timelineSection.open = false;
+  state.reasoningTrace = [];
+  renderReasoningTrace([]);
+  elements.reasoningSection.open = false;
   setReportRecord(null);
 }
 
@@ -591,7 +599,7 @@ function renderDiagnosis(diagnosis) {
   elements.diagnosisStatus.className = `diagnosis-badge ${status}`;
   elements.diagnosisStatus.textContent = diagnosis.status === "completed" ? "已完成" : "需注意";
   const evidenceCount = diagnosis.evidence?.length || 0;
-  const summary = String(diagnosis.summary || "").replace(/\s+/g, " ").trim();
+  const summary = String(diagnosis.summary || "").replace(/\[\[cite:[^\]\n]*(?:\]\]|$)/g, "").replace(/\s+/g, " ").trim();
   const preview = summary.length > 180 ? `${summary.slice(0, 180)}…` : summary;
   const evidenceMeta = `${diagnosis.tool_rounds} 个工具轮次 · ${evidenceCount} 条结构化证据`;
   elements.diagnosisSummary.textContent = preview ? `${preview}（${evidenceMeta}）` : evidenceMeta;
@@ -604,6 +612,8 @@ function renderMetrics(metrics) {
     rag_calls: metrics.rag_calls,
     knowledge_finalization_attempts: metrics.knowledge_finalization_attempts,
     knowledge_finalization_failure_kind: metrics.knowledge_finalization_failure_kind,
+    reasoning_trace_steps: metrics.reasoning_trace_steps,
+    reasoning_summary_llm_used: metrics.reasoning_summary_llm_used,
   }, null, 2) : "暂无调试指标。";
   if (!metrics) {
     elements.tokenUsage.textContent = "--";
@@ -626,7 +636,54 @@ function formatDuration(value) {
     : `${milliseconds.toFixed(milliseconds % 1 ? 1 : 0)} ms`;
 }
 
+function renderReasoningTrace(steps) {
+  elements.reasoningTrace.replaceChildren();
+  elements.reasoningCount.textContent = String(steps?.length || 0);
+  if (!steps?.length) {
+    elements.reasoningTrace.append(emptyState("RT", "本记录没有诊断思路；不会根据旧答案补造轨迹。"));
+    return;
+  }
+  const phases = { intent: "识别", planning: "计划", evidence: "证据", hypothesis: "假设", decision: "决策", finalization: "结论", state_change: "状态变化", fallback: "兜底" };
+  const list = document.createElement("ol");
+  list.className = "reasoning-list";
+  for (const step of steps) {
+    const item = document.createElement("li");
+    const heading = document.createElement("div");
+    heading.className = "reasoning-heading";
+    const phase = document.createElement("span");
+    phase.className = "reasoning-phase";
+    phase.textContent = phases[step.phase] || "诊断";
+    const title = document.createElement("strong");
+    title.textContent = step.title;
+    heading.append(phase, title);
+    const summary = document.createElement("p");
+    summary.textContent = step.summary;
+    item.append(heading, summary);
+    if (step.evidence_ids?.length) {
+      const meta = document.createElement("small");
+      meta.textContent = `关联证据：${step.evidence_ids.length}`;
+      item.append(meta);
+    }
+    list.append(item);
+  }
+  elements.reasoningTrace.append(list);
+}
+
+function appendTurnReasoningTrace(steps) {
+  const known = new Map(state.reasoningTrace.map((step) => [step.step_index, step]));
+  for (const step of steps || []) known.set(step.step_index, step);
+  const limit = Math.max(1, Math.min(200, Number(state.health?.reasoning_trace_max_steps || 50)));
+  const ordered = [...known.values()].sort((a, b) => a.step_index - b.step_index);
+  const recentCount = Math.max(1, Math.floor(limit / 2));
+  const recent = ordered.slice(-recentCount);
+  const priority = { planning:0, evidence:1, intent:2, hypothesis:2, decision:2, finalization:2, state_change:3, fallback:3 };
+  const older = ordered.slice(0, -recentCount).sort((a, b) => (priority[b.phase] - priority[a.phase]) || (b.step_index - a.step_index));
+  state.reasoningTrace = [...recent, ...older.slice(0, limit - recent.length)].sort((a, b) => a.step_index - b.step_index);
+  renderReasoningTrace(state.reasoningTrace);
+}
+
 function renderTools(tools) {
+  elements.timelineCount.textContent = String(tools?.length || 0);
   elements.toolTimeline.replaceChildren();
   if (!tools?.length) {
     elements.toolTimeline.append(emptyState("01", "本次尚未调用网络或知识工具。"));
@@ -663,47 +720,6 @@ function renderTools(tools) {
     list.append(item);
   }
   elements.toolTimeline.append(list);
-}
-
-function renderSources(sources) {
-  elements.sourceList.replaceChildren();
-  if (!sources?.length) {
-    elements.sourceList.append(emptyState("KB", "本次回答没有使用知识库来源。"));
-    return;
-  }
-  const list = document.createElement("ul");
-  list.className = "source-list";
-  for (const source of sources) {
-    const item = document.createElement("li");
-    const type = document.createElement("span");
-    type.className = `source-type ${source.source_type}`;
-    type.textContent = source.source_type;
-    const title = document.createElement("strong");
-    title.textContent = source.title;
-    const link = safeSourceLink(source.source);
-    const meta = document.createElement("small");
-    meta.textContent = `相关度 ${Number(source.score).toFixed(3)} · ${source.file} · ${source.chunk_id}`;
-    item.append(type, title, link, meta);
-    list.append(item);
-  }
-  elements.sourceList.append(list);
-}
-
-function safeSourceLink(value) {
-  const fallback = document.createElement("span");
-  fallback.textContent = "来源链接不可用";
-  try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) return fallback;
-    const link = document.createElement("a");
-    link.href = url.href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = url.href;
-    return link;
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 function emptyState(code, message) {
@@ -827,12 +843,14 @@ async function loadDiagnosisRecord(recordId) {
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
       appendMessage("user", turn.user_message);
-      appendMessage("assistant", turn.assistant_answer);
+      appendMessage("assistant", turn.assistant_answer, record.sources);
     }
     renderDiagnosis(record.diagnosis);
     renderMetrics(record.metrics);
     renderTools(record.tool_calls);
-    renderSources(record.sources);
+    elements.timelineSection.open = false;
+    renderReasoningTrace(record.reasoning_trace);
+    elements.reasoningSection.open = false;
     setReportRecord(record.record_id);
     const legacyNote = record.conversation_complete === false
       ? "该记录创建于完整会话持久化功能启用之前，仅保留部分对话内容。"
@@ -877,11 +895,11 @@ async function submitChat(event) {
     );
     if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
-    renderAssistantMarkdown(streamedAnswer, response.answer);
+    renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     renderTools(response.tool_calls);
-    renderSources(response.sources);
+    appendTurnReasoningTrace(response.reasoning_trace);
     setReportRecord(response.record_id);
     await loadHistory();
     if (state.authEpoch !== authEpoch) return;
@@ -938,6 +956,10 @@ function formatReportPreview(report) {
     const status = STATUS_LABELS[tool.finding_status] || tool.finding_status;
     lines.push(`- ${label}［${status}］：${tool.summary}`);
   }
+  lines.push("", "诊断思路");
+  lines.push(...(report.reasoning_trace?.length
+    ? report.reasoning_trace.map((step, index) => `${index + 1}. ${step.title}：${step.summary}`)
+    : ["- 本记录未保存诊断思路。"]));
   lines.push("", "建议操作");
   const recommendations = diagnosis.recommendations || [];
   lines.push(...(recommendations.length ? recommendations.map((item) => `- ${item}`) : ["- 无额外建议。"]));

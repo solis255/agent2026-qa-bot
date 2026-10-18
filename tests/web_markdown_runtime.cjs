@@ -144,27 +144,151 @@ const cases = {
     }
     assert.equal(w.eval("state.sessionId"), "current-session");
   },
-  "SRC-04": async (w) => {
-    const sources = ["official", "community", "maintainer"].map((source_type, index) => ({
-      source_type, title: `资料 ${index}`, source: `https://example.test/${index}`,
-      score: .9 - index / 10, file: `file-${index}.md`, chunk_id: `chunk-${index}`,
-    }));
-    w.renderSources(sources);
-    const panel = w.document.querySelector("#source-list");
-    assert.equal(panel.querySelectorAll("li").length, 3);
-    for (const source of sources) {
-      for (const value of [source.source_type, source.title, source.source, source.file, source.chunk_id, source.score.toFixed(3)]) {
-        assert.ok(panel.textContent.includes(value));
-      }
-    }
-    for (const link of panel.querySelectorAll("a")) {
-      assert.equal(link.target, "_blank");
-      assert.equal(link.rel, "noopener noreferrer");
-    }
-  },
 };
 
-(async () => {
+const sources = ["official", "community", "maintainer"].map((source_type, index) => ({
+  source_ref: ["abc", "def", "ghi"][index], source_type, title: `资料 ${index}`,
+  source: `https://example.test/${index}`, score: .9, file: `file-${index}.md`, chunk_id: `chunk-${index}`,
+}));
+const step = (index) => ({
+  tool_name: "dns_lookup", finding_status: "abnormal", round: index,
+  duration_ms: 7, tool_call_id: `tool-${index}`, summary: "DNS 异常",
+  arguments: { domain: "example.test" }, data: { resolved: false }, error_code: "TEST_ERROR",
+});
+const links = (body) => [...body.querySelectorAll(".inline-citation")];
+Object.assign(cases, {
+  "UI-01": async (w) => {
+    const timeline = w.document.querySelector("#timeline-section");
+    assert.equal(timeline.tagName, "DETAILS");
+    assert.equal(timeline.open, false);
+    w.renderTools([step(1)]);
+    assert.equal(timeline.open, false);
+    assert.equal(w.document.querySelector("#timeline-count").textContent, "1");
+    assert.ok(timeline.querySelector("pre").textContent.includes("TEST_ERROR"));
+  },
+  "UI-02": async (w) => {
+    w.renderTools([step(1)]);
+    const timeline = w.document.querySelector("#timeline-section");
+    const summary = timeline.querySelector("summary");
+    summary.click();
+    assert.equal(timeline.open, true);
+    summary.click();
+    assert.equal(timeline.open, false);
+    assert.equal(timeline.querySelectorAll("li").length, 1);
+  },
+  "UI-03": async (w) => {
+    const timeline = w.document.querySelector("#timeline-section");
+    timeline.querySelector("summary").click();
+    w.renderTools([step(1)]);
+    w.renderTools([step(1), step(2)]);
+    assert.equal(timeline.open, true);
+    assert.equal(w.document.querySelector("#timeline-count").textContent, "2");
+    assert.equal(timeline.querySelectorAll("li").length, 2);
+    w.resetConversation();
+    assert.equal(timeline.open, false);
+    assert.equal(w.document.querySelector("#timeline-count").textContent, "0");
+  },
+  "CIT-01": async (w) => {
+    const body = w.appendMessage("assistant", "校园网官方说明。[[cite:abc]]", sources);
+    assert.equal(body.textContent.trim(), "校园网官方说明。[1]");
+    const link = links(body)[0];
+    assert.equal(link.href, sources[0].source);
+    assert.equal(link.target, "_blank");
+    assert.equal(link.rel, "noopener noreferrer");
+    assert.equal(link.getAttribute("aria-label"), "来源 1：Official，资料 0");
+    assert.ok(link.title.includes("example.test"));
+  },
+  "CIT-02": async (w) => {
+    const body = w.appendMessage("assistant", "共同支撑。[[cite:abc,def,abc]]", sources);
+    assert.equal(body.textContent.trim(), "共同支撑。[1][2]");
+    assert.ok(links(body)[1].title.includes("Community"));
+  },
+  "CIT-03": async (w) => {
+    const body = w.appendMessage("assistant", "第一段[[cite:abc]]\n\n第二段[[cite:abc]]", sources);
+    assert.deepEqual(links(body).map((link) => link.textContent), ["[1]", "[1]"]);
+    assert.equal(links(body)[0].href, links(body)[1].href);
+  },
+  "CIT-04": async (w) => {
+    const body = w.appendMessage("assistant", "C[[cite:ghi]]\n\nA[[cite:abc]]\n\nC[[cite:ghi]]", sources);
+    assert.deepEqual(links(body).map((link) => [link.textContent, link.href]),
+      [["[1]", sources[2].source], ["[2]", sources[0].source], ["[1]", sources[2].source]]);
+    assert.ok(links(body)[0].title.includes("Maintainer"));
+  },
+  "CIT-05": async (w) => {
+    const body = w.appendMessage("assistant", "安全[[cite:not-exist]][[cite:abc]] 未完成[[cite:garbage", sources);
+    assert.equal(links(body).length, 1);
+    assert.equal(links(body)[0].textContent, "[1]");
+    assert.ok(!body.textContent.includes("[[cite:"));
+    const conflict = w.appendMessage("assistant", "冲突[[cite:abc]]", [sources[0], { ...sources[0], source: "https://evil.test" }]);
+    assert.equal(links(conflict).length, 0);
+  },
+  "CIT-06": async (w) => {
+    for (const source of ["javascript:alert(1)", "data:text/html,x", "file:///x", "//evil.test", "/relative", "java\tscript:alert(1)"]) {
+      const body = w.appendMessage("assistant", "安全[[cite:abc]]", [{ ...sources[0], source, title: '<img src=x onerror=alert(1)>' }]);
+      assert.equal(body.querySelectorAll("a,img,script").length, 0);
+      const citation = links(body)[0];
+      assert.equal(citation.textContent, "[1]");
+      assert.ok(citation.title.includes("链接不可用"));
+      assert.equal(citation.getAttribute("onerror"), null);
+    }
+  },
+  "CIT-07": async (w) => {
+    const body = w.appendMessage("assistant", "### VPN\n\n**官方资料**介绍使用方式。[[cite:abc]]", sources);
+    assert.equal(body.querySelector("h3").textContent, "VPN");
+    assert.equal(body.querySelector("strong").textContent, "官方资料");
+    assert.equal(links(body).length, 1);
+    assert.ok(!body.textContent.includes("[[cite:"));
+    w.renderDiagnosis({ status: "completed", summary: "资料说明[[cite:abc]]", evidence: [], tool_rounds: 1 });
+    assert.ok(!w.document.querySelector("#diagnosis-summary").textContent.includes("[[cite:"));
+  },
+  "CIT-08": async (w) => {
+    const answer = "### VPN\n\n资料介绍。[[cite:abc]]\n\n需要核验。[[cite:def]]";
+    const live = w.appendMessage("assistant", answer, sources).innerHTML;
+    const record = {
+      record_id: "citation-record", updated_at: "2026-10-18T00:00:00Z", turn_count: 1,
+      conversation_complete: true, diagnosis: null, metrics: null, tool_calls: [step(1)],
+      sources: [...sources].reverse(), // Persistent union may have a different order.
+      conversation_turns: [{ turn_index: 1, user_message: "VPN", assistant_answer: answer }],
+    };
+    w.fetch = async () => ({ ok: true, json: async () => record });
+    w.document.querySelector("#timeline-section").open = true;
+    await w.loadDiagnosisRecord("citation-record");
+    const body = w.document.querySelector(".assistant-message .message-body");
+    assert.equal(body.innerHTML, live);
+    assert.equal(links(body)[0].href, sources[0].source);
+    assert.equal(w.document.querySelector("#timeline-section").open, false);
+  },
+  "CIT-09": async (w) => {
+    const answer = "VPN 说明。[[cite:abc]]";
+    const payload = { answer, sources, tool_calls: [step(1)], diagnosis: null, metrics: null };
+    let index = 0;
+    const events = [
+      ...["VPN 说明。[[ci", "te:ab", "c]]"].map((text) => `event: delta\ndata: ${JSON.stringify({ text })}\n\n`),
+      `event: complete\ndata: ${JSON.stringify({ response: payload })}\n\n`,
+    ];
+    w.fetch = async (url) => url.startsWith("/api/diagnoses?")
+      ? { ok: true, json: async () => ({ items: [] }) }
+      : { ok: true, headers: { get: () => "text/event-stream" }, body: { getReader: () => ({ read: async () =>
+        index < events.length ? { done: false, value: new TextEncoder().encode(events[index++]) } : { done: true },
+      }) } };
+    w.document.querySelector("#timeline-section").open = true;
+    w.document.querySelector("#message-input").value = "VPN 怎么使用？";
+    await w.submitChat({ preventDefault() {} });
+    const body = w.document.querySelector(".assistant-message .message-body");
+    assert.equal(body.textContent.trim(), "VPN 说明。[1]");
+    assert.equal(links(body)[0].href, sources[0].source);
+    assert.equal(w.document.querySelector("#timeline-section").open, true);
+  },
+  "CIT-10": async (w) => {
+    assert.equal(w.document.querySelector("#source-list,.source-list,.source-type"), null);
+    assert.ok(!w.document.querySelector(".diagnostics-panel").textContent.includes("校园网络来源"));
+    assert.ok(!w.document.querySelector(".diagnostics-panel").textContent.includes("参考知识"));
+    assert.equal(typeof w.renderSources, "undefined");
+  },
+});
+
+module.exports = { setup, step, sources };
+if (require.main === module) (async () => {
   const selected = process.argv[2] ? [process.argv[2]] : Object.keys(cases);
   for (const name of selected) {
     const dom = await setup();

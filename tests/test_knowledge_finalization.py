@@ -9,6 +9,7 @@ from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
 from netpilot.llm import ChatResult, FunctionCall, LLMTimeoutError, ToolCall
 from netpilot.rag import KnowledgeSearchResult
+from netpilot.rag.schemas import source_ref_for
 from netpilot.tools import build_network_tools
 
 
@@ -45,7 +46,11 @@ class LLM:
         return value
 
 
-def completed(text="请先安装资料中说明的客户端，再按指引访问校内资源。"):
+def citation(*indexes):
+    return "[[cite:" + ",".join(source_ref_for(f"https://example.test/{index}", f"vpn-chunk-{index}") for index in indexes) + "]]"
+
+
+def completed(text="请先安装资料中说明的客户端，再按指引访问校内资源。" + citation(0, 1, 2)):
     return ChatResult(content=text, model="test", duration_ms=1, finish_reason="stop")
 
 
@@ -60,7 +65,7 @@ def test_knowledge_finalization_answers_using_bounded_original_content():
     assert "安装" in result.answer
     assert "模型未能完成最终整理" not in result.answer
     assert len(result.sources) == 3
-    assert result.answer == "请先安装资料中说明的客户端，再按指引访问校内资源。"
+    assert result.answer == completed().content
     assert "检索来源（参考资料）" not in result.answer
     assert not any(source.source in result.answer for source in result.sources)
     assert {s.source_type.value for s in result.sources} == {"official", "community", "maintainer"}
@@ -75,12 +80,12 @@ def test_knowledge_finalization_answers_using_bounded_original_content():
     assert llm.calls[1][1]["tool_choice"] == "none"
 
 
-def test_synthesis_prompts_separate_answer_from_sources_panel():
+def test_synthesis_prompts_separate_answer_from_bibliography():
     llm = LLM([completed()])
     run(llm)
     prompt = "\n".join(message.content or "" for message in llm.calls[1][0])
     assert "不要在答案末尾输出" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
-    assert "独立 Sources 面板" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
+    assert "[[cite:<source_ref>]]" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "source_type" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "再列来源" not in prompt
     assert "最后列出使用的来源" not in prompt
@@ -91,9 +96,9 @@ def test_synthesis_prompts_separate_answer_from_sources_panel():
 def test_source_type_question_keeps_substantive_type_comparison_and_metadata():
     body = (
         "| 资料 | source_type | 核验建议 |\n|---|---|---|\n"
-        "| VPN 资料 0 | official | 核验更新日期 |\n"
-        "| VPN 资料 1 | community | 需要官方再次核验 |\n"
-        "| VPN 资料 2 | maintainer | 留意维护时间 |"
+        f"| VPN 资料 0 | official | 核验更新日期{citation(0)} |\n"
+        f"| VPN 资料 1 | community | 需要官方再次核验{citation(1)} |\n"
+        f"| VPN 资料 2 | maintainer | 留意维护时间{citation(2)} |"
     )
     llm = LLM([completed(body)])
     registry = ToolRegistry(build_network_tools(Settings(_env_file=None)), Retriever())
@@ -119,9 +124,48 @@ def test_knowledge_finalization_retries_once_with_shorter_context():
 
 
 def test_final_sources_prefer_chunks_actually_cited_in_synthesis():
-    result = run(LLM([completed("根据 VPN 资料 0，请先安装客户端，并核验后续使用步骤。")]))
+    result = run(LLM([completed("根据 VPN 资料 0，请先安装客户端，并核验后续使用步骤。" + citation(0))]))
     assert [source.source for source in result.sources] == ["https://example.test/0"]
     assert "https://example.test/2" not in result.answer
+
+
+def test_citation_mapping_uses_refs_not_mentioned_titles_or_urls():
+    answer = "VPN 资料 0 的事项仍待核验，本句实际依据另一份社区片段。" + citation(1)
+    result = run(LLM([completed(answer)]))
+    assert result.answer == answer
+    assert [source.source_ref for source in result.sources] == [source_ref_for("https://example.test/1", "vpn-chunk-1")]
+
+
+@pytest.mark.parametrize("answer,kind", [
+    ("VPN 使用说明没有引用。", "missing_citations"),
+    ("VPN 使用说明。[[cite:does-not-exist]]", "invalid_citations"),
+    ("VPN 使用说明。[[cite:0]]", "invalid_citations"),
+    ("VPN 使用说明。[[cite:]]", "invalid_citations"),
+    ("VPN 使用说明。[[cite:unclosed", "missing_citations"),
+    ("VPN 使用说明。" + citation(0) + "[[cite:unknown]]", "invalid_citations"),
+])
+def test_bad_citations_retry_then_fallback_preserves_provenance(answer, kind):
+    result_llm = LLM([completed(answer), completed(answer)])
+    result = run(result_llm)
+    assert result.knowledge_finalization_attempts == 2
+    assert result.knowledge_finalization_failure_kind == kind
+    assert result.fallback_reason == FallbackReason.FINALIZATION_FAILED
+    assert all(citation(index) in result.answer for index in range(3))
+    assert "http" not in result.answer
+    assert "source_ref" in result_llm.calls[2][0][2].content
+
+
+def test_missing_citations_retry_can_recover_without_new_tools():
+    result_llm = LLM([completed("请先安装客户端。"), completed()])
+    result = run(result_llm)
+    assert result.fallback_reason is None
+    assert result.knowledge_finalization_attempts == 2
+    assert len(result.steps) == 1
+    assert result.knowledge_finalization_failure_kind == "missing_citations"
+
+
+def test_marker_only_is_not_a_substantive_answer():
+    assert source_only_answer(citation(0, 1), Retriever().search("VPN")) is True
 
 
 @pytest.mark.parametrize("question", [
@@ -161,7 +205,9 @@ def test_two_finalization_failures_return_real_chunks_and_observable_reason(fail
     assert len(llm.calls) == 3
     assert len(result.steps) == 1
     assert all(f"真实片段 {index}" in result.answer for index in range(3))
-    assert "https://example.test/0" in result.answer
+    assert "https://example.test/0" not in result.answer
+    assert all(citation(index) in result.answer for index in range(3))
+    assert public.sources[0].source == "https://example.test/0"
     assert "[community]" in result.answer
     assert "原文片段" in result.answer
     assert public.metrics.response_mode == "knowledge"
@@ -199,9 +245,10 @@ def test_knowledge_followup_reuses_evidence_and_retains_short_text_history():
             ])]
 
     retriever = CampusRetriever()
+    refs = [source_ref_for(f"https://example.test/{index}", f"campus-chunk-{index}") for index in range(3)]
     llm = LLM([
-        completed("VPN、校园网与 eduroam 的资料性质如下：校园网为 community，其余为 official。"),
-        completed("community 校园网资料中的配置可能更新，应以官方说明再次核验。"),
+        completed("VPN、校园网与 eduroam 的资料性质如下：校园网为 community，其余为 official。[[cite:" + ",".join(refs) + "]]"),
+        completed("community 校园网资料中的配置可能更新，应以官方说明再次核验。[[cite:" + refs[1] + "]]"),
     ])
     agent = AgentOrchestrator(llm, ToolRegistry(build_network_tools(Settings(_env_file=None)), retriever))
     sessions = SessionStore()
@@ -243,7 +290,7 @@ def test_source_only_preserves_short_substantive_chinese(answer, expected):
 def test_length_retry_shortens_context_and_asks_for_concise_body():
     truncated = completed("正文尚未完成")
     truncated.finish_reason = "length"
-    llm = LLM([truncated, completed()])
+    llm = LLM([truncated, completed("请先安装资料中的客户端。" + citation(0, 1))])
     result = run(llm)
     assert result.fallback_reason is None
     assert result.knowledge_finalization_attempts == 2

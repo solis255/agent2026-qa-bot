@@ -16,7 +16,8 @@ def test_web_demo_contains_all_milestone_six_surfaces() -> None:
         "scenario-select",
         "diagnosis-summary",
         "tool-timeline",
-        "source-list",
+        "timeline-section",
+        "timeline-count",
         "metrics-grid",
         "token-usage",
         "history-list",
@@ -66,7 +67,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "innerHTML" not in javascript
     assert "localStorage" not in javascript
     assert "sessionStorage" not in javascript
-    assert 'rel = "noopener noreferrer"' in javascript
+    assert 'rel = "noopener noreferrer"' in (PROJECT_ROOT / "web/markdown.js").read_text(encoding="utf-8")
     assert "diagnosis.summary" in javascript
     assert "response.metrics" in javascript
     assert "record.conversation_turns" in javascript
@@ -85,10 +86,10 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "armInactivityTimeout" in javascript
     assert "流式连接长时间未收到数据" in javascript
     assert "timeoutMs = 180000" not in javascript
-    assert 'src="/app.js?v=safe-markdown"' in html
+    assert 'src="/app.js?v=reasoning-trace"' in html
     assert html.index('/vendor/marked.umd.js') < html.index('/markdown.js?') < html.index('/app.js?')
     assert html.index('/vendor/purify.min.js') < html.index('/markdown.js?')
-    assert 'renderAssistantMarkdown(streamedAnswer, response.answer)' in javascript
+    assert 'renderAssistantMarkdown(streamedAnswer, response.answer, response.sources)' in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:
@@ -98,7 +99,8 @@ def test_web_styles_include_mobile_and_accessible_states() -> None:
     assert "@media (max-width: 560px)" in stylesheet
     assert ":focus-visible" in stylesheet
     assert ".timeline-item.abnormal" in stylesheet
-    assert ".source-type.community" in stylesheet
+    assert ".inline-citation" in stylesheet
+    assert ".timeline-section[open]" in stylesheet
     assert ".report-dialog::backdrop" in stylesheet
     assert ".report-actions" in stylesheet
     assert ".scenario-form-body" in stylesheet

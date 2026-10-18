@@ -91,6 +91,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_output_tokens=app.state.settings.llm_max_output_tokens,
         report_max_output_tokens=app.state.settings.llm_report_max_output_tokens,
         knowledge_max_output_tokens=app.state.settings.llm_knowledge_max_output_tokens,
+        reasoning_trace_enabled=app.state.settings.reasoning_trace_enabled,
+        reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
+        reasoning_summary_llm_enabled=app.state.settings.reasoning_summary_llm_enabled,
     )
     app.state.rag_ready = app.state.retriever is not None
     app.state.diagnosis_repository = None
@@ -99,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.diagnosis_repository = SQLiteDiagnosisRepository(
                 app.state.settings.diagnosis_db_path,
                 max_records=app.state.settings.diagnosis_max_records,
+                reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
             )
         except DiagnosisStorageError:
             log_event(
@@ -112,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = SessionStore(
         max_history_messages=app.state.settings.max_history_messages,
         max_sessions=app.state.settings.max_sessions,
+        reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
     )
     # The Mock provider is shared mutable demo state. Serialize Agent runs with
     # scenario changes so a diagnostic turn cannot observe two scenarios.

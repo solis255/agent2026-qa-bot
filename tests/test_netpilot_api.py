@@ -29,6 +29,7 @@ def test_health_reports_milestone_one_readiness() -> None:
         "tool_mode": "mock",
         "rag_ready": False,
         "history_ready": False,
+        "reasoning_trace_max_steps": 50,
     }
     assert secret not in response.text
     assert "api_key" not in response.text.lower()
@@ -103,7 +104,8 @@ def test_root_serves_the_chinese_web_shell() -> None:
     assert "TJU NetPilot" in response.text
     assert "校园网络智能诊断与服务 Agent" in response.text
     assert "工具执行步骤" in response.text
-    assert "参考知识" in response.text
+    assert "参考知识" not in response.text
+    assert 'id="timeline-section"' in response.text
 
 
 def test_web_assets_are_served_by_fastapi() -> None:

@@ -225,13 +225,14 @@ def test_full_web_diagnosis_continues_after_first_dns_abnormal() -> None:
 
 
 def test_hypotheses_use_supporting_and_contradicting_evidence() -> None:
+    ping = _ping_step()
     hypotheses = {
         item.name: item
         for item in track_hypotheses(
             steps=[
                 _dns_step("dns-github", "github.com"),
                 _dns_step("dns-baidu", "baidu.com"),
-                _ping_step(),
+                ping,
             ]
         )
     }
@@ -240,7 +241,7 @@ def test_hypotheses_use_supporting_and_contradicting_evidence() -> None:
     assert hypotheses["single_site_failure"].status == "weakened"
     assert hypotheses["overall_ip_connectivity_failure"].status == "excluded"
     assert hypotheses["overall_ip_connectivity_failure"].contradicting_evidence_ids == [
-        "tool_call:public-ip"
+        ping.evidence_id
     ]
 
 

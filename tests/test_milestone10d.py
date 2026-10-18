@@ -29,6 +29,7 @@ from netpilot.llm import (
 )
 from netpilot.main import create_app
 from netpilot.rag import KnowledgeSearchResult
+from netpilot.rag.schemas import source_ref_for
 from netpilot.tools import build_network_tools
 
 
@@ -89,7 +90,10 @@ class BatchedRAGLLM:
                 duration_ms=1,
             )
         return ChatResult(
-            content="已按去重来源回答。",
+            content="已按去重来源回答。[[cite:" + ",".join(
+                source_ref_for(f"https://example.test/source-{index}", f"chunk_{index:03d}")
+                for index in (1, 2)
+            ) + "]]",
             model="fake-tju-llm",
             duration_ms=1,
         )

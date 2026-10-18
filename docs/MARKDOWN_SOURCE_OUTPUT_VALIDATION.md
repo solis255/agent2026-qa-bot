@@ -1,5 +1,8 @@
 # Markdown 与来源输出验收
 
+本文保留上一次 Markdown/来源分离改造的验收记录。当前版本已进一步移除独立来源面板，
+改为行内引用；最新行为与测试结果见 [折叠时间线与行内引用验收](INLINE_CITATIONS_VALIDATION.md)。
+
 ## 原因与边界
 
 - `appendMessage` 原先统一创建 `<p>` 并设置 `textContent`，Assistant 的 Markdown 因此显示为原始标记。

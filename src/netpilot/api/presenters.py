@@ -53,6 +53,10 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
             knowledge_finalization_failure_kind=result.knowledge_finalization_failure_kind,
             history_context_records=result.history_context_records,
             network_tool_calls=sum(call.tool_name != "knowledge_search" for call in tool_calls),
+            reasoning_trace_steps=len(result.reasoning_trace),
+            reasoning_summary_llm_used=result.reasoning_summary_llm_used,
+            reasoning_summary_prompt_tokens=result.reasoning_summary_prompt_tokens,
+            reasoning_summary_completion_tokens=result.reasoning_summary_completion_tokens,
             turn_intent=(
                 result.turn_intent.value if result.turn_intent is not None else None
             ),
@@ -67,6 +71,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
         ),
         tool_calls=tool_calls,
         sources=[SourceView(**source.model_dump(mode="json")) for source in result.sources],
+        reasoning_trace=result.reasoning_trace,
     )
 
 
@@ -79,6 +84,7 @@ def _present_tool_call(step: AgentToolStep) -> ToolCallView:
     return ToolCallView(
         round=step.round,
         tool_call_id=step.tool_call_id,
+        evidence_id=step.evidence_id,
         tool_name=step.tool_name,
         arguments=step.arguments,
         success=result.success,

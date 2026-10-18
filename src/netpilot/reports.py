@@ -76,6 +76,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         sources=record.sources,
         conversation_turns=record.conversation_turns,
         conversation_complete=record.conversation_complete,
+        reasoning_trace=record.reasoning_trace,
     )
 
 
@@ -180,7 +181,14 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
             ]
         )
 
-    lines.extend(["## 建议操作", ""])
+    lines.extend(["## 诊断思路", ""])
+    if report.reasoning_trace:
+        for index, step in enumerate(report.reasoning_trace, 1):
+            lines.append(f"{index}. **{_markdown_text(step.title)}**：{_markdown_text(step.summary)}")
+    else:
+        lines.append("- 本记录没有保存诊断思路；不会根据旧答案推造决策轨迹。")
+
+    lines.extend(["", "## 建议操作", ""])
     if diagnosis.recommendations:
         lines.extend(
             f"- {_markdown_text(item)}" for item in diagnosis.recommendations

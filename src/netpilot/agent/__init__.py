@@ -9,6 +9,7 @@ from netpilot.agent.coverage import (
 )
 from netpilot.agent.context_builder import build_task_context_message
 from netpilot.agent.hypotheses import Hypothesis, track_hypotheses
+from netpilot.agent.reasoning_trace import ReasoningTraceBuilder, ReasoningTraceStep
 from netpilot.agent.intent import IntentClassification, TurnIntent, classify_turn_intent
 from netpilot.agent.orchestrator import AgentOrchestrator, MAX_TOOL_ROUNDS_ANSWER
 from netpilot.agent.response_modes import ResponseMode
@@ -44,6 +45,8 @@ __all__ = [
     "IntentClassification",
     "MAX_TOOL_ROUNDS_ANSWER",
     "ResponseMode",
+    "ReasoningTraceBuilder",
+    "ReasoningTraceStep",
     "SessionBusyError",
     "SessionCapacityError",
     "SessionNotFoundError",

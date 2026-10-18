@@ -15,6 +15,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
+from netpilot.agent.reasoning_trace import merge_reasoning_trace, trim_reasoning_trace
 
 from netpilot.models import (
     ChatResponse,
@@ -28,7 +29,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 3
+SNAPSHOT_SCHEMA_VERSION = 4
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -74,11 +75,14 @@ class DiagnosisRepository(Protocol):
 class SQLiteDiagnosisRepository:
     """Persist one bounded cumulative diagnosis snapshot per user Session."""
 
-    def __init__(self, path: Path, *, max_records: int = 1000) -> None:
+    def __init__(self, path: Path, *, max_records: int = 1000, reasoning_trace_max_steps: int = 50) -> None:
         if max_records < 1:
             raise ValueError("max_records must be at least 1")
         self.path = Path(path)
         self.max_records = max_records
+        if not 1 <= reasoning_trace_max_steps <= 200:
+            raise ValueError("reasoning_trace_max_steps must be between 1 and 200")
+        self.reasoning_trace_max_steps = reasoning_trace_max_steps
         self._lock = RLock()
         self._initialize()
 
@@ -100,7 +104,9 @@ class SQLiteDiagnosisRepository:
             latest_user_message=user_message,
             answer=response.answer,
             diagnosis=response.diagnosis,
-            metrics=response.metrics,
+            metrics=response.metrics.model_copy(update={
+                "reasoning_trace_steps": min(len(response.reasoning_trace), self.reasoning_trace_max_steps),
+            }),
             tool_calls=response.tool_calls,
             sources=response.sources,
             conversation_turns=[PersistedConversationTurn(
@@ -112,6 +118,7 @@ class SQLiteDiagnosisRepository:
                 knowledge_finalization_failure_kind=response.metrics.knowledge_finalization_failure_kind,
             )],
             conversation_complete=True,
+            reasoning_trace=trim_reasoning_trace(response.reasoning_trace, self.reasoning_trace_max_steps),
         )
         try:
             with self._lock, self._connection() as connection:
@@ -126,7 +133,7 @@ class SQLiteDiagnosisRepository:
                     _insert_record(connection, record)
                 else:
                     existing = _record_from_row(row)
-                    record = _merge_session_records(existing, current)
+                    record = _merge_session_records(existing, current, reasoning_trace_max_steps=self.reasoning_trace_max_steps)
                     _update_record(connection, record)
                 connection.execute(
                     """
@@ -434,9 +441,16 @@ def _merge_session_records(
     current: DiagnosisRecordView,
     *,
     keep_latest_record_id: bool = False,
+    reasoning_trace_max_steps: int = 50,
 ) -> DiagnosisRecordView:
-    tool_calls = _merge_tool_calls(existing.tool_calls, current.tool_calls)
+    traced_ids = {identifier for step in [*existing.reasoning_trace, *current.reasoning_trace] for identifier in step.evidence_ids}
+    tool_calls = _merge_tool_calls(existing.tool_calls, current.tool_calls, traced_ids=traced_ids)
     sources = _merge_sources(existing.sources, current.sources)
+    trace = merge_reasoning_trace(existing.reasoning_trace, [
+        step.model_copy(update={"turn_index": existing.turn_count + step.turn_index})
+        if step.turn_index <= current.turn_count else step
+        for step in current.reasoning_trace
+    ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         record_id=(current.record_id if keep_latest_record_id else existing.record_id),
@@ -449,7 +463,7 @@ def _merge_session_records(
         latest_user_message=current.latest_user_message,
         answer=current.answer,
         diagnosis=_merge_session_diagnosis(existing, current),
-        metrics=_merge_metrics(existing.metrics, current.metrics, tool_calls),
+        metrics=_merge_metrics(existing.metrics, current.metrics, tool_calls).model_copy(update={"reasoning_trace_steps": len(trace)}),
         tool_calls=tool_calls,
         sources=sources,
         conversation_turns=[
@@ -459,6 +473,7 @@ def _merge_session_records(
             }) for turn in current.conversation_turns),
         ],
         conversation_complete=existing.conversation_complete and current.conversation_complete,
+        reasoning_trace=trace,
     )
 
 
@@ -515,25 +530,31 @@ def _merge_metrics(
         ),
         history_context_records=current.history_context_records,
         knowledge_finalization_failure_kind=current.knowledge_finalization_failure_kind,
+        reasoning_summary_llm_used=existing.reasoning_summary_llm_used or current.reasoning_summary_llm_used,
+        reasoning_summary_prompt_tokens=existing.reasoning_summary_prompt_tokens + current.reasoning_summary_prompt_tokens,
+        reasoning_summary_completion_tokens=existing.reasoning_summary_completion_tokens + current.reasoning_summary_completion_tokens,
     )
 
 
-def _merge_tool_calls(existing, current):
+def _merge_tool_calls(existing, current, *, traced_ids=frozenset()):
     merged = []
     seen: set[str] = set()
     for tool_call in [*existing, *current]:
-        if tool_call.tool_call_id in seen:
+        # Keep legacy/untraced dedup semantics. Traced observations need durable
+        # identities even if a model reuses its transport call ID in a later Turn.
+        identity = tool_call.evidence_id if tool_call.evidence_id in traced_ids else tool_call.tool_call_id
+        if identity in seen:
             continue
-        seen.add(tool_call.tool_call_id)
+        seen.add(identity)
         merged.append(tool_call)
     return merged
 
 
 def _merge_sources(existing, current):
     merged = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[str] = set()
     for source in [*existing, *current]:
-        key = (source.source, source.file, source.chunk_id)
+        key = source.source_ref
         if key in seen:
             continue
         seen.add(key)

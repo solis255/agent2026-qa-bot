@@ -14,6 +14,7 @@ from netpilot.rag import (
 )
 from netpilot.tools import build_network_tools
 from netpilot.tools.schemas import ToolErrorCode
+from netpilot.rag.schemas import source_ref_for
 
 
 class FakeRetriever:
@@ -69,7 +70,8 @@ class RAGFakeLLM:
             )
         return ChatResult(
             content=(
-                "参考社区资料，VPN 用于校外访问校内资源，具体步骤需核验最新官方说明。"
+                "参考社区资料，VPN 用于校外访问校内资源，具体步骤需核验最新官方说明。[[cite:"
+                + source_ref_for("https://wiki.tjubot.cn/e-life/vpn", "vpn_chunk_001") + "]]"
             ),
             model="fake-tju-llm",
             duration_ms=1,
@@ -143,7 +145,7 @@ def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
     )
     assert "untrusted reference data" in context
     assert "VPN 用于在校外访问校内资源" in context
-    assert "https://wiki.tjubot.cn/e-life/vpn" in context
+    assert result.sources[0].source_ref in context
 
 
 def test_application_reports_rag_ready_when_retriever_loads(monkeypatch) -> None:

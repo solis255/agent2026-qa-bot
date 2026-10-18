@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=safe-markdown">
+    <link rel="stylesheet" href="/style.css?v=reasoning-trace">
   </head>
   <body>
     <header class="topbar">
@@ -149,21 +149,25 @@
           </div>
         </section>
 
-        <section class="status-card">
-          <p class="eyebrow">工具执行步骤</p>
-          <h2>诊断时间线</h2>
+        <details class="status-card reasoning-section" id="reasoning-section">
+          <summary class="reasoning-summary">
+            <span>诊断思路</span>
+            <span class="timeline-count" id="reasoning-count" aria-label="诊断思路步骤数量">0</span>
+          </summary>
+          <div id="reasoning-trace" aria-live="polite">
+            <div class="empty-state"><span>RT</span><p>提交问题后展示证据驱动的诊断决策摘要。</p></div>
+          </div>
+        </details>
+
+        <details class="status-card timeline-section" id="timeline-section">
+          <summary class="timeline-summary">
+            <span>工具执行步骤 / 诊断时间线</span>
+            <span class="timeline-count" id="timeline-count" aria-label="工具步骤数量">0</span>
+          </summary>
           <div id="tool-timeline">
             <div class="empty-state"><span>01</span><p>开始诊断后，此处将展示每一步只读检测及其证据。</p></div>
           </div>
-        </section>
-
-        <section class="status-card">
-          <p class="eyebrow">参考知识</p>
-          <h2>校园网络来源</h2>
-          <div id="source-list">
-            <div class="empty-state"><span>KB</span><p>使用知识库后，此处将展示标题、资料类型和原始链接。</p></div>
-          </div>
-        </section>
+        </details>
 
         <section class="status-card history-card" id="my-history-card">
           <div class="section-heading compact">
@@ -269,7 +273,7 @@
 
     <script src="/vendor/marked.umd.js" defer></script>
     <script src="/vendor/purify.min.js" defer></script>
-    <script src="/markdown.js?v=safe-markdown" defer></script>
-    <script src="/app.js?v=safe-markdown" defer></script>
+    <script src="/markdown.js?v=inline-citations" defer></script>
+    <script src="/app.js?v=reasoning-trace" defer></script>
   </body>
 </html>
