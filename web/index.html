@@ -204,6 +204,14 @@
           </div>
         </section>
 
+        <details class="status-card remediation-section" id="remediation-section">
+          <summary>修复计划 <span id="remediation-count" class="timeline-count">0 步</span></summary>
+          <p class="environment-note">仅为用户手动计划，不会自动执行或重新检测。计划完成不等于网络故障已解决。</p>
+          <button id="remediation-generate" type="button" disabled>生成 / 更新低风险计划</button>
+          <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
+          <div id="remediation-plan"></div>
+        </details>
+
         <details class="status-card reasoning-section" id="reasoning-section">
           <summary class="reasoning-summary">
             <span>诊断思路</span>

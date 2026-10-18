@@ -32,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 7
+SNAPSHOT_SCHEMA_VERSION = 8
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -57,6 +57,7 @@ class DiagnosisRepository(Protocol):
     def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None: ...
     def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None: ...
     def update_client_snapshot(self, user_id: UUID, session_id: UUID, task) -> bool: ...
+    def update_remediation(self, user_id: UUID, session_id: UUID, task) -> bool: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -108,6 +109,9 @@ class SQLiteDiagnosisRepository:
             diagnostic_target=response.diagnostic_target,
             client_snapshot_summary=response.client_snapshot_summary,
             client_evidence=response.client_evidence,
+            remediation_plan=response.remediation_plan,
+            remediation_plan_history=response.remediation_plan_history,
+            remediation_readiness=response.remediation_readiness,
             analyzed_snapshot_id=response.client_snapshot_summary.snapshot_id if response.client_snapshot_summary and any(item.evidence_origin == "client_snapshot" for item in response.diagnosis.evidence) else None,
             created_at=now,
             updated_at=now,
@@ -182,6 +186,10 @@ class SQLiteDiagnosisRepository:
                     record = _record_from_row(row).model_copy(update={
                         "environment_profile": profile, "schema_version": SNAPSHOT_SCHEMA_VERSION,
                     })
+                    from netpilot.remediation.planner import environment_key
+                    from netpilot.remediation.service import supersede
+                    if record.remediation_plan and record.remediation_plan.environment_key != environment_key(profile):
+                        supersede(record.remediation_plan)
                     _update_record(connection, record)
         except (sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("用户环境保存失败") from exc
@@ -195,6 +203,8 @@ class SQLiteDiagnosisRepository:
                     existing = _record_from_row(row)
                     updates = {"diagnostic_target":target, "schema_version":SNAPSHOT_SCHEMA_VERSION}
                     if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (target.subject, target.target_version):
+                        from netpilot.remediation.service import supersede
+                        supersede(existing.remediation_plan)
                         updates["diagnosis"] = DiagnosisView(status="completed", summary="诊断对象已切换，尚无当前对象的直接网络检测结论。", tool_rounds=0)
                     _update_record(connection, existing.model_copy(update=updates))
         except (sqlite3.Error, ValueError) as exc:
@@ -220,6 +230,9 @@ class SQLiteDiagnosisRepository:
                 record = record.model_copy(update={
                     "schema_version":SNAPSHOT_SCHEMA_VERSION,
                     "client_snapshot_summary":task.client_snapshot_summary,
+                    "remediation_plan":task.remediation_plan,
+                    "remediation_plan_history":task.remediation_plan_history,
+                    "remediation_readiness":task.remediation_readiness,
                     "client_evidence":[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
                     "environment_profile":task.environment_profile,
                     "diagnostic_target":task.diagnostic_target,
@@ -232,6 +245,25 @@ class SQLiteDiagnosisRepository:
                 return True
         except (sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("客户端快照保存失败") from exc
+
+    def update_remediation(self,user_id,session_id,task) -> bool:
+        """Update an existing Session record, never fabricate a conversation Turn."""
+        try:
+            with self._lock,self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row=connection.execute("SELECT * FROM diagnosis_records WHERE user_id=? AND session_id=?",(str(user_id),str(session_id))).fetchone()
+                if row is None: return False
+                record=_record_from_row(row)
+                trace=merge_reasoning_trace(record.reasoning_trace,task.reasoning_trace,self.reasoning_trace_max_steps)
+                _update_record(connection,record.model_copy(update={
+                    "schema_version":SNAPSHOT_SCHEMA_VERSION,"remediation_plan":task.remediation_plan,
+                    "remediation_plan_history":task.remediation_plan_history,"remediation_readiness":task.remediation_readiness,
+                    "reasoning_trace":trace,"updated_at":datetime.now(timezone.utc),
+                    "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)}),
+                }))
+                return True
+        except (sqlite3.Error,ValueError) as exc:
+            raise DiagnosisStorageError("修复计划保存失败") from exc
 
     def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView:
         try:
@@ -519,7 +551,7 @@ def _merge_session_records(
     sources = _merge_sources(existing.sources, current.sources)
     trace = merge_reasoning_trace(existing.reasoning_trace, [
         step.model_copy(update={"turn_index": existing.turn_count + step.turn_index})
-        if step.turn_index <= current.turn_count and step.event_origin != "client_snapshot" else step
+        if step.turn_index <= current.turn_count and step.event_origin == "agent" else step
         for step in current.reasoning_trace
     ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
@@ -531,6 +563,9 @@ def _merge_session_records(
         diagnostic_target=current.diagnostic_target,
         client_snapshot_summary=current.client_snapshot_summary,
         client_evidence=current.client_evidence,
+        remediation_plan=current.remediation_plan,
+        remediation_plan_history=current.remediation_plan_history,
+        remediation_readiness=current.remediation_readiness,
         analyzed_snapshot_id=current.analyzed_snapshot_id or existing.analyzed_snapshot_id,
         created_at=min(existing.created_at, current.created_at),
         updated_at=max(existing.updated_at, current.updated_at),
@@ -706,6 +741,16 @@ def _record_from_row(row: sqlite3.Row) -> DiagnosisRecordView:
     if record.client_snapshot_summary:
         summary = record.client_snapshot_summary
         summary.applicable = summary.applicable and record.diagnostic_target.subject == "user_client" and summary.target_version == record.diagnostic_target.target_version
+    if record.remediation_plan and record.remediation_plan.status != "superseded":
+        from netpilot.remediation.planner import environment_key
+        from netpilot.remediation.service import supersede
+        plan=record.remediation_plan
+        summary=record.client_snapshot_summary
+        if ((plan.target_subject,plan.target_version) != (record.diagnostic_target.subject,record.diagnostic_target.target_version)
+                or plan.environment_key != environment_key(record.environment_profile)
+                or (plan.based_on_snapshot_id and (summary is None or not summary.applicable or summary.snapshot_id != plan.based_on_snapshot_id
+                    or (plan.readiness == "ready" and (summary.stale or summary.clock_skew_suspected))))):
+            supersede(plan)
     now = datetime.now(timezone.utc)
     for item in record.client_evidence:
         if item.expires_at:

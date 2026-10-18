@@ -92,6 +92,9 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
             session_id=sid, created_at=session.created_at,
             environment_profile=task.environment_profile, diagnostic_target=task.diagnostic_target,
             client_snapshot_summary=task.client_snapshot_summary,
+            remediation_plan=task.remediation_plan,
+            remediation_plan_history=task.remediation_plan_history,
+            remediation_readiness=task.remediation_readiness,
             client_evidence=[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
         ).model_dump(mode="json")
         body.update(snapshot_id=task.client_snapshot_id, snapshot_sequence=task.snapshot_sequence,

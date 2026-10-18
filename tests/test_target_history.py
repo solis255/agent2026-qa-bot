@@ -34,7 +34,7 @@ def test_dt12_history_report_switch_archive_and_chat_sse_match_after_restart(tmp
         assert "DNS 正常" not in response["answer"]
     repository = SQLiteDiagnosisRepository(tmp_path / "target.db")
     record = repository.get(owner,UUID(rid))
-    assert record.schema_version == 7 and repository.count(owner) == 1
+    assert record.schema_version == 8 and repository.count(owner) == 1
     assert record.turn_count == len(record.conversation_turns) == 2
     assert record.diagnostic_target.subject == "user_client"
     assert record.tool_calls[0].target_subject == "netpilot_host"  # Archive preserved.

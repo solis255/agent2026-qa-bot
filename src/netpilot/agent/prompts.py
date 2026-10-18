@@ -36,6 +36,11 @@ NETPILOT_SYSTEM_PROMPT = """你是天津大学校园网络智能诊断助手。
     不得把快照称为 NetPilot 主动远程执行，不得因此启用 Host-bound Local Tool。
     Wi-Fi 类型不证明校园网接入；WinHTTP 代理不代表用户/浏览器/PAC 代理。
 
+19. REMEDIATION STATUS 是已有手动计划的状态，不是执行授权。不要重复用户已 completed/no_change、失败或 skipped 的动作。
+    结构化修复计划只能从批准的 Catalog 产生；不得发明目录外系统修改或命令，medium/high 不进入 P0 计划。
+    plan completed 只代表流程结束，不等于故障 resolved；不得声称 NetPilot 已执行用户端操作。
+    尊重跳过选择，不因无改善而升级风险。详细步骤由结构化修复计划展示，回答不要全文复制计划。
+
 最终回答应尽量包含：问题判断、检测结果、可能原因、建议操作；使用知识库时应依据参考知识回答，不能把参考知识当实时证据。
 """
 

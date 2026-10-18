@@ -40,7 +40,7 @@ async def _validation_error_without_auth_secrets(
 ) -> Response:
     """Do not echo rejected auth/environment values (especially secrets)."""
 
-    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target")):
+    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target", "/api/session/remediation-plan")):
         return await request_validation_exception_handler(request, exc)
     details = [
         {key: value for key, value in error.items() if key not in {"input", "ctx"}}
@@ -71,6 +71,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=app_lifespan,
     )
     app.state.settings = settings or Settings()
+    from netpilot.remediation.catalog import CATALOG
+    from netpilot.remediation.safety import validate_catalog
+    validate_catalog(CATALOG)
     app.add_exception_handler(
         RequestValidationError, _validation_error_without_auth_secrets
     )
@@ -94,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reasoning_trace_enabled=app.state.settings.reasoning_trace_enabled,
         reasoning_trace_max_steps=app.state.settings.reasoning_trace_max_steps,
         reasoning_summary_llm_enabled=app.state.settings.reasoning_summary_llm_enabled,
+        remediation_max_steps=app.state.settings.remediation_max_steps,
     )
     app.state.rag_ready = app.state.retriever is not None
     app.state.diagnosis_repository = None
@@ -127,6 +131,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth_lock = RLock()
     app.state.auth_service = None
 
+    from netpilot.api.remediation_routes import router as remediation_router
+    app.include_router(remediation_router,prefix="/api")
     app.include_router(api_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     from netpilot.api.client_snapshot_routes import router as snapshot_router

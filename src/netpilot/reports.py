@@ -87,6 +87,9 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         diagnostic_target=target,
         client_snapshot_summary=summary,
         client_evidence=record.client_evidence,
+        remediation_plan=record.remediation_plan,
+        remediation_plan_history=record.remediation_plan_history,
+        remediation_readiness=record.remediation_readiness,
         generated_at=record.updated_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -259,6 +262,31 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
     else:
         lines.append("- 本记录没有保存诊断思路；不会根据旧答案推造决策轨迹。")
 
+    lines.extend(["", "## 修复计划", ""])
+    if report.remediation_plan:
+        plan=report.remediation_plan
+        lines.extend([f"- 版本：{plan.plan_version}；对象：{plan.target_subject} v{plan.target_version}",
+                      f"- 状态：{plan.status}；就绪度：{plan.readiness}；{_markdown_text(plan.readiness_reason)}",
+                      "- 仅为手动计划。completed 仅代表流程结束，不代表网络故障已解决。",""])
+        for step in plan.steps:
+            lines.extend([f"### Step {step.order} — {_markdown_text(step.title)}", "",
+                f"- 风险：{step.risk}；管理员：{'是' if step.requires_admin else '否'}",
+                f"- 状态：{step.status}；用户反馈：{step.outcome}",f"- 理由：{_markdown_text(step.rationale)}",
+                *[f"- 操作：{_markdown_text(item)}" for item in step.instructions],
+                f"- 验证：{_markdown_text(step.verification)}",
+                *[f"- 回滚：{_markdown_text(item)}" for item in step.rollback_instructions],
+                f"- 停止条件：{_markdown_text(step.continue_condition or '用户自行决定停止')}",
+                f"- Evidence：{_markdown_text(', '.join(step.evidence_ids) or '有限现象，无直接证据')}",
+                f"- 来源标识：{_markdown_text(', '.join(step.source_refs) or '通用步骤，不依赖校园特定资料')}",
+                f"- 用户备注：{_markdown_text(step.user_note or '无')}",""])
+        for source in plan.sources:
+            if source.source_ref in {ref for step in plan.steps for ref in step.source_refs}:
+                lines.append(f"- {_markdown_text(source.source_type)} / {_markdown_text(source.title)} — {_safe_source(source.source)}")
+    else:
+        lines.append("- 未保存结构化修复计划；不会从旧回答反推。")
+    if report.remediation_plan_history:
+        lines.extend(["", "### 历史失效计划（不可继续执行）", ""])
+        lines.extend(f"- v{item.plan_version} / {item.target_subject} v{item.target_version} / {item.status}" for item in report.remediation_plan_history)
     lines.extend(["", "## 建议操作", ""])
     if diagnosis.recommendations:
         lines.extend(

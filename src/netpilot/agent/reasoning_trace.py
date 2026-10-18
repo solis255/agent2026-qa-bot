@@ -29,7 +29,7 @@ class ReasoningTraceStep(BaseModel):
     severity: Literal["info", "success", "warning", "error"] = "info"
     turn_index: int = Field(default=1, ge=1)
     task_version: int = Field(default=1, ge=1)
-    event_origin: Literal["agent", "client_snapshot"] = "agent"
+    event_origin: Literal["agent", "client_snapshot", "remediation"] = "agent"
 
 
 def trace_signature(step: ReasoningTraceStep) -> tuple:

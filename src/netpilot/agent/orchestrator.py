@@ -88,6 +88,7 @@ class AgentOrchestrator:
         reasoning_trace_max_steps: int = 50,
         reasoning_summary_llm_enabled: bool = False,
         system_prompt: str = NETPILOT_SYSTEM_PROMPT,
+        remediation_max_steps: int = 5,
     ) -> None:
         if max_tool_rounds < 1:
             raise ValueError("max_tool_rounds must be at least 1")
@@ -112,6 +113,7 @@ class AgentOrchestrator:
         self.reasoning_trace_enabled = reasoning_trace_enabled
         self.reasoning_trace_max_steps = reasoning_trace_max_steps
         self.reasoning_summary_llm_enabled = reasoning_summary_llm_enabled
+        self.remediation_max_steps = remediation_max_steps
 
     def run(
         self,
@@ -148,10 +150,18 @@ class AgentOrchestrator:
             task_version=task_state.task_version if task_state is not None else 1,
             enabled=self.reasoning_trace_enabled, max_steps=self.reasoning_trace_max_steps,
         )
-        result = self._run_turn(
-            user_message, history=history, task_state=task_state,
-            history_context=history_context, trace=trace, environment=environment, target=target,
-        )
+        from netpilot.remediation.service import explicit_remediation
+        classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
+        if task_state is not None and explicit_remediation(user_message) and classification.intent not in {TurnIntent.STATE_CHANGED,TurnIntent.KNOWLEDGE_REQUEST}:
+            trace.intent = TurnIntent.FOLLOWUP_ACTION
+            trace.append("decision","复用诊断生成手动计划","复用当前证据与用户步骤反馈，不运行新的网络工具或自动重测。")
+            result = AgentResult(answer="正在整理批准目录中的低风险手动步骤。",status=AgentStatus.COMPLETED,
+                                 tool_rounds=0,turn_intent=TurnIntent.FOLLOWUP_ACTION,response_mode=ResponseMode.ANALYSIS)
+        else:
+            result = self._run_turn(
+                user_message, history=history, task_state=task_state,
+                history_context=history_context, trace=trace, environment=environment, target=target,
+            )
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
@@ -162,8 +172,17 @@ class AgentOrchestrator:
             or any(step.execution_scope != "target_neutral" for step in result.steps)
         ):
             result = result.model_copy(update={"answer":scoped_answer(result.answer, target)})
-        pending = task_state.pending_snapshot_trace if task_state is not None else []
-        return result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target})
+        pending = [*task_state.pending_snapshot_trace,*task_state.pending_remediation_trace] if task_state is not None else []
+        result = result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target})
+        if task_state is not None:
+            from netpilot.remediation.integration import enrich_result
+            try:
+                result = enrich_result(task_state,result,user_message,max_steps=self.remediation_max_steps,
+                                       trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
+            except Exception as exc:
+                # Planning must never break the authoritative diagnosis.
+                logger.warning("remediation_integration_failed error_type=%s",type(exc).__name__)
+        return result
 
     def _run_turn(
         self, user_message: str, *, history: Sequence[ChatMessage],
@@ -332,6 +351,7 @@ class AgentOrchestrator:
                 sources=sources,
                 environment_profile=environment,
                 diagnostic_target=target,
+                remediation_plan=task_state.remediation_plan if task_state else None,
             )
         )
         messages.extend(message.model_copy(deep=True) for message in history)
@@ -415,6 +435,7 @@ class AgentOrchestrator:
                 sources=sources,
                 environment_profile=environment,
                 diagnostic_target=target,
+                remediation_plan=task_state.remediation_plan if task_state else None,
             )
 
         while True:

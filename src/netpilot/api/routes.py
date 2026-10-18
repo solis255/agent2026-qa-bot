@@ -112,6 +112,7 @@ def create_session(request: Request, user: CurrentUser) -> SessionResponse:
         created_at=snapshot.created_at,
         environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
         diagnostic_target=_sessions(request).task_state(snapshot.session_id, user.id).diagnostic_target,
+        remediation_readiness=_sessions(request).task_state(snapshot.session_id,user.id).remediation_readiness,
     )
 
 
@@ -125,6 +126,9 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
             environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
             diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
             client_snapshot_summary=_sessions(request).task_state(session_id, user.id).client_snapshot_summary,
+            remediation_plan=_sessions(request).task_state(session_id,user.id).remediation_plan,
+            remediation_plan_history=_sessions(request).task_state(session_id,user.id).remediation_plan_history,
+            remediation_readiness=_sessions(request).task_state(session_id,user.id).remediation_readiness,
             client_evidence=[item for item in _sessions(request).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
         )
     except SessionNotFoundError as exc:
@@ -194,6 +198,9 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     task = _sessions(request).task_state(payload.session_id, owner_id)
     response.client_snapshot_summary = task.client_snapshot_summary
     response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
+    response.remediation_plan = task.remediation_plan
+    response.remediation_plan_history = task.remediation_plan_history
+    response.remediation_readiness = task.remediation_readiness
     if result.reused_evidence_ids and result.response_mode is not None and result.response_mode.value in {"diagnostic", "analysis", "report"}:
         from netpilot.client_snapshot.service import apply_snapshot_diagnosis
         apply_snapshot_diagnosis(response, task.reusable_evidence())

@@ -296,6 +296,15 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .snapshot-card input { max-width: 100%; }
 .snapshot-card button { background: #e9f2ff; color: #1458b4; padding: 9px; }
 .snapshot-card li { overflow-wrap: anywhere; margin-bottom: 5px; }
+.remediation-section > summary { cursor: pointer; font-weight: 700; }
+.remediation-section button { color: #1458b4; background: #e9f2ff; padding: 8px; border-radius: 7px; }
+.remediation-list { list-style: none; padding: 0; font-size: .78rem; line-height: 1.6; }
+.remediation-list > li { border: 1px solid #dbe7f5; padding: 10px; border-radius: 9px; margin: 10px 0; overflow-wrap: anywhere; }
+.remediation-list > .remediation-current { border-left: 3px solid #3984df; background: #f8fbff; }
+.remediation-list summary { cursor: pointer; font-weight: 600; }
+.remediation-rationale { font-size: .78rem; }
+.remediation-feedback-controls { display: flex; flex-wrap: wrap; gap: 7px; }
+.remediation-feedback-controls select, .remediation-feedback-controls textarea { width: 100%; padding: 7px; font: inherit; }
 .tool-execution-context { display: block; color: #526b87; overflow-wrap: anywhere; }
 .environment-summary { font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
 .environment-note { font-size: .72rem; color: #64748b; line-height: 1.5; }

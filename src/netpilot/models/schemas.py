@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from netpilot.agent.schemas import AgentStatus
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
+from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
@@ -34,7 +35,13 @@ class HealthResponse(BaseModel):
     client_snapshot_max_bytes: int = Field(default=262144, ge=1024)
 
 
-class SessionResponse(BaseModel):
+class RemediationStateView(BaseModel):
+    remediation_plan: RemediationPlan | None = None
+    remediation_plan_history: list[RemediationPlan] = Field(default_factory=list,max_length=20)
+    remediation_readiness: RemediationReadiness | None = None
+
+
+class SessionResponse(RemediationStateView):
     session_id: UUID
     created_at: datetime
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
@@ -149,7 +156,7 @@ class ExecutionMetricsView(BaseModel):
     reasoning_summary_completion_tokens: int = Field(default=0, ge=0)
 
 
-class ChatResponse(BaseModel):
+class ChatResponse(RemediationStateView):
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
@@ -203,8 +210,8 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
     return value
 
 
-class DiagnosisRecordView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7] = 7
+class DiagnosisRecordView(RemediationStateView):
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8] = 8
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     analyzed_snapshot_id: str | None = None
@@ -277,8 +284,8 @@ class DiagnosisHistoryResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class DiagnosisReportView(BaseModel):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7] = 7
+class DiagnosisReportView(RemediationStateView):
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8] = 8
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)

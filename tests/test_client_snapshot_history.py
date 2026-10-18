@@ -47,7 +47,7 @@ def test_cs15_cs16_history_reopen_export_privacy_and_no_fake_tools_or_turns(tmp_
         assert sum(counts.values()) == 0
     repository=SQLiteDiagnosisRepository(tmp_path / "target.db")
     record=repository.get(owner,rid)
-    assert record.schema_version == 7 and record.turn_count == len(record.conversation_turns) == 2
+    assert record.schema_version == 8 and record.turn_count == len(record.conversation_turns) == 2
     assert record.client_snapshot_summary.snapshot_sequence == 2
     assert len(record.client_evidence) == 10 and sum(item.superseded for item in record.client_evidence) == 5
     assert sum(item.title == "收到客户端诊断快照" for item in record.reasoning_trace) == 2

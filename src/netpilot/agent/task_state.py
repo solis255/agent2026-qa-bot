@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
+from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -83,6 +84,12 @@ class SessionTaskState(BaseModel):
     client_snapshot_id: str | None = None
     snapshot_sequence: int = 0
     pending_snapshot_trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    remediation_plan: RemediationPlan | None = None
+    remediation_plan_history: list[RemediationPlan] = Field(default_factory=list, max_length=20)
+    remediation_plan_version: int = 0
+    remediation_symptom: str = Field(default="", max_length=4000)
+    remediation_readiness: RemediationReadiness = Field(default_factory=lambda: RemediationReadiness(status="not_ready",reason="尚无修复计划，请先诊断或补充现象。"))
+    pending_remediation_trace: list[ReasoningTraceStep] = Field(default_factory=list)
 
     def reusable_evidence(self) -> list[EvidenceRecord]:
         now = datetime.now(timezone.utc)
@@ -102,6 +109,8 @@ class SessionTaskState(BaseModel):
             if record.task_version == self.task_version:
                 record.superseded = True
         self.task_version += 1
+        from netpilot.remediation.service import supersede
+        supersede(self.remediation_plan)
         if self.client_snapshot_summary:
             self.client_snapshot_summary.applicable = False
         if self.diagnostic_target.limitation_code == "client_snapshot_available":
@@ -110,6 +119,9 @@ class SessionTaskState(BaseModel):
         self.coverage = DiagnosticCoverage()
         self.hypotheses.clear()
         self.last_evidence_sufficiency = None
+
+        from netpilot.remediation.service import invalidate
+        invalidate(self)
 
     def set_target(self, target: DiagnosticTarget) -> None:
         self.diagnostic_target = target.model_copy(deep=True)
@@ -125,6 +137,8 @@ class SessionTaskState(BaseModel):
         self.coverage = coverage_from_observations(evidence=active)
         self.hypotheses = track_hypotheses(evidence=active)
         self.last_evidence_sufficiency = None
+        from netpilot.remediation.service import invalidate
+        invalidate(self)
 
 
 def evidence_from_step(

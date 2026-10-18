@@ -10,6 +10,8 @@ const state = {
   diagnosticTarget: null,
   clientSnapshotSummary: null,
   clientEvidence: [],
+  remediationPlan: null,
+  remediationReadiness: null,
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -24,6 +26,11 @@ const state = {
 };
 
 const elements = {
+  remediationSection: document.querySelector("#remediation-section"),
+  remediationGenerate: document.querySelector("#remediation-generate"),
+  remediationStatus: document.querySelector("#remediation-status"),
+  remediationCount: document.querySelector("#remediation-count"),
+  remediationPlan: document.querySelector("#remediation-plan"),
   snapshotForm: document.querySelector("#snapshot-form"),
   snapshotFile: document.querySelector("#snapshot-file"),
   snapshotUpload: document.querySelector("#snapshot-upload"),
@@ -170,6 +177,10 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  elements.remediationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
+  for (const control of elements.remediationPlan.querySelectorAll("button, select, textarea")) {
+    control.disabled = busy || !state.user || state.viewingHistory || ["superseded", "cancelled"].includes(state.remediationPlan?.status);
+  }
   const snapshotDisabled = busy || !state.user || !state.sessionId || state.viewingHistory || state.diagnosticTarget?.subject !== "user_client" || state.diagnosticTarget?.relationship_to_netpilot !== "remote";
   elements.snapshotFile.disabled = snapshotDisabled;
   elements.snapshotUpload.disabled = snapshotDisabled;
@@ -377,6 +388,8 @@ function showAuthGate(message = "请先登录或注册。") {
   state.diagnosticTarget = null;
   state.clientSnapshotSummary = null;
   state.clientEvidence = [];
+  state.remediationPlan = null;
+  state.remediationReadiness = null;
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -583,6 +596,8 @@ function resetConversation() {
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
   elements.snapshotFile.value = "";
+  renderRemediationPlan(state.remediationPlan);
+  elements.remediationSection.open = false;
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -649,6 +664,7 @@ function collectBrowserEnvironment() {
 }
 
 async function uploadBrowserEnvironment(authEpoch, sessionId) {
+  const baseline = state.environmentProfile;
   try {
     const values = collectBrowserEnvironment();
     if (!Object.keys(values).length) return;
@@ -656,6 +672,7 @@ async function uploadBrowserEnvironment(authEpoch, sessionId) {
     if (state.authEpoch !== authEpoch || state.sessionId !== sessionId) return;
     state.environmentProfile = profile;
     renderEnvironmentProfile(profile);
+    invalidateDisplayedPlan(baseline, profile);
   } catch (_error) {
     if (state.authEpoch === authEpoch && state.sessionId === sessionId) elements.environmentStatus.textContent = "浏览器环境上报不可用；仍可手动填写环境，不影响诊断。";
   }
@@ -681,6 +698,7 @@ async function saveEnvironment(event) {
     state.environmentProfile = profile;
     renderEnvironmentProfile(profile);
     elements.environmentStatus.textContent = "环境已保存到服务端；已有诊断证据保持不变。";
+    invalidateDisplayedPlan(baseline, profile);
   } catch (error) {
     if (state.authEpoch === authEpoch) elements.environmentStatus.textContent = error.message;
   } finally {
@@ -719,6 +737,89 @@ function renderClientSnapshot(summary, evidence = [], {historical = false, targe
   }
 }
 
+const REMEDIATION_STATUS = {proposed:"待处理",in_progress:"进行中",completed:"流程结束（非故障解决）",superseded:"已失效，请重新生成",cancelled:"已取消"};
+const STEP_STATUS = {pending:"待处理",completed:"已完成",skipped:"已跳过（未执行）",failed:"执行失败"};
+const STEP_OUTCOME = {unknown:"暂不确定",improved:"有改善",no_change:"没有变化",worse:"变差"};
+
+function invalidateDisplayedPlan(before, after) {
+  if (!state.remediationPlan) return;
+  if (["os_family","os_version","network_access","vpn_enabled","proxy_enabled","affected_scope","affected_service"].some(key => (before?.[key] ?? null) !== (after?.[key] ?? null))) {
+    state.remediationPlan = {...state.remediationPlan,status:"superseded"};
+    renderRemediationPlan(state.remediationPlan);
+  }
+}
+
+function renderRemediationPlan(plan, {historical = false} = {}) {
+  elements.remediationPlan.replaceChildren();
+  elements.remediationCount.textContent = `${plan?.steps?.length || 0} 步`;
+  if (!plan) {
+    elements.remediationStatus.textContent = "尚未生成修复计划；证据不足时先补充现象。";
+    return;
+  }
+  const target = TARGET_LABELS[plan.target_subject] || "未明确";
+  elements.remediationStatus.textContent = `${historical ? "历史计划（只读）· " : ""}v${plan.plan_version} · ${target} · ${REMEDIATION_STATUS[plan.status] || "未知状态"} · ${plan.readiness}：${plan.readiness_reason}`;
+  const firstPending = plan.steps?.find(step => step.status === "pending");
+  const list = document.createElement("ol");
+  list.className = "remediation-list";
+  for (const step of plan.steps || []) {
+    const row = document.createElement("li");
+    row.className = step === firstPending && plan.status !== "superseded" ? "remediation-current" : "";
+    const details = document.createElement("details");
+    details.open = step === firstPending;
+    const heading = document.createElement("summary");
+    heading.textContent = `${step.order}. ${step.title} · ${step.risk === "low" ? "低风险" : "非 P0 风险"} · ${STEP_STATUS[step.status] || "未知"} · ${STEP_OUTCOME[step.outcome] || "暂不确定"}`;
+    const rationale = document.createElement("div");
+    rationale.className = "markdown-body remediation-rationale";
+    const refs = (step.source_refs || []).map(ref => `[[cite:${ref}]]`).join("");
+    renderAssistantMarkdown(rationale, `为什么：${step.rationale || ""}${refs}`, plan.sources || []);
+    const instructions = document.createElement("ol");
+    for (const text of step.instructions || []) {const line = document.createElement("li");line.textContent = text;instructions.append(line);}
+    details.append(heading, rationale, instructions);
+    for (const text of [`完成后验证：${step.verification}`,`回滚：${(step.rollback_instructions || []).join("；") || "无需恢复配置"}`,`停止条件：${step.continue_condition || "用户自行决定停止"}`,`用户备注：${step.user_note || "无"}`]) {
+      const line = document.createElement("p");line.textContent = text;details.append(line);
+    }
+    if (!historical && step.status === "pending" && !["superseded","cancelled"].includes(plan.status)) {
+      const controls = document.createElement("div");controls.className = "remediation-feedback-controls";
+      const outcome = document.createElement("select");outcome.setAttribute("aria-label",`步骤 ${step.order} 的反馈`);
+      for (const [value,label] of Object.entries(STEP_OUTCOME)) {const option = document.createElement("option");option.value=value;option.textContent=label;outcome.append(option);}
+      const note = document.createElement("textarea");note.maxLength=500;note.placeholder="可选备注，不填密码、Cookie 或密钥";note.setAttribute("aria-label",`步骤 ${step.order} 的备注`);
+      controls.append(outcome,note);
+      for (const [action,label] of [["complete","已完成"],["skip","跳过"],["fail","执行失败"]]) {
+        const button = document.createElement("button");button.type="button";button.textContent=label;button.dataset.action=action;
+        button.addEventListener("click",()=>sendRemediationFeedback(step.step_id,action,action === "skip" ? "unknown" : outcome.value,note.value));
+        controls.append(button);
+      }
+      details.append(controls);
+    }
+    row.append(details);list.append(row);
+  }
+  elements.remediationPlan.append(list);
+}
+
+async function remediationRequest(url, options) {
+  if (!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
+  const epoch=state.authEpoch, sessionId=state.sessionId;
+  setBusy(true);
+  try {
+    const result=await requestJSON(url, options);
+    if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
+    state.remediationPlan=result.remediation_plan || null;
+    state.remediationReadiness=result.remediation_readiness || null;
+    renderRemediationPlan(state.remediationPlan);
+    appendTurnReasoningTrace(result.reasoning_trace || []);
+  } catch (error) {
+    if (epoch === state.authEpoch && sessionId === state.sessionId) elements.remediationStatus.textContent=error.message;
+  } finally {if (epoch === state.authEpoch) setBusy(false);}
+}
+
+async function generateRemediationPlan() {
+  await remediationRequest("/api/session/remediation-plan",{method:"POST",body:JSON.stringify({session_id:state.sessionId})});
+}
+
+async function sendRemediationFeedback(stepId, action, outcome="unknown", userNote="") {
+  await remediationRequest(`/api/session/remediation-plan/steps/${encodeURIComponent(stepId)}`,{method:"PATCH",body:JSON.stringify({session_id:state.sessionId,action,outcome,user_note:userNote.trim() || null})});
+}
+
 async function uploadClientSnapshot(event) {
   event.preventDefault();
   if (!state.user || !state.sessionId || state.busy || state.viewingHistory || state.diagnosticTarget?.subject !== "user_client" || state.diagnosticTarget?.relationship_to_netpilot !== "remote") return;
@@ -737,6 +838,8 @@ async function uploadClientSnapshot(event) {
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
     state.clientSnapshotSummary = result.client_snapshot_summary;
     state.clientEvidence = result.client_evidence || [];
+    state.remediationPlan = result.remediation_plan || null;
+    renderRemediationPlan(state.remediationPlan);
     state.environmentProfile = result.environment_profile;
     state.diagnosticTarget = result.diagnostic_target;
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
@@ -767,7 +870,7 @@ async function saveDiagnosticTarget(event) {
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     elements.snapshotFile.value = "";
-    if (changed) { renderDiagnosis(null); renderTools([]); }
+    if (changed) { renderDiagnosis(null); renderTools([]); if (state.remediationPlan) state.remediationPlan={...state.remediationPlan,status:"superseded"};renderRemediationPlan(state.remediationPlan); }
     elements.targetStatus.textContent = "诊断对象已保存；其他对象的旧检测仅保留于历史，不参与当前结论。";
   } catch (error) {
     if (state.authEpoch === epoch) elements.targetStatus.textContent = error.message;
@@ -799,6 +902,8 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.diagnosticTarget = session.diagnostic_target || null;
     state.clientSnapshotSummary = session.client_snapshot_summary || null;
     state.clientEvidence = session.client_evidence || [];
+    state.remediationPlan = session.remediation_plan || null;
+    state.remediationReadiness = session.remediation_readiness || null;
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
@@ -1077,6 +1182,7 @@ async function loadDiagnosisRecord(recordId) {
     state.viewingHistory = true;
     renderEnvironmentProfile(record.environment_profile, { historical: true });
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
+    renderRemediationPlan(record.remediation_plan,{historical:true});
     renderClientSnapshot(record.client_snapshot_summary, record.client_evidence || [], {historical:true, target:record.diagnostic_target});
     elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
@@ -1112,6 +1218,7 @@ async function submitChat(event) {
   appendMessage("user", message);
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+  renderRemediationPlan(state.remediationPlan);
   const streamedAnswer = appendMessage("assistant", "");
   streamedAnswer.classList.add("is-streaming");
   elements.messageInput.value = "";
@@ -1142,6 +1249,9 @@ async function submitChat(event) {
     if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
     state.clientSnapshotSummary = response.client_snapshot_summary || null;
     state.clientEvidence = response.client_evidence || [];
+    state.remediationPlan = response.remediation_plan || null;
+    state.remediationReadiness = response.remediation_readiness || null;
+    renderRemediationPlan(state.remediationPlan);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
@@ -1173,8 +1283,10 @@ function formatReportPreview(report) {
   const metrics = report.metrics || {};
   const usage = metrics.token_usage || {};
   const snapshot = report.client_snapshot_summary;
+  const plan = report.remediation_plan;
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
+    ...(plan ? [`修复计划 v${plan.plan_version}：${REMEDIATION_STATUS[plan.status]}；仅用户手动操作，不代表故障已解决。`,...(plan.steps || []).flatMap(step=>[`${step.order}. ${step.title} · ${step.risk} · ${STEP_STATUS[step.status]} · ${STEP_OUTCOME[step.outcome]}`,`理由：${step.rationale}`,`操作：${step.instructions.join("；")}`,`验证：${step.verification}`,`回滚：${step.rollback_instructions.join("；")}`,`备注：${step.user_note || "无"}`])] : []),
     ...(snapshot ? [`客户端诊断快照：#${snapshot.snapshot_sequence}，${formatHistoryTime(snapshot.generated_at)}，${snapshot.stale || Date.now() > Date.parse(snapshot.expires_at) ? "已过期（历史）" : snapshot.clock_skew_suspected ? "疑似时钟偏差" : "采集时点证据"}，非远程执行。`, ...(report.client_evidence || []).map(item => `${item.superseded ? "历史归档" : "采集证据"}：${item.summary}`)] : []),
     `用户环境：${formatEnvironmentSummary(report.environment_profile)}`,
     `诊断对象：${TARGET_LABELS[report.diagnostic_target?.subject] || TARGET_LABELS.unknown}；执行位置：${EXECUTION_LABELS[report.diagnostic_target?.execution_context] || EXECUTION_LABELS.unavailable}`,
@@ -1350,6 +1462,7 @@ async function activateScenario(scenario) {
   state.diagnosticTarget = response.diagnostic_target || null;
   state.clientSnapshotSummary = null;
   state.clientEvidence = [];
+  state.remediationPlan = null;
   window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   elements.scenarioSelect.value = response.current;
@@ -1466,6 +1579,7 @@ async function deleteCurrentCustomScenario() {
       state.diagnosticTarget = response.diagnostic_target || null;
       state.clientSnapshotSummary = null;
       state.clientEvidence = [];
+      state.remediationPlan = null;
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
@@ -1513,9 +1627,15 @@ elements.chatForm.addEventListener("submit", submitChat);
 elements.targetForm.addEventListener("submit", saveDiagnosticTarget);
 elements.environmentForm.addEventListener("submit", saveEnvironment);
 elements.snapshotForm.addEventListener("submit", uploadClientSnapshot);
+elements.remediationGenerate.addEventListener("click", generateRemediationPlan);
 window.setInterval?.(() => {
   if (state.user && state.clientSnapshotSummary && !state.viewingHistory && !state.busy) {
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+    const snapshot = state.clientSnapshotSummary;
+    if (state.remediationPlan?.readiness === "ready" && state.remediationPlan.status !== "superseded" && state.remediationPlan.based_on_snapshot_id === snapshot.snapshot_id && (snapshot.stale || snapshot.clock_skew_suspected || Date.now() > Date.parse(snapshot.expires_at))) {
+      state.remediationPlan = {...state.remediationPlan,status:"superseded"};
+      renderRemediationPlan(state.remediationPlan);
+    }
   }
 }, 30000);
 elements.environmentForm.addEventListener("change", (event) => {

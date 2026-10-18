@@ -18,6 +18,7 @@ from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
+from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 
 
 class AgentStatus(str, Enum):
@@ -59,6 +60,10 @@ class AgentResult(BaseModel):
     """Final one-shot diagnosis plus its bounded evidence trace."""
 
     answer: str = Field(min_length=1)
+    remediation_plan: RemediationPlan | None = None
+    remediation_plan_history: list[RemediationPlan] = Field(default_factory=list)
+    remediation_readiness: RemediationReadiness | None = None
+    remediation_updated: bool = False
     environment_profile: EnvironmentProfile | None = None
     diagnostic_target: DiagnosticTarget | None = None
     status: AgentStatus

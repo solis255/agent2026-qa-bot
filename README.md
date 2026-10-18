@@ -24,6 +24,7 @@ TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只�
 | 环境画像 | 每个 Session 一份 EnvironmentProfile；浏览器低风险采集、用户编辑/明确表述更新、来源优先级、跨 Turn 复用、历史与报告保存 |
 | 诊断对象 | 区分浏览器设备 / NetPilot 服务主机 / Mock 模拟终端；按工具执行位置限制能力，证据与去重绑定对象版本 |
 | 客户端快照 | Windows 只读脚本 → 手动 JSON 上传 → 客户端 Evidence；校验/脱敏/时效/去重/替换归档，不启用远程执行 |
+| 引导式修复 | 批准目录生成低风险手动计划，展示理由/验证/回滚，记录完成/跳过/结果；不自动执行或重测 |
 | 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
 | 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
 
@@ -225,7 +226,7 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12C 当前为 v7），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12D 当前为 v8），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
 ### 诊断对象（Milestone 12B）
@@ -258,6 +259,19 @@ unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器�
 真实 Windows 普通用户运行尚待验收：本环境执行策略为 Restricted，未绕过策略，也未声称真实采集成功。
 完整契约、CS-01～CS-18 与四个人工 Case 状态见 [12C 验收记录](docs/MILESTONE12C_VALIDATION.md)。
 
+### 引导式修复计划（Milestone 12D）
+
+诊断或明确询问“怎么解决 / 下一步怎么办”时，服务端可从本地批准目录生成最多 5 步手动计划。
+侧栏“修复计划”展示低风险标签、适用对象、理由、操作、验证和回滚；可标记完成、跳过、失败及是否改善。
+“还是不行”复用既有状态，不重复已完成无效或跳过的等价操作，也不会自动升级为高风险操作。
+
+**Plan 不是执行。** 不运行 Shell、不提权、不改 DNS/Proxy/Route、防火墙或执行策略，不自动重测。
+VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认无依赖时建议短暂对比，并提供恢复方法。
+对象、关键环境、诊断依据或快照时效变化使旧计划失效。completed 只表示步骤流程结束，不等于故障 resolved。
+
+结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v8，SQLite 结构仍 v3，旧记录不会从文本反推计划。
+完整接口、批准模板、GR-01～GR-20 和人工验收状态见 [12D 验收记录](docs/MILESTONE12D_VALIDATION.md)。
+
 ### 测试
 
 Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
@@ -266,7 +280,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12C 当前为 v7），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12D 当前为 v8），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -284,7 +298,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-48 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+56 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -295,10 +309,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12C 修改前基线为 `557 passed in 101.74s`；2026-10-18 客户端诊断快照实现后的全量回归实测为：
+Milestone 12D 修改前基线为 `631 passed in 118.66s`；2026-10-19 引导式修复计划实现后的全量回归实测为：
 
 ```text
-631 passed in 104.88s
+711 passed in 123.42s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

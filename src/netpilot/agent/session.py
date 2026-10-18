@@ -171,7 +171,7 @@ class SessionStore:
                         task_state.last_target_limit_version = target.target_version
                 task_state.reasoning_trace = merge_reasoning_trace(
                     task_state.reasoning_trace,
-                    [step if step.event_origin == "client_snapshot" else step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
+                    [step if step.event_origin != "agent" else step.model_copy(update={"turn_index": task_state.turn_index, "task_version": task_state.task_version}) for step in result.reasoning_trace],
                     self.reasoning_trace_max_steps,
                 )
                 for step in result.steps:
@@ -208,9 +208,17 @@ class SessionStore:
                     diagnostic=result.turn_intent
                     in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED},
                 )
+                if result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}:
+                    task_state.remediation_symptom = user_message
+                if result.remediation_updated:
+                    task_state.remediation_plan = result.remediation_plan.model_copy(deep=True) if result.remediation_plan else None
+                    task_state.remediation_plan_history = [item.model_copy(deep=True) for item in result.remediation_plan_history]
+                    if result.remediation_readiness: task_state.remediation_readiness = result.remediation_readiness
+                    task_state.remediation_plan_version = max(task_state.remediation_plan_version,result.remediation_plan.plan_version if result.remediation_plan else 0)
             # Persist under this lock, so a PATCH cannot race a completed Turn.
             response = after_finish() if after_finish is not None else None
             task_state.pending_snapshot_trace.clear()
+            task_state.pending_remediation_trace.clear()
             state.busy = False
             state.updated_at = datetime.now(timezone.utc)
             return response
@@ -242,7 +250,29 @@ class SessionStore:
             for item in task.evidence:
                 if item.expires_at:
                     item.stale = now > item.expires_at
+            from netpilot.remediation.service import invalidate
+            invalidate(task)
             return task
+
+    def remediation(self, session_id, owner_user_id, *, generate=False, step_id=None, feedback=None, max_steps=5, persist=None):
+        """Owner-scoped atomic plan/feedback update, without adding a chat Turn."""
+        from netpilot.remediation.service import ensure_plan, update_step
+        with self._lock:
+            state = self._require(session_id,owner_user_id)
+            if state.busy: raise SessionBusyError(str(session_id))
+            original = _task_state(state)
+            draft = self.task_state(session_id,owner_user_id)
+            events = []
+            if generate:
+                _,events = ensure_plan(draft,max_steps=max_steps,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
+            if feedback is not None:
+                events = update_step(draft,step_id,feedback,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
+            if draft.model_dump() != original.model_dump():
+                persisted = persist(draft) if persist else False
+                if not persisted: draft.pending_remediation_trace.extend(events)
+                state.task_state = draft
+                state.updated_at = datetime.now(timezone.utc)
+            return draft.model_copy(deep=True),events
 
     def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None):
         """Atomic owner-scoped import. A snapshot is not an Agent Turn/Tool Call."""
@@ -288,6 +318,8 @@ class SessionStore:
             if persist is not None:
                 persist(profile)
             task.environment_profile = profile
+            from netpilot.remediation.service import invalidate
+            invalidate(task)
             state.updated_at = datetime.now(timezone.utc)
             return profile.model_copy(deep=True)
 
