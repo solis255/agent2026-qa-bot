@@ -9,6 +9,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from netpilot.models import DiagnosisRecordView, DiagnosisReportView
+from netpilot.privacy import export_safe, sanitize_url
 from netpilot.environment import OS_LABELS, ACCESS_LABELS, SCOPE_LABELS, bool_label
 from netpilot.diagnostic_target import SUBJECT_LABELS, EXECUTION_LABELS, RELATIONSHIP_LABELS, matches_target
 
@@ -61,6 +62,7 @@ class DiagnosisReportArtifact:
 def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
     """Build a stable report from one Session-level diagnosis snapshot."""
 
+    record = export_safe(record)
     target = record.diagnostic_target
     current_calls = [call for call in record.tool_calls if target.subject == "unknown" or matches_target(call, target)]
     archived_calls = [call for call in record.tool_calls if call not in current_calls]
@@ -80,6 +82,8 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
     if summary and summary.applicable and (summary.stale or summary.clock_skew_suspected):
         conclusion = "快照已过期或疑似时钟偏差；以下仅为历史采集状态，不代表现在。\n\n" + conclusion
     return DiagnosisReportView(
+        privacy_metadata=record.privacy_metadata,
+        privacy_policy_version=record.privacy_policy_version,
         report_id=record.record_id,
         record_id=record.record_id,
         session_id=record.session_id,
@@ -140,11 +144,12 @@ def export_diagnosis_report(
 
 
 def render_report_json(report: DiagnosisReportView) -> str:
-    payload = report.model_dump(mode="json")
+    payload = export_safe(report).model_dump(mode="json")
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def render_report_markdown(report: DiagnosisReportView) -> str:
+    report = export_safe(report)
     diagnosis = report.diagnosis
     usage = report.metrics.token_usage
     lines = [
@@ -153,6 +158,7 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         "## 报告信息",
         "",
         f"- 报告 ID：`{report.report_id}`",
+        f"- 隐私策略版本：{report.privacy_policy_version}（凭据移除、设备标识最小化）",
         f"- 诊断记录 ID：`{report.record_id}`",
         f"- 会话 ID：`{report.session_id}`",
         f"- 会话创建时间：{_markdown_text(report.created_at.isoformat())}",
@@ -400,7 +406,7 @@ def _indented_json(value: object) -> list[str]:
 
 
 def _safe_source(value: str) -> str:
-    cleaned = _CONTROL_CHARACTERS.sub("", value).strip()
+    cleaned = sanitize_url(_CONTROL_CHARACTERS.sub("", value).strip())
     parsed = urlsplit(cleaned)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return "来源链接不可用"

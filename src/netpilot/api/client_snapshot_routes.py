@@ -107,6 +107,11 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
     except MultipartParseError as exc:
         raise HTTPException(422, "multipart 上传格式不正确。") from exc
     except SnapshotValidationError as exc:
+        if exc.code in {"sensitive_fields", "sensitive_values"}:
+            import logging
+            from netpilot.observability import log_event
+            log_event(logging.getLogger("netpilot.privacy"), "sensitive_upload_rejected",
+                      categories=["forbidden_snapshot_data"], count=1, context="snapshot")
         raise HTTPException(413 if exc.code == "file_too_large" else 422, "快照被拒绝：" + exc.code) from exc
     except SessionNotFoundError as exc:
         raise HTTPException(404, "会话不存在或已失效。") from exc

@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     escalation_max_evidence_items: int = Field(default=12, ge=1, le=50)
     escalation_max_packages: int = Field(default=5, ge=1, le=20)
     escalation_mask_private_ip: bool = False
+    privacy_mask_private_ip: bool = False
+    privacy_remove_public_client_ip: bool = True
+    privacy_redact_hostname: bool = True
+    privacy_redact_email: bool = False
+    privacy_redact_phone: bool = False
+    privacy_policy_version: Literal["1"] = "1"
     reasoning_trace_enabled: bool = True
     reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
     reasoning_summary_llm_enabled: bool = False

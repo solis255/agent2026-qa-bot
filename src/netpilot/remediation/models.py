@@ -1,11 +1,11 @@
 """Bounded remediation contracts; no commands or risk overrides from clients."""
 from datetime import datetime, timezone
-import re
 from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from netpilot.diagnostic_target import TargetSubject
+from netpilot.privacy import redact_text
 
 
 def utcnow():
@@ -114,6 +114,4 @@ class StepFeedback(RemediationRequest):
     @field_validator("user_note")
     @classmethod
     def private_note(cls, value):
-        if value and re.search(r"(?i)(?:password|api[_-]?key|authorization|cookie|token|secret|密码|密钥)\s*[:=：]|\bBearer\s+|\S+:\S+@|\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b", value):
-            raise ValueError("do not include credentials or device identifiers")
-        return value.strip() or None if value is not None else None
+        return redact_text(value.strip()).value or None if value is not None else None

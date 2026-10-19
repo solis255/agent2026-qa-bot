@@ -11,19 +11,12 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import Request, Response
+from netpilot.privacy.logging import safe_log_context
 
 
 _request_id: ContextVar[str] = ContextVar("netpilot_request_id", default="-")
 _session_id: ContextVar[str] = ContextVar("netpilot_session_id", default="-")
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-_SENSITIVE_KEYS = {
-    "api_key",
-    "authorization",
-    "cookie",
-    "credential",
-    "password",
-    "secret",
-}
 
 
 def configure_observability(level: str) -> None:
@@ -70,7 +63,7 @@ def log_event(
     }
     logger.log(
         level,
-        json.dumps(_redact(payload), ensure_ascii=False, separators=(",", ":")),
+        json.dumps(safe_log_context(payload), ensure_ascii=False, separators=(",", ":")),
     )
 
 
@@ -98,7 +91,7 @@ async def request_logging_middleware(
             logging.getLogger("netpilot.http"),
             "http_request",
             method=request.method,
-            path=request.url.path,
+            path=_log_route(request),
             http_status=http_status,
             duration_ms=max(0, round((perf_counter() - started) * 1000)),
             error_type=error_type,
@@ -107,16 +100,14 @@ async def request_logging_middleware(
         _request_id.reset(request_token)
 
 
+def _log_route(request: Request) -> str:
+    path = getattr(request.scope.get("route"), "path", None)
+    if path is None:
+        return "[unmatched_route]"
+    # New FastAPI route scopes may store the path relative to an API router.
+    return "/api" + path if request.url.path.startswith("/api/") and not path.startswith("/api/") else path
+
+
 def _redact(value: Any, key: str = "") -> Any:
-    normalized = key.lower()
-    if normalized in _SENSITIVE_KEYS or any(
-        normalized.endswith(f"_{item}") for item in _SENSITIVE_KEYS
-    ):
-        return "[REDACTED]"
-    if isinstance(value, dict):
-        return {str(k): _redact(v, str(k)) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redact(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    from netpilot.privacy import redact_mapping
+    return redact_mapping({key: value}).value[key]

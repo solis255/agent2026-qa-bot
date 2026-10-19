@@ -105,7 +105,8 @@ def test_report_generation_is_deterministic_complete_and_markdown_safe(
     assert first.created_at == record.created_at
     assert first.updated_at == record.updated_at
     assert first.turn_count == 1
-    assert first.latest_user_message == question
+    # 12H removes unsafe URL schemes before persistence/presentation.
+    assert first.latest_user_message == question.replace("javascript:bad", "[REDACTED]")
     assert "# TJU NetPilot 故障诊断报告" in markdown
     for section in (
         "## 用户问题",

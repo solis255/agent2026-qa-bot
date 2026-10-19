@@ -196,9 +196,11 @@ def update_target(payload: DiagnosticTargetRequest, request: Request, user: Curr
 
 
 def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest, result: AgentResult) -> ChatResponse:
+    from netpilot.privacy import redact_text, safe_value
     target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
     result = result.model_copy(update={"diagnostic_target":target})
     response = present_chat(payload.session_id, result)
+    response.redacted_user_message = redact_text(payload.message).value
     response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
     response.diagnostic_target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
     task = _sessions(request).task_state(payload.session_id, owner_id)
@@ -215,7 +217,7 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     if result.reused_evidence_ids and result.response_mode is not None and result.response_mode.value in {"diagnostic", "analysis", "report"}:
         from netpilot.client_snapshot.service import apply_snapshot_diagnosis
         apply_snapshot_diagnosis(response, task.reusable_evidence())
-    return _persist_session_diagnosis(request, owner_id, payload.message, response)
+    return _persist_session_diagnosis(request, owner_id, payload.message, safe_value(response))
 
 
 @router.post("/chat", response_model=ChatResponse, tags=["chat"])

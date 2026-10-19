@@ -10,7 +10,7 @@ from netpilot.escalation.models import (
     PackageIssue, PackageEvidence, PackageHypothesis, PackageRemediation,
     PackageVerification, PackageResolution, PackageReason, PackagePrivacy,
 )
-from netpilot.escalation.privacy import redact, REDACTED_FIELDS
+from netpilot.escalation.privacy import redact, REDACTED_FIELDS, escalation_policy
 
 
 def canonical(value):
@@ -29,7 +29,10 @@ def _json(value):
 
 
 def package_digest(package):
-    return digest(package.model_dump(mode="json", exclude={"package_digest"}))
+    excluded = {"package_digest"}
+    # Old 12G immutable artifacts were signed before these fields existed.
+    excluded.update({k for k in ("privacy_metadata", "privacy_policy_version") if k not in package.model_fields_set})
+    return digest(package.model_dump(mode="json", exclude=excluded))
 
 
 def material_request(message):
@@ -56,23 +59,8 @@ def _stale(item, task, now):
 
 
 def _safe_text(task, policy):
-    # Also remove known sensitive values wherever repeated in a free-text summary.
-    values = set()
-    def collect(obj):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                if re.search(r"(?i)hostname|computername|ssid|bssid|mac(?:_address)?$|password|passwd|cookie|authorization|api.?key|token|secret|credential|user.?agent|location|latitude|longitude", str(k)):
-                    if isinstance(v, (str, int, float)) and len(str(v)) >= 3: values.add(str(v))
-                else: collect(v)
-        elif isinstance(obj, (list, tuple)):
-            for v in obj: collect(v)
-    for e in task.evidence:
-        collect(e.data); collect(e.arguments)
-    def safe(value):
-        if value is None: return None
-        for secret in sorted(values, key=len, reverse=True): value = value.replace(secret, "[redacted]")
-        return redact(value, policy)
-    return safe
+    from netpilot.privacy.redactor import safe_text_factory
+    return safe_text_factory(task.evidence, escalation_policy(policy))
 
 
 def _content(task, max_evidence, policy, now):
@@ -170,7 +158,7 @@ def _content(task, max_evidence, policy, now):
 
 
 def state_fingerprint(task, *, max_evidence=12, policy=None, now=None):
-    policy = policy or EscalationPrivacyPolicy()
+    policy = escalation_policy(policy)
     content = _content(task,max_evidence,policy,now or datetime.now(timezone.utc))
     # Material/report requests are not new diagnostic observations.
     content["issue"] = content["issue"].model_copy(update={"turn_count":0})
@@ -183,8 +171,10 @@ def state_fingerprint(task, *, max_evidence=12, policy=None, now=None):
 def build_package(task, *, version=1, max_evidence=12, policy=None, now=None):
     if not 1 <= max_evidence <= 50: raise ValueError("invalid evidence limit")
     now = now or datetime.now(timezone.utc)
-    policy = policy or EscalationPrivacyPolicy()
+    policy = escalation_policy(policy)
     package = EscalationPackage(session_id=task.session_id,package_version=version,generated_at=now,
         created_from_state_version=task.resolution.state_version,created_from_task_version=task.task_version,created_from_target_version=task.diagnostic_target.target_version,
         source_state_fingerprint=state_fingerprint(task,max_evidence=max_evidence,policy=policy,now=now),**_content(task,max_evidence,policy,now))
+    from netpilot.privacy import export_safe
+    package = export_safe(package, escalation_policy(policy))
     return package.model_copy(update={"package_digest":package_digest(package)})

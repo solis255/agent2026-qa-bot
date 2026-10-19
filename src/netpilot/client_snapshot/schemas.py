@@ -185,6 +185,7 @@ class ClientDiagnosticSnapshot(StrictModel):
 
 
 class ClientSnapshotSummary(BaseModel):
+    privacy_policy_version: str = "1"
     model_config = ConfigDict(extra="forbid")
     snapshot_id: str
     snapshot_digest: str

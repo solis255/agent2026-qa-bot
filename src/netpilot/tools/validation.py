@@ -80,7 +80,8 @@ def validate_http_url(value: str) -> str:
     else:
         netloc_host = host
     netloc = f"{netloc_host}:{port}" if port is not None else netloc_host
-    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", parsed.query, ""))
+    from netpilot.privacy import sanitize_url
+    return sanitize_url(urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", parsed.query, "")))
 
 
 def assert_safe_direct_http_host(host: str) -> None:

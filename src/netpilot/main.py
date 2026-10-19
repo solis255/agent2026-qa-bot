@@ -10,7 +10,6 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -40,10 +39,8 @@ async def _validation_error_without_auth_secrets(
 ) -> Response:
     """Do not echo rejected auth/environment values (especially secrets)."""
 
-    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target", "/api/session/remediation-plan", "/api/session/verification", "/api/session/resolution", "/api/session/escalation-package")):
-        return await request_validation_exception_handler(request, exc)
     details = [
-        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        {"type": error["type"], "loc": error["loc"], "msg": "请求参数不符合要求。"}
         for error in exc.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": details})
@@ -71,6 +68,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=app_lifespan,
     )
     app.state.settings = settings or Settings()
+    from netpilot.privacy import PrivacyPolicy
+    from netpilot.privacy.middleware import PrivacyMiddleware
+    app.state.privacy_policy = PrivacyPolicy.from_settings(app.state.settings)
+    app.add_middleware(PrivacyMiddleware, policy=app.state.privacy_policy)
     from netpilot.remediation.catalog import CATALOG
     from netpilot.remediation.safety import validate_catalog
     validate_catalog(CATALOG)

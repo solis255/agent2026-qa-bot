@@ -1,10 +1,11 @@
 """Bounded self-contained Markdown / exact-schema JSON, never transcript export."""
 from netpilot.escalation.builder import package_digest
 from netpilot.reports import DiagnosisReportArtifact, DiagnosisReportTooLargeError, _markdown_text
+from netpilot.escalation.privacy import safe_package
 
 
 def markdown(package):
-    p = package
+    p = safe_package(package)
     text = lambda v: _markdown_text(str(v)) if v is not None else "未知 / 未记录"
     lines = ["# TJU NetPilot 升级报修材料", "", "仅供用户自行交接；未提交工单、未通知或发送给任何外部运维系统。", "",
         "## 1. 基本信息", f"- 材料 ID：{p.package_id}；版本：v{p.package_version}", f"- Session：{p.session_id}；生成时间：{p.generated_at.isoformat()}",
@@ -33,6 +34,7 @@ def markdown(package):
 def export_package(package, format="md", *, max_bytes=1_000_000):
     if format not in {"md","json"}: raise ValueError("unsupported format")
     if package_digest(package) != package.package_digest: raise ValueError("invalid package digest")
+    package = safe_package(package)
     content = (markdown(package) if format == "md" else package.model_dump_json(indent=2)).encode("utf-8")
     if len(content) > max_bytes: raise DiagnosisReportTooLargeError("报修材料超过导出大小限制。")
     return DiagnosisReportArtifact(content=content,media_type="text/markdown; charset=utf-8" if format == "md" else "application/json",

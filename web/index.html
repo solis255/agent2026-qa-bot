@@ -175,6 +175,7 @@
             <button id="snapshot-upload" type="submit" disabled>上传 / 替换快照</button>
           </form>
           <p id="snapshot-summary" class="environment-summary" aria-live="polite">尚未导入</p>
+          <p class="privacy-notice">NetPilot 会对密码、Token、Cookie、MAC、SSID 等敏感信息进行拦截或脱敏。</p>
           <p id="snapshot-status" class="environment-note" role="status"></p>
           <ul id="snapshot-evidence" class="environment-note"></ul>
         </section>
@@ -221,6 +222,7 @@
 
         <section class="status-card" id="escalation-section" aria-label="升级报修材料">
           <h2>报修材料</h2>
+          <p class="privacy-notice">隐私处理：已移除凭据类信息，已隐藏 MAC / SSID 和主机名。材料仅保留排障所需信息。</p>
           <p class="environment-note">仅生成脱敏交接材料，由你自行交给授权人员；不会提交工单或通知网络中心。</p>
           <button type="button" id="escalation-generate" disabled>生成报修材料</button>
           <div id="escalation-content" aria-live="polite"></div>

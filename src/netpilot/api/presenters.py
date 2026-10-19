@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from uuid import UUID
+from netpilot.privacy import safe_value
 
 from netpilot.agent import AgentResult, AgentToolStep
 from netpilot.agent.diagnosis import assess_diagnosis, step_status
@@ -35,7 +36,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
         if tool_call.tool_name != "knowledge_search"
         and (result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(tool_call, result.diagnostic_target))
     ]
-    return ChatResponse(
+    return safe_value(ChatResponse(
         remediation_plan=result.remediation_plan,
         remediation_plan_history=result.remediation_plan_history,
         remediation_readiness=result.remediation_readiness,
@@ -82,7 +83,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
         tool_calls=tool_calls,
         sources=[SourceView(**source.model_dump(mode="json")) for source in result.sources],
         reasoning_trace=result.reasoning_trace,
-    )
+    ))
 
 
 def _scope_step(step: AgentToolStep, target: DiagnosticTarget | None = None) -> AgentToolStep:

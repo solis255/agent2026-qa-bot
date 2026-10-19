@@ -15,6 +15,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
+from netpilot.privacy import safe_value
 from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget
 from netpilot.models import DiagnosisView
@@ -144,6 +145,7 @@ class SQLiteDiagnosisRepository:
             conversation_complete=True,
             reasoning_trace=trim_reasoning_trace(response.reasoning_trace, self.reasoning_trace_max_steps),
         )
+        current = safe_value(current, context="persistence")
         try:
             with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -161,6 +163,7 @@ class SQLiteDiagnosisRepository:
                 else:
                     existing = _record_from_row(row)
                     record = _merge_session_records(existing, current, reasoning_trace_max_steps=self.reasoning_trace_max_steps)
+                    record = safe_value(record, context="persistence")
                     _update_record(connection, record)
                 connection.execute(
                     """
@@ -395,7 +398,7 @@ class SQLiteDiagnosisRepository:
                         turn_count=snapshot.turn_count,
                         user_message=snapshot.user_message,
                         latest_user_message=snapshot.latest_user_message,
-                        answer_preview=row["answer_preview"],
+                        answer_preview=_preview(snapshot.answer),
                         status=row["status"],
                         primary_issue=row["primary_issue"],
                         confidence=row["confidence"],
@@ -798,7 +801,7 @@ def _record_from_row(row: sqlite3.Row) -> DiagnosisRecordView:
             ),
         }
     )
-    record = DiagnosisRecordView.model_validate(payload)
+    record = safe_value(DiagnosisRecordView.model_validate(payload))
     from netpilot.client_snapshot.schemas import refresh_summary
     record.client_snapshot_summary = refresh_summary(record.client_snapshot_summary)
     if record.client_snapshot_summary:
@@ -860,6 +863,7 @@ def _update_record(
 
 
 def _record_values(record: DiagnosisRecordView) -> tuple[object, ...]:
+    record = safe_value(record, context="persistence")
     return (
         str(record.record_id),
         SNAPSHOT_SCHEMA_VERSION,

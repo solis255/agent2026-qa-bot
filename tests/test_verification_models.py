@@ -19,9 +19,14 @@ def test_request_rejects_external_execution_authority(extra):
     with pytest.raises(ValidationError):VerificationRequest(session_id=uuid4(),**{extra:"private"})
 
 
-@pytest.mark.parametrize("note",["密码：secret","api_key=secret","Bearer private","a"*501])
-def test_observation_privacy_and_length(note):
-    with pytest.raises(ValidationError):ObservationRequest(session_id=uuid4(),symptom_status="unknown",note=note)
+@pytest.mark.parametrize("note,secret",[("密码：secret","secret"),("api_key=secret","secret"),("Bearer private","private")])
+def test_observation_privacy_and_length(note,secret):
+    observation=ObservationRequest(session_id=uuid4(),symptom_status="unknown",note=note)
+    assert secret not in observation.note and "[REDACTED]" in observation.note
+
+
+def test_observation_rejects_oversized_note():
+    with pytest.raises(ValidationError):ObservationRequest(session_id=uuid4(),symptom_status="unknown",note="a"*501)
 
 
 def test_subjective_resolved_is_not_resolution_state():

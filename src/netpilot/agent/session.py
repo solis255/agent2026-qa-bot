@@ -20,6 +20,7 @@ from netpilot.agent.task_state import SessionTaskState, evidence_from_step
 from netpilot.agent.reasoning_trace import merge_reasoning_trace
 from netpilot.client_snapshot.schemas import refresh_summary
 from netpilot.llm import ChatMessage, ChatRole
+from netpilot.privacy import safe_value, redact_text
 from netpilot.environment import ClientMode, EnvironmentProfile, EnvironmentSource, initial_environment, merge_environment
 from netpilot.diagnostic_target import DiagnosticTarget, ProviderKind, derive_diagnostic_target, merge_diagnostic_target, user_target, binding_for
 
@@ -158,6 +159,8 @@ class SessionStore:
             state = self._sessions.get(session_id)
             if state is None:
                 raise SessionNotFoundError(str(session_id))
+            user_message = redact_text(user_message).value
+            answer = redact_text(answer, truncate=False).value
             task_state = _task_state(state)
             if result is not None and result.diagnostic_target is not None:
                 task_state.set_target(result.diagnostic_target)
@@ -260,6 +263,8 @@ class SessionStore:
                     logging.getLogger(__name__).warning("escalation_build_failed: %s",type(exc).__name__)
                     result.answer="报修材料暂时生成失败，原诊断与处理状态保留；请稍后重试。"
                 state.messages[-1]=ChatMessage(role=ChatRole.ASSISTANT,content=result.answer)
+            sanitized = safe_value(task_state)
+            task_state.__dict__.update(sanitized.__dict__)
             response = after_finish() if after_finish is not None else None
             task_state.pending_snapshot_trace.clear()
             task_state.pending_remediation_trace.clear()
@@ -298,7 +303,7 @@ class SessionStore:
             invalidate(task)
             from netpilot.verification.service import invalidate_cycles
             invalidate_cycles(task)
-            return task
+            return safe_value(task)
 
     def remediation(self, session_id, owner_user_id, *, generate=False, step_id=None, feedback=None, max_steps=5, persist=None):
         """Owner-scoped atomic plan/feedback update, without adding a chat Turn."""
@@ -317,11 +322,11 @@ class SessionStore:
                 events.extend(self._resolution_update(draft,source="remediation"))
             if draft.model_dump() != original.model_dump():
                 draft.verification_cycles = draft.verification_cycles[-self.verification_max_cycles:]
-                persisted = persist(draft) if persist else False
+                persisted = persist(safe_value(draft)) if persist else False
                 if not persisted: draft.pending_remediation_trace.extend(events)
-                state.task_state = draft
+                state.task_state = safe_value(draft)
                 state.updated_at = datetime.now(timezone.utc)
-            return draft.model_copy(deep=True),events
+            return safe_value(draft).model_copy(deep=True),safe_value(events)
 
     def verification(self, session_id, owner_user_id, *, action="get", cycle_id=None, observation=None, reverify=False, registry=None, persist=None):
         """Owner-scoped draft -> persistence -> memory commit; no fake chat Turn."""
@@ -359,10 +364,10 @@ class SessionStore:
             if not self.reasoning_trace_enabled:
                 draft.reasoning_trace = [e for e in draft.reasoning_trace if e not in events]; events = []
             if draft.model_dump() != original.model_dump():
-                persisted = persist(draft) if persist else False
+                persisted = persist(safe_value(draft)) if persist else False
                 if not persisted: draft.pending_remediation_trace.extend(events)
-                state.task_state = draft; state.updated_at = datetime.now(timezone.utc)
-            return draft.model_copy(deep=True),events
+                state.task_state = safe_value(draft); state.updated_at = datetime.now(timezone.utc)
+            return safe_value(draft).model_copy(deep=True),safe_value(events)
 
     def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None):
         """Atomic owner-scoped import. A snapshot is not an Agent Turn/Tool Call."""
@@ -389,10 +394,10 @@ class SessionStore:
             if sum(item.evidence_origin == "client_snapshot" for item in draft.evidence) > max(1, self.max_evidence_records * 4 // 5):
                 raise SessionCapacityError("snapshot_archive_full")
             draft.reasoning_trace = merge_reasoning_trace([], draft.reasoning_trace, self.reasoning_trace_max_steps)
-            persisted = persist(draft) if persist is not None else False
+            persisted = persist(safe_value(draft)) if persist is not None else False
             if not persisted:
                 draft.pending_snapshot_trace.extend(events)
-            state.task_state = draft
+            state.task_state = safe_value(draft)
             self._trim_evidence(draft)
             state.updated_at = datetime.now(timezone.utc)
             return self.task_state(session_id, owner_user_id), False, events
@@ -445,7 +450,7 @@ class SessionStore:
                 if not persisted: draft.pending_remediation_trace.extend(events)
             elif persist is not None:
                 persist(target)
-            state.task_state=draft
+            state.task_state=safe_value(draft)
             state.updated_at = datetime.now(timezone.utc)
             return target.model_copy(deep=True)
 
@@ -466,10 +471,10 @@ class SessionStore:
                 events=self._resolution_update(draft,source="confirm" if action == "confirm" else "support",
                     confirmation=confirmation,request_support=action == "support")
                 if draft.model_dump() != original.model_dump():
-                    persisted=persist(draft) if persist else False
+                    persisted=persist(safe_value(draft)) if persist else False
                     if not persisted: draft.pending_remediation_trace.extend(events)
-                    state.task_state=draft;state.updated_at=datetime.now(timezone.utc)
-            return draft.model_copy(deep=True),events
+                    state.task_state=safe_value(draft);state.updated_at=datetime.now(timezone.utc)
+            return safe_value(draft).model_copy(deep=True),safe_value(events)
 
     def clear(self) -> int:
         with self._lock:
@@ -492,12 +497,12 @@ class SessionStore:
             if generate:
                 _,events=self._ensure_escalation(draft)
                 if events or draft.escalation_package_sequence != _task_state(state).escalation_package_sequence:
-                    persisted=persist(draft) if persist else False
+                    persisted=persist(safe_value(draft)) if persist else False
                     # Standalone artifact persistence may precede a History row.
                     draft.pending_remediation_trace.extend(events)
-                    state.task_state=draft
+                    state.task_state=safe_value(draft)
                     state.updated_at=datetime.now(timezone.utc)
-            return draft.model_copy(deep=True),events
+            return safe_value(draft).model_copy(deep=True),safe_value(events)
 
     def _require(self, session_id: UUID, owner_user_id: UUID) -> SessionState:
         state = self._sessions.get(session_id)

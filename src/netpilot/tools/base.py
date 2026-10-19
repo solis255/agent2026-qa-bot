@@ -158,8 +158,8 @@ class NetworkProvider(ABC):
                 summary=exc.summary,
                 data=exc.data,
             )
-        except Exception:
-            logger.exception("Unexpected %s provider failure in %s", tool_name, self.provider_name)
+        except Exception as exc:
+            logger.warning("Network provider failure error_type=%s", type(exc).__name__)
             return self._failure(
                 tool_name,
                 started,

@@ -11,6 +11,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from netpilot.models import ChatResponse
+from netpilot.privacy import safe_value
 
 
 SSEEventName = Literal["start", "delta", "complete", "error"]
@@ -60,7 +61,7 @@ def iter_chat_sse(
 
     def worker() -> None:
         try:
-            completed.put(("complete", run_turn()))
+            completed.put(("complete", safe_value(run_turn())))
         except Exception:
             completed.put(("error", None))
 

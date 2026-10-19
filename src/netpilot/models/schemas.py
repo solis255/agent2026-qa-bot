@@ -22,6 +22,7 @@ from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, TargetSu
 from netpilot.rag import SourceType
 from netpilot.rag.schemas import StableSourceRef
 from netpilot.tools.custom_scenarios import CustomMockScenario, CustomScenarioBehavior
+from netpilot.privacy import RedactionMetadata, PRIVACY_POLICY_VERSION
 
 
 class HealthResponse(BaseModel):
@@ -39,6 +40,8 @@ class HealthResponse(BaseModel):
 
 
 class RemediationStateView(BaseModel):
+    privacy_metadata: RedactionMetadata | None = None
+    privacy_policy_version: str = PRIVACY_POLICY_VERSION
     escalation_packages: list[EscalationPackage] = Field(default_factory=list,max_length=20)
     resolution: ResolutionRecord = Field(default_factory=ResolutionRecord)
     resolution_transitions: list[ResolutionTransition] = Field(default_factory=list,max_length=200)
@@ -167,6 +170,7 @@ class ExecutionMetricsView(BaseModel):
 
 
 class ChatResponse(RemediationStateView):
+    redacted_user_message: str | None = None
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)

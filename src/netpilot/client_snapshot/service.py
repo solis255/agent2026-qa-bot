@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.environment import merge_environment
+from netpilot.privacy import redact_evidence
 
 
 def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_enabled=True, now=None):
@@ -71,6 +72,7 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
         target_version=task.diagnostic_target.target_version, task_version=task.task_version,
         redaction=snapshot.redaction,
     )
+    records = [redact_evidence(record) for record in records]
     task.evidence.extend(records)
     task.client_snapshot_summary = summary
     task.client_snapshot_id = snapshot_id

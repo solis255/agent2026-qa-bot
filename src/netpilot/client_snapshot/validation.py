@@ -6,6 +6,7 @@ import re
 
 from pydantic import ValidationError
 from netpilot.client_snapshot.schemas import ClientDiagnosticSnapshot
+from netpilot.privacy.detectors import sensitive_key
 
 
 class SnapshotValidationError(ValueError):
@@ -33,7 +34,7 @@ def _scan(value, depth=0):
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
-            if key not in _METADATA and normalized in _SENSITIVE:
+            if key not in _METADATA and (normalized in _SENSITIVE or sensitive_key(key)):
                 raise SnapshotValidationError("sensitive_fields")
             _scan(key, depth + 1)
             _scan(child, depth + 1)

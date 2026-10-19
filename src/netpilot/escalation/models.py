@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from netpilot.privacy.models import RedactionMetadata, PRIVACY_POLICY_VERSION
 
 
 class FrozenModel(BaseModel):
@@ -112,6 +113,8 @@ class PackagePrivacy(FrozenModel):
 
 
 class EscalationPackage(FrozenModel):
+    privacy_policy_version: str = PRIVACY_POLICY_VERSION
+    privacy_metadata: RedactionMetadata | None = None
     package_id: UUID = Field(default_factory=uuid4)
     package_version: int = Field(ge=1)
     session_id: UUID

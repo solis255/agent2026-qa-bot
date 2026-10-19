@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Literal, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from netpilot.privacy import safe_value
 
 from netpilot.agent.coverage import DiagnosticGoal, normalize_observations
 from netpilot.agent.intent import TurnIntent
@@ -30,6 +31,11 @@ class ReasoningTraceStep(BaseModel):
     turn_index: int = Field(default=1, ge=1)
     task_version: int = Field(default=1, ge=1)
     event_origin: Literal["agent", "client_snapshot", "remediation", "verification", "resolution", "escalation"] = "agent"
+
+    @model_validator(mode="after")
+    def privacy_safety(self):
+        self.__dict__.update(safe_value(self).__dict__)
+        return self
 
 
 def trace_signature(step: ReasoningTraceStep) -> tuple:

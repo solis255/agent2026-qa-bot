@@ -880,6 +880,9 @@ function renderEscalation(packages=[],{historical=false,sessionId=state.sessionI
     const stale=staleIds.includes(p.package_id) || changed ? " · 状态已变化，旧材料仅供历史参考" : "";
     summary.textContent=`${historical ? "历史材料 · " : ""}v${p.package_version} · ${p.completeness} · ${formatHistoryTime(p.generated_at)}${stale}`;
     card.append(summary);
+    const privacy=document.createElement("p");privacy.className="privacy-notice";
+    privacy.textContent=`隐私处理：✓ 已移除凭据类信息 ✓ 已隐藏 MAC / SSID ✓ 已隐藏主机名；策略 v${p.privacy_policy_version || "1"}`;
+    card.append(privacy);
     for(const value of [p.target?.notice,`处理状态：${RESOLUTION_LABELS[p.resolution?.state] || p.resolution?.state || "未知"}；${p.escalation_reason?.summary || ""}`,...(p.completeness_notes || [])]){
       const line=document.createElement("p");line.textContent=value || "";card.append(line);
     }
@@ -1442,7 +1445,7 @@ async function submitChat(event) {
   const authEpoch = state.authEpoch;
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
-  appendMessage("user", message);
+  const userMessage = appendMessage("user", "消息已发送，正在进行隐私处理…");
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
   renderRemediationPlan(state.remediationPlan);
@@ -1472,6 +1475,7 @@ async function submitChat(event) {
     );
     if (state.authEpoch !== authEpoch) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
+    userMessage.textContent = response.redacted_user_message || "消息已处理（原文不在此展示）";
     if (response.environment_profile) state.environmentProfile = response.environment_profile;
     if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
     state.clientSnapshotSummary = response.client_snapshot_summary || null;

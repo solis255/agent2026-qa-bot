@@ -361,3 +361,10 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .resolution-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 #escalation-content details { margin-top: 12px; border-top: 1px solid #d9e4f3; padding-top: 10px; overflow-wrap: anywhere; }
 #escalation-content button { margin: 5px 6px 0 0; }
+.privacy-notice {
+  color: var(--muted, #627189);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  border-left: 2px solid var(--accent, #237a64);
+  padding-left: 0.65rem;
+}

@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from netpilot.privacy import RedactionMetadata, PRIVACY_POLICY_VERSION, safe_value
 from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
@@ -59,6 +60,14 @@ class EvidenceRecord(TargetBinding):
     clock_skew_suspected: bool = False
     purpose: Literal["diagnosis", "verification"] = "diagnosis"
     verification_id: UUID | None = None
+
+    privacy_metadata: RedactionMetadata | None = None
+    privacy_policy_version: str = PRIVACY_POLICY_VERSION
+
+    @model_validator(mode="after")
+    def privacy_safety(self):
+        self.__dict__.update(safe_value(self, context="persistence").__dict__)
+        return self
 
 
 class SessionTaskState(BaseModel):
