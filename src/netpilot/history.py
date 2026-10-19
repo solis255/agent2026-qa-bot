@@ -32,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 8
+SNAPSHOT_SCHEMA_VERSION = 9
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -110,6 +110,8 @@ class SQLiteDiagnosisRepository:
             client_snapshot_summary=response.client_snapshot_summary,
             client_evidence=response.client_evidence,
             remediation_plan=response.remediation_plan,
+            verification_cycles=response.verification_cycles,
+            verification_evidence=response.verification_evidence,
             remediation_plan_history=response.remediation_plan_history,
             remediation_readiness=response.remediation_readiness,
             analyzed_snapshot_id=response.client_snapshot_summary.snapshot_id if response.client_snapshot_summary and any(item.evidence_origin == "client_snapshot" for item in response.diagnosis.evidence) else None,
@@ -230,6 +232,8 @@ class SQLiteDiagnosisRepository:
                 record = record.model_copy(update={
                     "schema_version":SNAPSHOT_SCHEMA_VERSION,
                     "client_snapshot_summary":task.client_snapshot_summary,
+                    "verification_cycles":task.verification_cycles,
+                    "verification_evidence":[e for e in task.evidence if e.evidence_origin == "tool"],
                     "remediation_plan":task.remediation_plan,
                     "remediation_plan_history":task.remediation_plan_history,
                     "remediation_readiness":task.remediation_readiness,
@@ -255,11 +259,18 @@ class SQLiteDiagnosisRepository:
                 if row is None: return False
                 record=_record_from_row(row)
                 trace=merge_reasoning_trace(record.reasoning_trace,task.reasoning_trace,self.reasoning_trace_max_steps)
+                from netpilot.api.presenters import _present_tool_call
+                calls = _merge_tool_calls(record.tool_calls,[_present_tool_call(s) for s in task.verification_tool_steps])
                 _update_record(connection,record.model_copy(update={
+                    "tool_calls":calls,
                     "schema_version":SNAPSHOT_SCHEMA_VERSION,"remediation_plan":task.remediation_plan,
+                    "verification_cycles":task.verification_cycles,
+                    "verification_evidence":[e for e in task.evidence if e.evidence_origin == "tool"],
+                    "client_evidence":[e for e in task.evidence if e.evidence_origin == "client_snapshot"],
+                    "client_snapshot_summary":task.client_snapshot_summary,
                     "remediation_plan_history":task.remediation_plan_history,"remediation_readiness":task.remediation_readiness,
                     "reasoning_trace":trace,"updated_at":datetime.now(timezone.utc),
-                    "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)}),
+                    "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace),"tool_calls":len(calls),"network_tool_calls":sum(c.tool_name != "knowledge_search" for c in calls),"tool_duration_ms":sum(c.duration_ms for c in calls)}),
                 }))
                 return True
         except (sqlite3.Error,ValueError) as exc:
@@ -564,6 +575,8 @@ def _merge_session_records(
         client_snapshot_summary=current.client_snapshot_summary,
         client_evidence=current.client_evidence,
         remediation_plan=current.remediation_plan,
+        verification_cycles=current.verification_cycles,
+        verification_evidence=current.verification_evidence,
         remediation_plan_history=current.remediation_plan_history,
         remediation_readiness=current.remediation_readiness,
         analyzed_snapshot_id=current.analyzed_snapshot_id or existing.analyzed_snapshot_id,
@@ -748,10 +761,13 @@ def _record_from_row(row: sqlite3.Row) -> DiagnosisRecordView:
         summary=record.client_snapshot_summary
         if ((plan.target_subject,plan.target_version) != (record.diagnostic_target.subject,record.diagnostic_target.target_version)
                 or plan.environment_key != environment_key(record.environment_profile)
-                or (plan.based_on_snapshot_id and (summary is None or not summary.applicable or summary.snapshot_id != plan.based_on_snapshot_id
+                or (not any(c.remediation_plan_id == plan.plan_id and c.after_task_version is not None and c.status not in {"superseded","failed"} for c in record.verification_cycles) and plan.based_on_snapshot_id and (summary is None or not summary.applicable or summary.snapshot_id != plan.based_on_snapshot_id
                     or (plan.readiness == "ready" and (summary.stale or summary.clock_skew_suspected))))):
             supersede(plan)
     now = datetime.now(timezone.utc)
+    for cycle in record.verification_cycles:
+        if cycle.status in {"baseline_ready","awaiting_after_evidence","verifying"} and ((cycle.target_subject,cycle.target_version) != (record.diagnostic_target.subject,record.diagnostic_target.target_version) or not record.remediation_plan or record.remediation_plan.status in {"superseded","cancelled"} or record.remediation_plan.plan_id != cycle.remediation_plan_id):
+            cycle.status = "superseded"
     for item in record.client_evidence:
         if item.expires_at:
             item.stale = now > item.expires_at

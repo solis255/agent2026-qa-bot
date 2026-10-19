@@ -20,6 +20,7 @@ class RemediationTemplate(BaseModel):
     instructions: tuple[str, ...]
     rollback_instructions: tuple[str, ...] = ()
     verification: str
+    verification_metrics: tuple[str, ...] = ("dns_resolution", "gateway_reachability", "tcp_connectivity", "http_reachability", "network_configuration", "user_observed_symptom")
     prerequisites: tuple[str, ...] = ()
     priority: int = 10
 

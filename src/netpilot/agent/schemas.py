@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
-from uuid import uuid4
+from typing import Any, Literal
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,7 @@ from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
+from netpilot.verification.models import VerificationCycle
 
 
 class AgentStatus(str, Enum):
@@ -47,6 +48,8 @@ class RegistryExecution(BaseModel):
 class AgentToolStep(TargetBinding):
     """One correlated tool execution exposed to later timeline consumers."""
 
+    purpose: Literal["diagnosis", "verification"] = "diagnosis"
+    verification_id: UUID | None = None
     round: int = Field(ge=1)
     tool_call_id: str = Field(min_length=1)
     tool_name: str = Field(min_length=1)
@@ -64,6 +67,7 @@ class AgentResult(BaseModel):
     remediation_plan_history: list[RemediationPlan] = Field(default_factory=list)
     remediation_readiness: RemediationReadiness | None = None
     remediation_updated: bool = False
+    verification_cycles: list[VerificationCycle] = Field(default_factory=list)
     environment_profile: EnvironmentProfile | None = None
     diagnostic_target: DiagnosticTarget | None = None
     status: AgentStatus

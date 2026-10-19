@@ -11,6 +11,7 @@ from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
+from netpilot.verification.models import VerificationCycle
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -54,6 +55,8 @@ class EvidenceRecord(TargetBinding):
     expires_at: datetime | None = None
     stale: bool = False
     clock_skew_suspected: bool = False
+    purpose: Literal["diagnosis", "verification"] = "diagnosis"
+    verification_id: UUID | None = None
 
 
 class SessionTaskState(BaseModel):
@@ -90,6 +93,9 @@ class SessionTaskState(BaseModel):
     remediation_symptom: str = Field(default="", max_length=4000)
     remediation_readiness: RemediationReadiness = Field(default_factory=lambda: RemediationReadiness(status="not_ready",reason="尚无修复计划，请先诊断或补充现象。"))
     pending_remediation_trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    verification_cycles: list[VerificationCycle] = Field(default_factory=list, max_length=50)
+    verification_sequence: int = 0
+    verification_tool_steps: list[AgentToolStep] = Field(default_factory=list,max_length=100)
 
     def reusable_evidence(self) -> list[EvidenceRecord]:
         now = datetime.now(timezone.utc)
@@ -122,6 +128,8 @@ class SessionTaskState(BaseModel):
 
         from netpilot.remediation.service import invalidate
         invalidate(self)
+        from netpilot.verification.service import invalidate_cycles
+        invalidate_cycles(self)
 
     def set_target(self, target: DiagnosticTarget) -> None:
         self.diagnostic_target = target.model_copy(deep=True)
@@ -139,6 +147,8 @@ class SessionTaskState(BaseModel):
         self.last_evidence_sufficiency = None
         from netpilot.remediation.service import invalidate
         invalidate(self)
+        from netpilot.verification.service import invalidate_cycles
+        invalidate_cycles(self)
 
 
 def evidence_from_step(
@@ -187,5 +197,6 @@ def evidence_from_step(
         turn_index=turn_index,
         task_version=task_version,
         reusable=bool(step.result.success),
+        purpose=step.purpose, verification_id=step.verification_id,
         evidence_origin="knowledge" if step.tool_name == "knowledge_search" else "tool",
     )

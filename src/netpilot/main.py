@@ -40,7 +40,7 @@ async def _validation_error_without_auth_secrets(
 ) -> Response:
     """Do not echo rejected auth/environment values (especially secrets)."""
 
-    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target", "/api/session/remediation-plan")):
+    if not request.url.path.startswith(("/api/auth/", "/api/session/environment/", "/api/session/diagnostic-target", "/api/session/remediation-plan", "/api/session/verification")):
         return await request_validation_exception_handler(request, exc)
     details = [
         {key: value for key, value in error.items() if key not in {"input", "ctx"}}
@@ -118,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
     app.state.history_ready = app.state.diagnosis_repository is not None
     app.state.sessions = SessionStore(
+        verification_max_cycles=app.state.settings.verification_max_cycles,
         max_history_messages=app.state.settings.max_history_messages,
         max_sessions=app.state.settings.max_sessions,
         environment_client_mode="mock" if app.state.settings.tool_mode == ToolMode.MOCK else "remote_browser",
@@ -133,6 +134,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from netpilot.api.remediation_routes import router as remediation_router
     app.include_router(remediation_router,prefix="/api")
+    from netpilot.api.verification_routes import router as verification_router
+    app.include_router(verification_router,prefix="/api")
     app.include_router(api_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     from netpilot.api.client_snapshot_routes import router as snapshot_router

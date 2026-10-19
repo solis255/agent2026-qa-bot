@@ -20,9 +20,16 @@ def enrich_result(task, result, message, *, max_steps=5, trace_enabled=True, tra
     if intent in {"diagnose","state_changed"}:
         draft.remediation_symptom = message
     if generate:
+        # After an actual comparison, an explicit next-action request may need
+        # a revised plan. Keep the completed verification as history and let
+        # the catalog omit completed/skipped equivalences from the new plan.
+        if intent == "followup_action" and explicit_remediation(message) and draft.verification_cycles and draft.verification_cycles[-1].after is not None and draft.verification_cycles[-1].status in {"completed","inconclusive"}:
+            from netpilot.remediation.service import supersede
+            supersede(draft.remediation_plan)
         _, events = ensure_plan(draft,message=message if intent in {"diagnose","state_changed"} else draft.remediation_symptom + " " + message,
                                 max_steps=max_steps,sources=result.sources,trace_enabled=trace_enabled,trace_limit=trace_limit)
     updates = {"remediation_plan":draft.remediation_plan,"remediation_plan_history":draft.remediation_plan_history,
+               "verification_cycles":draft.verification_cycles,
                "remediation_readiness":draft.remediation_readiness,"remediation_updated":True,
                "reasoning_trace":[*result.reasoning_trace,*events]}
     if intent == "followup_action" and explicit_remediation(message):

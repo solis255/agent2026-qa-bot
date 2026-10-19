@@ -80,8 +80,11 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
         values["os_version"] = snapshot.os.version
     task.environment_profile = merge_environment(task.environment_profile, values, source="snapshot")
     task.diagnostic_target.limitation_code = "client_snapshot_available"
+    from netpilot.verification.service import bind_snapshot
+    verification_events = bind_snapshot(task,records)
     task.set_target(task.diagnostic_target)
     if not trace_enabled:
+        task.reasoning_trace = [e for e in task.reasoning_trace if e not in verification_events]
         return records, []
     events = [ReasoningTraceStep(
         step_index=max((item.step_index for item in task.reasoning_trace), default=0) + 1,
@@ -96,7 +99,7 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
             "summary":"快照已过期，仅能描述历史采集状态。" if stale else "快照采集时间超前，疑似客户端时钟偏差，不能作为当前状态依据。", "severity":"warning",
         }))
     task.reasoning_trace = merge_reasoning_trace(task.reasoning_trace, events)
-    return records, events
+    return records, [*events,*verification_events]
 
 
 def snapshot_evidence(task):

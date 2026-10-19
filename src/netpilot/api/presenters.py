@@ -100,6 +100,7 @@ def _present_tool_call(step: AgentToolStep, target: DiagnosticTarget | None = No
     if result.error is not None:
         error_code = str(getattr(result.error.code, "value", result.error.code))
     return ToolCallView(
+        purpose=step.purpose, verification_id=step.verification_id,
         **{key:getattr(step, key) for key in TargetBinding.model_fields},
         round=step.round,
         tool_call_id=step.tool_call_id,

@@ -152,7 +152,12 @@ class AgentOrchestrator:
         )
         from netpilot.remediation.service import explicit_remediation
         classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
-        if task_state is not None and explicit_remediation(user_message) and classification.intent not in {TurnIntent.STATE_CHANGED,TurnIntent.KNOWLEDGE_REQUEST}:
+        if task_state is not None and task_state.verification_cycles and re.fullmatch(r"(?:请问)?(?:现在怎么样|验证结果(?:怎么样)?|修复后怎么样|修复前后对比)[？?。！!]?",user_message.strip()):
+            cycle = task_state.verification_cycles[-1]
+            valid = (cycle.target_subject,cycle.target_version) == (target.subject,target.target_version) and cycle.status != "superseded"
+            answer = (f"修复后验证 #{cycle.verification_sequence}：{cycle.result_summary or '尚未取得修复后证据。'}\n\n" + "\n".join(f"- {d.metric} {d.target or ''}：{d.before or '未知'} → {d.after or '未采集'}（{d.change}）" for d in cycle.diffs[:10]) + "\n\n这是结构化指标对比；improved 不等于故障已解决。") if valid else "旧验证属于其他对象或已失效，不能用于当前对象结论。"
+            result = AgentResult(answer=answer,status=AgentStatus.COMPLETED,tool_rounds=0,turn_intent=TurnIntent.ANALYZE_EXISTING,response_mode=ResponseMode.ANALYSIS)
+        elif task_state is not None and explicit_remediation(user_message) and classification.intent not in {TurnIntent.STATE_CHANGED,TurnIntent.KNOWLEDGE_REQUEST}:
             trace.intent = TurnIntent.FOLLOWUP_ACTION
             trace.append("decision","复用诊断生成手动计划","复用当前证据与用户步骤反馈，不运行新的网络工具或自动重测。")
             result = AgentResult(answer="正在整理批准目录中的低风险手动步骤。",status=AgentStatus.COMPLETED,
@@ -352,6 +357,7 @@ class AgentOrchestrator:
                 environment_profile=environment,
                 diagnostic_target=target,
                 remediation_plan=task_state.remediation_plan if task_state else None,
+                verification_cycles=task_state.verification_cycles if task_state else (),
             )
         )
         messages.extend(message.model_copy(deep=True) for message in history)
@@ -436,6 +442,7 @@ class AgentOrchestrator:
                 environment_profile=environment,
                 diagnostic_target=target,
                 remediation_plan=task_state.remediation_plan if task_state else None,
+                verification_cycles=task_state.verification_cycles if task_state else (),
             )
 
         while True:

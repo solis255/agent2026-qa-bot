@@ -226,7 +226,7 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12D 当前为 v8），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12E 当前为 v9），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
 ### 诊断对象（Milestone 12B）
@@ -269,8 +269,21 @@ unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器�
 VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认无依赖时建议短暂对比，并提供恢复方法。
 对象、关键环境、诊断依据或快照时效变化使旧计划失效。completed 只表示步骤流程结束，不等于故障 resolved。
 
-结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v8，SQLite 结构仍 v3，旧记录不会从文本反推计划。
+结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v9，SQLite 结构仍 v3，旧记录不会从文本反推计划。
 完整接口、批准模板、GR-01～GR-20 和人工验收状态见 [12D 验收记录](docs/MILESTONE12D_VALIDATION.md)。
+
+### 修复前后验证（Milestone 12E）
+
+计划创建时冻结同一诊断对象的 Before 基线。手动步骤标记“已完成”后，进入新的 task version，但不会立即判定改善：
+
+- 远程浏览器设备：重新运行 Windows 诊断脚本并上传新快照；不能用服务主机检测替代用户设备证据。
+- NetPilot 服务主机：点击“开始验证”，只重测基线中的相关关键只读指标，不重跑完整诊断链。
+- 按同一域名、同一网关、同一 TCP host/port 或同一 URL 比较，输出“有改善 / 无变化 / 变差 / 暂时无法确认”。
+- 用户反馈单独记录；与客观证据冲突时显示“暂时无法确认”。过期、不支持或错误结果不会冒充恢复证据。
+
+网页提供 Before/After 表格和主观反馈，History 与 Markdown/JSON 报告保存每轮验证。默认保留最近 `VERIFICATION_MAX_CYCLES=10` 轮；普通重复验证复用已有结果，只有显式“重新验证”才创建下一轮。
+**Verification ≠ Resolution**：本阶段不自动判定 resolved、不自动修复、不生成 Support Package。
+完整接口、BV-01～BV-20 和四个人工验收步骤见 [12E 验收记录](docs/MILESTONE12E_VALIDATION.md)。
 
 ### 测试
 
@@ -280,7 +293,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12D 当前为 v8），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12E 当前为 v9），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -298,7 +311,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-56 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+64 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -309,10 +322,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12D 修改前基线为 `631 passed in 118.66s`；2026-10-19 引导式修复计划实现后的全量回归实测为：
+Milestone 12E 修改前基线为 `711 passed in 152.29s`；2026-10-19 修复前后验证实现后的最终全量回归实测为：
 
 ```text
-711 passed in 123.42s
+791 passed in 148.75s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

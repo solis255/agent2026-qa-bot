@@ -12,6 +12,7 @@ from netpilot.agent.schemas import AgentStatus
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
+from netpilot.verification.models import VerificationCycle
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
@@ -36,6 +37,8 @@ class HealthResponse(BaseModel):
 
 
 class RemediationStateView(BaseModel):
+    verification_cycles: list[VerificationCycle] = Field(default_factory=list,max_length=50)
+    verification_evidence: list[EvidenceRecord] = Field(default_factory=list)
     remediation_plan: RemediationPlan | None = None
     remediation_plan_history: list[RemediationPlan] = Field(default_factory=list,max_length=20)
     remediation_readiness: RemediationReadiness | None = None
@@ -98,6 +101,8 @@ class EvidenceView(TargetBinding):
 
 
 class ToolCallView(TargetBinding):
+    purpose: Literal["diagnosis", "verification"] = "diagnosis"
+    verification_id: UUID | None = None
     round: int = Field(ge=1)
     tool_call_id: str
     evidence_id: str | None = None
@@ -211,7 +216,7 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(RemediationStateView):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8] = 8
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 9
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     analyzed_snapshot_id: str | None = None
@@ -285,7 +290,7 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(RemediationStateView):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8] = 8
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 9
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)

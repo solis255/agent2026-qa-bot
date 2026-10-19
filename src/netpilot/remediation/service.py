@@ -28,6 +28,8 @@ def invalidate(task):
     if plan.status == "superseded":
         task.remediation_readiness = RemediationReadiness(status="not_ready",reason="旧计划已失效，不可继续执行；请基于当前对象和证据重新生成。")
         return
+    from netpilot.verification.service import protects_plan
+    if protects_plan(task, plan): return
     if (plan.target_subject,plan.target_version,plan.task_version) != (task.diagnostic_target.subject,task.diagnostic_target.target_version,task.task_version):
         supersede(plan)
         task.remediation_readiness = RemediationReadiness(status="not_ready",reason="对象或任务已变化，旧计划已失效，请基于当前证据重新生成。")
@@ -78,6 +80,11 @@ def ensure_plan(task, *, message="", max_steps=5, sources=(), trace_enabled=True
     if trace_enabled and plan.steps:
         events = [event(task,"生成修复计划", f"根据当前对象的结构化依据生成 {len(plan.steps)} 个低风险手动步骤（{plan.readiness}）；不会代替用户执行。",decision=f"plan:{plan.plan_id}",evidence_ids=plan.based_on_evidence_ids)]
         append_events(task,events,trace_limit)
+    from netpilot.verification.service import ensure_baseline
+    _, verification_events = ensure_baseline(task,max_cycles=50)
+    if trace_enabled: events.extend(verification_events)
+    else:
+        task.reasoning_trace = [e for e in task.reasoning_trace if e not in verification_events]
     return plan, events
 
 
@@ -104,6 +111,11 @@ def update_step(task, step_id: UUID, feedback, *, trace_enabled=True, trace_limi
     if step.status != "pending":
         if (step.status,step.outcome,step.user_note) == (status,feedback.outcome,feedback.user_note): return []
         raise ValueError("step_already_final")
+    from netpilot.verification.service import ensure_baseline, activate
+    verification_events = []
+    if status == "completed":
+        prior = task.verification_cycles[-1] if task.verification_cycles else None
+        cycle, verification_events = ensure_baseline(task, reverify=bool(prior and prior.status in {"completed","inconclusive","failed"}),max_cycles=50)
     # Construct atomically so assignment validation cannot see an intermediate state.
     replacement = step.model_copy(update={"status":status,"outcome":feedback.outcome,"user_note":feedback.user_note,"updated_at":utcnow()})
     plan.steps = [replacement if item.step_id == step_id else item for item in plan.steps]
@@ -115,6 +127,14 @@ def update_step(task, step_id: UUID, feedback, *, trace_enabled=True, trace_limi
         action = "跳过（未执行）" if status == "skipped" else "标记执行失败" if status == "failed" else "已完成"
         events = [event(task,"用户执行修复步骤",f"用户{action}“{step.title}”，反馈为“{outcome}”；仅记录用户声明，未自动重测或判定故障解决。",decision=f"step:{step.step_id}")]
         append_events(task,events,trace_limit)
+    if status == "completed":
+        verification_events.extend(activate(task,cycle,step_id=step_id))
+        if feedback.outcome != "unknown":
+            from netpilot.verification.models import UserVerificationObservation
+            cycle.user_observation = UserVerificationObservation(symptom_status={"improved":"improved_by_user_report","no_change":"unchanged_by_user_report","worse":"worsened_by_user_report"}[feedback.outcome],note=feedback.user_note)
+            cycle.result = "inconclusive"
+    if trace_enabled: events.extend(verification_events)
+    else: task.reasoning_trace = [e for e in task.reasoning_trace if e not in verification_events]
     return events
 
 

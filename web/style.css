@@ -347,3 +347,10 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
   .scenario-actions, .scenario-identity-grid, .behavior-row { grid-template-columns: 1fr; }
   .scenario-form-body { padding-left: 16px; padding-right: 16px; }
 }
+/* Bounded, text-only Before / After evidence table. */
+.verification-cycle { border-top: 1px solid #d9e4f3; padding: 12px 0; }
+.verification-table-scroll { overflow-x: auto; }
+.verification-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.verification-table th, .verification-table td { padding: 7px; border: 1px solid #d9e4f3; text-align: left; overflow-wrap: anywhere; }
+.verification-controls { display: grid; gap: 8px; margin-top: 12px; }
+.verification-controls textarea { min-height: 65px; max-width: 100%; }

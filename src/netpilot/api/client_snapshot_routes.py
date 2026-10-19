@@ -93,6 +93,7 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
             environment_profile=task.environment_profile, diagnostic_target=task.diagnostic_target,
             client_snapshot_summary=task.client_snapshot_summary,
             remediation_plan=task.remediation_plan,
+            verification_cycles=task.verification_cycles,
             remediation_plan_history=task.remediation_plan_history,
             remediation_readiness=task.remediation_readiness,
             client_evidence=[item for item in task.evidence if item.evidence_origin == "client_snapshot"],

@@ -74,6 +74,7 @@ class SessionStore:
         reasoning_trace_enabled: bool = True,
         environment_client_mode: ClientMode = "unknown",
         provider_kind: ProviderKind = "unavailable",
+        verification_max_cycles: int = 10,
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -88,6 +89,7 @@ class SessionStore:
         self.reasoning_trace_enabled = reasoning_trace_enabled
         self.environment_client_mode = environment_client_mode
         self.provider_kind = provider_kind
+        self.verification_max_cycles = verification_max_cycles
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -185,6 +187,10 @@ class SessionStore:
                     )
                     task_state.evidence.append(record)
                     task_state.executed_tool_signatures.add(record.tool_signature)
+                if result.remediation_updated:
+                    # Install new baseline pins before trimming; otherwise an
+                    # evidence-full Session could remove a just-frozen record.
+                    task_state.verification_cycles = [c.model_copy(deep=True) for c in result.verification_cycles][-self.verification_max_cycles:]
                 self._trim_evidence(task_state)
                 if result.turn_intent is not None:
                     task_state.last_turn_intent = result.turn_intent.value
@@ -211,6 +217,7 @@ class SessionStore:
                 if result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}:
                     task_state.remediation_symptom = user_message
                 if result.remediation_updated:
+                    task_state.verification_sequence = max(task_state.verification_sequence,max((c.verification_sequence for c in task_state.verification_cycles),default=0))
                     task_state.remediation_plan = result.remediation_plan.model_copy(deep=True) if result.remediation_plan else None
                     task_state.remediation_plan_history = [item.model_copy(deep=True) for item in result.remediation_plan_history]
                     if result.remediation_readiness: task_state.remediation_readiness = result.remediation_readiness
@@ -252,6 +259,8 @@ class SessionStore:
                     item.stale = now > item.expires_at
             from netpilot.remediation.service import invalidate
             invalidate(task)
+            from netpilot.verification.service import invalidate_cycles
+            invalidate_cycles(task)
             return task
 
     def remediation(self, session_id, owner_user_id, *, generate=False, step_id=None, feedback=None, max_steps=5, persist=None):
@@ -268,10 +277,49 @@ class SessionStore:
             if feedback is not None:
                 events = update_step(draft,step_id,feedback,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
             if draft.model_dump() != original.model_dump():
+                draft.verification_cycles = draft.verification_cycles[-self.verification_max_cycles:]
                 persisted = persist(draft) if persist else False
                 if not persisted: draft.pending_remediation_trace.extend(events)
                 state.task_state = draft
                 state.updated_at = datetime.now(timezone.utc)
+            return draft.model_copy(deep=True),events
+
+    def verification(self, session_id, owner_user_id, *, action="get", cycle_id=None, observation=None, reverify=False, registry=None, persist=None):
+        """Owner-scoped draft -> persistence -> memory commit; no fake chat Turn."""
+        from netpilot.verification.service import ensure_baseline, activate, host_refresh, invalidate_cycles, emit
+        from netpilot.verification.evaluator import VerificationEvaluator
+        with self._lock:
+            state = self._require(session_id,owner_user_id)
+            if state.busy: raise SessionBusyError(str(session_id))
+            original = _task_state(state)
+            draft = self.task_state(session_id,owner_user_id)
+            invalidate_cycles(draft)
+            events = []
+            cycle = draft.verification_cycles[-1] if draft.verification_cycles else None
+            if action == "create":
+                cycle,events = ensure_baseline(draft,reverify=reverify,max_cycles=self.verification_max_cycles)
+            if cycle_id is not None and (cycle is None or cycle.verification_id != cycle_id): raise KeyError("cycle_not_current")
+            if action in {"start","observation"}:
+                if not cycle or cycle.status == "superseded": raise ValueError("cycle_superseded")
+                if (cycle.target_subject,cycle.target_version) != (draft.diagnostic_target.subject,draft.diagnostic_target.target_version) or draft.task_version not in {cycle.baseline.task_version,cycle.after_task_version}: raise ValueError("cycle_not_current_scope")
+            if action == "start":
+                if cycle.status == "baseline_ready" and not any(s.status == "completed" for s in draft.remediation_plan.steps): raise ValueError("complete_manual_step_first")
+                events.extend(activate(draft,cycle))
+                if cycle.target_subject == "netpilot_host": events.extend(host_refresh(draft,cycle,registry))
+            if action == "observation":
+                if cycle.user_observation is None or cycle.user_observation.model_dump(exclude={"observed_at"}) != observation.model_dump(exclude={"observed_at"}):
+                    cycle.user_observation = observation
+                    if cycle.status != "failed":
+                        cycle.result,cycle.result_summary = VerificationEvaluator().evaluate(cycle)
+                        if cycle.after: cycle.status = "inconclusive" if cycle.result == "inconclusive" else "completed"
+                    cycle.updated_at = datetime.now(timezone.utc)
+                    events.append(emit(draft,"记录用户验证反馈","用户主观症状反馈已单独保存，不冒充客观网络检测；冲突会明确保留。",cycle,"observation"))
+            if not self.reasoning_trace_enabled:
+                draft.reasoning_trace = [e for e in draft.reasoning_trace if e not in events]; events = []
+            if draft.model_dump() != original.model_dump():
+                persisted = persist(draft) if persist else False
+                if not persisted: draft.pending_remediation_trace.extend(events)
+                state.task_state = draft; state.updated_at = datetime.now(timezone.utc)
             return draft.model_copy(deep=True),events
 
     def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None):
@@ -368,7 +416,8 @@ class SessionStore:
     def _trim_evidence(self, task_state: SessionTaskState) -> None:
         overflow = len(task_state.evidence) - self.max_evidence_records
         if overflow > 0:
-            removable = [item.evidence_id for item in task_state.evidence if item.evidence_origin != "client_snapshot"][:overflow]
+            pinned = {eid for c in task_state.verification_cycles for evidence_set in [c.baseline,c.after] if evidence_set for eid in evidence_set.evidence_ids}
+            removable = [item.evidence_id for item in task_state.evidence if item.evidence_origin != "client_snapshot" and item.evidence_id not in pinned][:overflow]
             task_state.evidence = [item for item in task_state.evidence if item.evidence_id not in removable]
         task_state.executed_tool_signatures = {record.tool_signature for record in task_state.reusable_evidence() if record.evidence_origin in {"tool", "knowledge"}}
 

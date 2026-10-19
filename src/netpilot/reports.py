@@ -88,6 +88,8 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         client_snapshot_summary=summary,
         client_evidence=record.client_evidence,
         remediation_plan=record.remediation_plan,
+        verification_cycles=record.verification_cycles,
+        verification_evidence=record.verification_evidence,
         remediation_plan_history=record.remediation_plan_history,
         remediation_readiness=record.remediation_readiness,
         generated_at=record.updated_at,
@@ -287,6 +289,24 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
     if report.remediation_plan_history:
         lines.extend(["", "### 历史失效计划（不可继续执行）", ""])
         lines.extend(f"- v{item.plan_version} / {item.target_subject} v{item.target_version} / {item.status}" for item in report.remediation_plan_history)
+    lines.extend(["", "## 修复前后验证", "", "Verification ≠ Resolution；有改善不代表故障已解决。", ""])
+    for cycle in report.verification_cycles:
+        labels = {"improved":"有改善","unchanged":"无变化","worsened":"变差","inconclusive":"暂时无法确认","unknown":"尚未验证"}
+        step_names = {step.step_id:step.title for plan in [report.remediation_plan,*report.remediation_plan_history] if plan for step in plan.steps}
+        lines.extend([f"### Verification {cycle.verification_sequence}", "",
+            f"- 对象：{cycle.target_subject} v{cycle.target_version}；流程：{cycle.status}",
+            f"- 修复计划：v{cycle.remediation_plan_version}；步骤：{_markdown_text('、'.join(step_names.get(s,str(s)) for s in cycle.remediation_step_ids) or '尚未执行')}",
+            f"- Baseline task v{cycle.baseline.task_version} / After task v{cycle.after_task_version or '尚未开始'}",
+            f"- 基线冻结时间：{cycle.baseline.captured_at.isoformat()}；After：{cycle.after.captured_at.isoformat() if cycle.after else '未采集'}",
+            f"- Baseline Evidence：{', '.join(cycle.baseline.evidence_ids) or '无'}",
+            f"- After Evidence：{', '.join(cycle.after.evidence_ids) if cycle.after else '等待采集'}", "",
+            "| 指标 / 目标 | 修复前 | 修复后 | 变化 |", "|---|---|---|---|"])
+        for check in cycle.checks:
+            lines.append(f"| {_markdown_text(check.metric)} / {_markdown_text(check.target or '')} | {_markdown_text(check.baseline_value or '未知')} | {_markdown_text(check.after_value or '未采集')} | {_markdown_text(labels.get(check.change, check.change))} |")
+        lines.extend(["",f"结果：**{labels[cycle.result]}**",_markdown_text(cycle.result_summary or ''), ""])
+        if cycle.user_observation:
+            lines.extend([f"用户主观反馈（非客观证据）：{cycle.user_observation.symptom_status}；{_markdown_text(cycle.user_observation.note or '')}",""])
+    if not report.verification_cycles: lines.append("- 未保存验证；不会从旧回答反推。")
     lines.extend(["", "## 建议操作", ""])
     if diagnosis.recommendations:
         lines.extend(

@@ -127,6 +127,8 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
             diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
             client_snapshot_summary=_sessions(request).task_state(session_id, user.id).client_snapshot_summary,
             remediation_plan=_sessions(request).task_state(session_id,user.id).remediation_plan,
+            verification_cycles=_sessions(request).task_state(session_id,user.id).verification_cycles,
+            verification_evidence=[e for e in _sessions(request).task_state(session_id,user.id).evidence if e.evidence_origin == "tool"],
             remediation_plan_history=_sessions(request).task_state(session_id,user.id).remediation_plan_history,
             remediation_readiness=_sessions(request).task_state(session_id,user.id).remediation_readiness,
             client_evidence=[item for item in _sessions(request).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
@@ -199,6 +201,8 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     response.client_snapshot_summary = task.client_snapshot_summary
     response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
     response.remediation_plan = task.remediation_plan
+    response.verification_cycles = task.verification_cycles
+    response.verification_evidence = [e for e in task.evidence if e.evidence_origin == "tool"]
     response.remediation_plan_history = task.remediation_plan_history
     response.remediation_readiness = task.remediation_readiness
     if result.reused_evidence_ids and result.response_mode is not None and result.response_mode.value in {"diagnostic", "analysis", "report"}:

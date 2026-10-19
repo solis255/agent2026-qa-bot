@@ -206,10 +206,17 @@
 
         <details class="status-card remediation-section" id="remediation-section">
           <summary>修复计划 <span id="remediation-count" class="timeline-count">0 步</span></summary>
-          <p class="environment-note">仅为用户手动计划，不会自动执行或重新检测。计划完成不等于网络故障已解决。</p>
+          <p class="environment-note">仅为用户手动计划，不会自动修复。完成后可另行验证，计划完成不等于网络故障已解决。</p>
           <button id="remediation-generate" type="button" disabled>生成 / 更新低风险计划</button>
           <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
           <div id="remediation-plan"></div>
+        </details>
+
+        <details class="status-card" id="verification-section">
+          <summary>修复后验证 <span id="verification-count" class="timeline-count">0 轮</span></summary>
+          <p class="environment-note">Verification ≠ Resolution。客观指标对比与用户主观反馈分开记录。</p>
+          <div id="verification-content" aria-live="polite"></div>
+          <p id="verification-notice" role="status" aria-live="polite"></p>
         </details>
 
         <details class="status-card reasoning-section" id="reasoning-section">

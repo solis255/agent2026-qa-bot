@@ -12,6 +12,7 @@ const state = {
   clientEvidence: [],
   remediationPlan: null,
   remediationReadiness: null,
+  verificationCycles: [],
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -26,6 +27,9 @@ const state = {
 };
 
 const elements = {
+  verificationContent: document.querySelector("#verification-content"),
+  verificationCount: document.querySelector("#verification-count"),
+  verificationNotice: document.querySelector("#verification-notice"),
   remediationSection: document.querySelector("#remediation-section"),
   remediationGenerate: document.querySelector("#remediation-generate"),
   remediationStatus: document.querySelector("#remediation-status"),
@@ -178,6 +182,7 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 function setBusy(busy, message = "") {
   state.busy = busy;
   elements.remediationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
+  for (const control of elements.verificationContent.querySelectorAll("button,select,textarea")) control.disabled = busy || !state.user || state.viewingHistory;
   for (const control of elements.remediationPlan.querySelectorAll("button, select, textarea")) {
     control.disabled = busy || !state.user || state.viewingHistory || ["superseded", "cancelled"].includes(state.remediationPlan?.status);
   }
@@ -390,6 +395,7 @@ function showAuthGate(message = "请先登录或注册。") {
   state.clientEvidence = [];
   state.remediationPlan = null;
   state.remediationReadiness = null;
+  state.verificationCycles = [];
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -598,6 +604,7 @@ function resetConversation() {
   elements.snapshotFile.value = "";
   renderRemediationPlan(state.remediationPlan);
   elements.remediationSection.open = false;
+  renderVerification(state.verificationCycles);
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -746,6 +753,8 @@ function invalidateDisplayedPlan(before, after) {
   if (["os_family","os_version","network_access","vpn_enabled","proxy_enabled","affected_scope","affected_service"].some(key => (before?.[key] ?? null) !== (after?.[key] ?? null))) {
     state.remediationPlan = {...state.remediationPlan,status:"superseded"};
     renderRemediationPlan(state.remediationPlan);
+    state.verificationCycles=state.verificationCycles.map(c=>["baseline_ready","awaiting_after_evidence","verifying"].includes(c.status)?{...c,status:"superseded"}:c);
+    renderVerification(state.verificationCycles);
   }
 }
 
@@ -796,6 +805,73 @@ function renderRemediationPlan(plan, {historical = false} = {}) {
   elements.remediationPlan.append(list);
 }
 
+const VERIFICATION_RESULT = {improved:"有改善",unchanged:"无变化",worsened:"变差",inconclusive:"暂时无法确认",unknown:"尚未验证"};
+const METRIC_LABEL = {dns_resolution:"DNS 解析",gateway_reachability:"网关可达性",tcp_connectivity:"TCP 连通性",http_reachability:"HTTP 可达性",network_configuration:"网络配置",campus_auth:"校园认证",vpn_state:"VPN 状态",proxy_state:"代理状态",user_observed_symptom:"用户症状"};
+
+function renderVerification(cycles = [], {historical = false} = {}) {
+  elements.verificationContent.replaceChildren();
+  elements.verificationNotice.textContent = "";
+  elements.verificationCount.textContent = `${cycles.length} 轮`;
+  if (!cycles.length) {elements.verificationContent.textContent = "尚无修复前后验证记录。";return;}
+  const latest = cycles[cycles.length-1];
+  for (const cycle of cycles) {
+    const card = document.createElement("section");card.className = "verification-cycle";
+    const title = document.createElement("h3");title.textContent = `验证 #${cycle.verification_sequence} · ${TARGET_LABELS[cycle.target_subject] || "未知对象"} v${cycle.target_version} · ${cycle.status}`;
+    const result = document.createElement("p");result.textContent = `结果：${VERIFICATION_RESULT[cycle.result] || "未知"}。${cycle.result_summary || "尚待验证"}（有改善不等于故障解决）`;
+    card.append(title,result);
+    const scroll = document.createElement("div");scroll.className="verification-table-scroll";
+    const table = document.createElement("table");table.className = "verification-table";
+    const head = document.createElement("thead"),header=document.createElement("tr");
+    for(const label of ["指标 / 目标","修复前","修复后","变化"]){const th=document.createElement("th");th.scope="col";th.textContent=label;header.append(th);}head.append(header);table.append(head);
+    const body=document.createElement("tbody");
+    for(const check of cycle.checks || []){
+      const row=document.createElement("tr");
+      for(const value of [`${METRIC_LABEL[check.metric] || check.metric} ${check.target || ""}`,check.baseline_value || "未知",check.after_value || "未采集",VERIFICATION_RESULT[check.change] || (check.change === "not_comparable" ? "不可比较" : "未知")]){const cell=document.createElement("td");cell.textContent=value;row.append(cell);}
+      body.append(row);
+    }
+    table.append(body);scroll.append(table);card.append(scroll);
+    const refs=document.createElement("p");refs.className="environment-note";refs.textContent=`Baseline task v${cycle.baseline?.task_version || "?"} / After task v${cycle.after_task_version || "?"}；Before ${cycle.baseline?.evidence_ids?.length || 0} 条 / After ${cycle.after?.evidence_ids?.length || 0} 条客观证据。`;card.append(refs);
+    if(cycle.user_observation){const note=document.createElement("p");note.textContent=`用户主观反馈（非客观证据）：${cycle.user_observation.symptom_status}；${cycle.user_observation.note || "无备注"}`;card.append(note);}
+    const inScope = !state.diagnosticTarget || (cycle.target_subject === state.diagnosticTarget.subject && cycle.target_version === state.diagnosticTarget.target_version);
+    const current = cycle === latest && !historical && !state.viewingHistory && inScope && cycle.status !== "superseded";
+    if(current && ["baseline_ready","awaiting_after_evidence"].includes(cycle.status)){
+      if(cycle.target_subject === "user_client"){
+        const prompt=document.createElement("p");prompt.textContent="需要修复后验证：完成手动步骤后，请重新运行 Windows 客户端诊断脚本，并上传新的诊断快照。";
+        const download=document.createElement("a");download.href="/static/scripts/client_diagnostic_windows.ps1";download.textContent="下载诊断脚本";download.setAttribute("download","client_diagnostic_windows.ps1");
+        const upload=document.createElement("button");upload.type="button";upload.textContent="上传新的诊断快照";upload.addEventListener("click",()=>{const details=elements.snapshotForm.closest("details");if(details)details.open=true;elements.snapshotFile.focus();elements.snapshotFile.click();});
+        card.append(prompt,download,upload);
+      } else if(cycle.target_subject === "netpilot_host"){
+        const start=document.createElement("button");start.type="button";start.textContent="开始验证";start.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(start);
+      }
+    }
+    if(current){
+      const controls=document.createElement("div");controls.className="verification-controls";
+      const select=document.createElement("select");select.setAttribute("aria-label","用户主观症状反馈");
+      for(const [value,label] of [["unknown","暂不确定"],["resolved_by_user_report","我感觉已恢复"],["improved_by_user_report","好多了"],["unchanged_by_user_report","还是一样"],["worsened_by_user_report","更差了"]]){const option=document.createElement("option");option.value=value;option.textContent=label;select.append(option);}
+      const note=document.createElement("textarea");note.maxLength=500;note.placeholder="可选症状备注，不填密码或密钥";note.setAttribute("aria-label","验证反馈备注");
+      const save=document.createElement("button");save.type="button";save.textContent="记录主观反馈";save.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/user-observation`,{session_id:state.sessionId,symptom_status:select.value,note:note.value.trim() || null}));
+      controls.append(select,note,save);card.append(controls);
+      if(["completed","inconclusive"].includes(cycle.status)){
+        const again=document.createElement("button");again.type="button";again.textContent="重新验证（新一轮）";again.addEventListener("click",()=>verificationRequest("",{session_id:state.sessionId,reverify:true}));card.append(again);
+      }
+    }
+    elements.verificationContent.append(card);
+  }
+}
+
+async function verificationRequest(suffix, body) {
+  if(!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
+  const epoch=state.authEpoch,sid=state.sessionId;setBusy(true);
+  elements.verificationNotice.textContent="正在验证 / 保存反馈…";
+  try{
+    const result=await requestJSON(`/api/session/verification${suffix}`,{method:"POST",body:JSON.stringify(body)});
+    if(epoch !== state.authEpoch || sid !== state.sessionId)return;
+    state.verificationCycles=result.verification_cycles || [];renderVerification(state.verificationCycles);appendTurnReasoningTrace(result.reasoning_trace || []);
+    if(result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
+  }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.verificationNotice.textContent=error.message;}
+  finally{if(epoch === state.authEpoch)setBusy(false);}
+}
+
 async function remediationRequest(url, options) {
   if (!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
   const epoch=state.authEpoch, sessionId=state.sessionId;
@@ -804,6 +880,8 @@ async function remediationRequest(url, options) {
     const result=await requestJSON(url, options);
     if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
     state.remediationPlan=result.remediation_plan || null;
+    state.verificationCycles=result.verification_cycles || [];
+    renderVerification(state.verificationCycles);
     state.remediationReadiness=result.remediation_readiness || null;
     renderRemediationPlan(state.remediationPlan);
     appendTurnReasoningTrace(result.reasoning_trace || []);
@@ -839,6 +917,9 @@ async function uploadClientSnapshot(event) {
     state.clientSnapshotSummary = result.client_snapshot_summary;
     state.clientEvidence = result.client_evidence || [];
     state.remediationPlan = result.remediation_plan || null;
+    state.verificationCycles = result.verification_cycles || [];
+    elements.verificationNotice.textContent = "正在对比修复前后状态…";
+    renderVerification(state.verificationCycles);
     renderRemediationPlan(state.remediationPlan);
     state.environmentProfile = result.environment_profile;
     state.diagnosticTarget = result.diagnostic_target;
@@ -870,7 +951,7 @@ async function saveDiagnosticTarget(event) {
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     elements.snapshotFile.value = "";
-    if (changed) { renderDiagnosis(null); renderTools([]); if (state.remediationPlan) state.remediationPlan={...state.remediationPlan,status:"superseded"};renderRemediationPlan(state.remediationPlan); }
+    if (changed) { renderDiagnosis(null); renderTools([]); if (state.remediationPlan) state.remediationPlan={...state.remediationPlan,status:"superseded"};renderRemediationPlan(state.remediationPlan); state.verificationCycles=state.verificationCycles.map(c=>["baseline_ready","awaiting_after_evidence","verifying"].includes(c.status)?{...c,status:"superseded"}:c);renderVerification(state.verificationCycles); }
     elements.targetStatus.textContent = "诊断对象已保存；其他对象的旧检测仅保留于历史，不参与当前结论。";
   } catch (error) {
     if (state.authEpoch === epoch) elements.targetStatus.textContent = error.message;
@@ -903,6 +984,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.clientSnapshotSummary = session.client_snapshot_summary || null;
     state.clientEvidence = session.client_evidence || [];
     state.remediationPlan = session.remediation_plan || null;
+    state.verificationCycles = session.verification_cycles || [];
     state.remediationReadiness = session.remediation_readiness || null;
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
@@ -1039,7 +1121,7 @@ function renderTools(tools) {
     badge.textContent = STATUS_LABELS[tool.finding_status] || tool.finding_status;
     heading.append(name, badge);
     const meta = document.createElement("small");
-    meta.textContent = `第 ${tool.round} 轮 · ${tool.duration_ms} ms · ${tool.tool_call_id}`;
+    meta.textContent = `第 ${tool.round} 轮 · ${tool.duration_ms} ms · ${tool.tool_call_id}${tool.purpose === "verification" ? " · Purpose: Verification" : ""}`;
     const location = document.createElement("small");
     location.className = "tool-execution-context";
     location.textContent = tool.execution_scope === "target_neutral" ? "对象无关的知识参考（非设备检测）" : `诊断对象：${TARGET_LABELS[tool.target_subject] || TARGET_LABELS.unknown} v${tool.target_version || 1} · 执行位置：${EXECUTION_LABELS[tool.execution_context] || EXECUTION_LABELS.unavailable}`;
@@ -1183,6 +1265,7 @@ async function loadDiagnosisRecord(recordId) {
     renderEnvironmentProfile(record.environment_profile, { historical: true });
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
     renderRemediationPlan(record.remediation_plan,{historical:true});
+    renderVerification(record.verification_cycles || [],{historical:true});
     renderClientSnapshot(record.client_snapshot_summary, record.client_evidence || [], {historical:true, target:record.diagnostic_target});
     elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
@@ -1250,6 +1333,8 @@ async function submitChat(event) {
     state.clientSnapshotSummary = response.client_snapshot_summary || null;
     state.clientEvidence = response.client_evidence || [];
     state.remediationPlan = response.remediation_plan || null;
+    state.verificationCycles = response.verification_cycles || [];
+    renderVerification(state.verificationCycles);
     state.remediationReadiness = response.remediation_readiness || null;
     renderRemediationPlan(state.remediationPlan);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
@@ -1286,6 +1371,7 @@ function formatReportPreview(report) {
   const plan = report.remediation_plan;
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
+    ...(report.verification_cycles || []).flatMap(c=>[`修复前后验证 #${c.verification_sequence}：${VERIFICATION_RESULT[c.result] || c.result} · ${c.status}；改善不等于故障解决。`,...(c.checks || []).map(k=>`${METRIC_LABEL[k.metric] || k.metric} ${k.target || ""}：${k.baseline_value || "未知"} → ${k.after_value || "未采集"}（${k.change}）`),c.result_summary || "",c.user_observation ? `用户主观反馈：${c.user_observation.symptom_status} ${c.user_observation.note || ""}` : ""]),
     ...(plan ? [`修复计划 v${plan.plan_version}：${REMEDIATION_STATUS[plan.status]}；仅用户手动操作，不代表故障已解决。`,...(plan.steps || []).flatMap(step=>[`${step.order}. ${step.title} · ${step.risk} · ${STEP_STATUS[step.status]} · ${STEP_OUTCOME[step.outcome]}`,`理由：${step.rationale}`,`操作：${step.instructions.join("；")}`,`验证：${step.verification}`,`回滚：${step.rollback_instructions.join("；")}`,`备注：${step.user_note || "无"}`])] : []),
     ...(snapshot ? [`客户端诊断快照：#${snapshot.snapshot_sequence}，${formatHistoryTime(snapshot.generated_at)}，${snapshot.stale || Date.now() > Date.parse(snapshot.expires_at) ? "已过期（历史）" : snapshot.clock_skew_suspected ? "疑似时钟偏差" : "采集时点证据"}，非远程执行。`, ...(report.client_evidence || []).map(item => `${item.superseded ? "历史归档" : "采集证据"}：${item.summary}`)] : []),
     `用户环境：${formatEnvironmentSummary(report.environment_profile)}`,
@@ -1464,6 +1550,7 @@ async function activateScenario(scenario) {
   state.clientEvidence = [];
   state.remediationPlan = null;
   window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
+  state.verificationCycles = [];
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   elements.scenarioSelect.value = response.current;
   renderScenarioDescription(response.current, true);
@@ -1580,6 +1667,7 @@ async function deleteCurrentCustomScenario() {
       state.clientSnapshotSummary = null;
       state.clientEvidence = [];
       state.remediationPlan = null;
+      state.verificationCycles = [];
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
@@ -1632,7 +1720,7 @@ window.setInterval?.(() => {
   if (state.user && state.clientSnapshotSummary && !state.viewingHistory && !state.busy) {
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     const snapshot = state.clientSnapshotSummary;
-    if (state.remediationPlan?.readiness === "ready" && state.remediationPlan.status !== "superseded" && state.remediationPlan.based_on_snapshot_id === snapshot.snapshot_id && (snapshot.stale || snapshot.clock_skew_suspected || Date.now() > Date.parse(snapshot.expires_at))) {
+    if (state.verificationCycles.at(-1)?.status !== "awaiting_after_evidence" && state.remediationPlan?.readiness === "ready" && state.remediationPlan.status !== "superseded" && state.remediationPlan.based_on_snapshot_id === snapshot.snapshot_id && (snapshot.stale || snapshot.clock_skew_suspected || Date.now() > Date.parse(snapshot.expires_at))) {
       state.remediationPlan = {...state.remediationPlan,status:"superseded"};
       renderRemediationPlan(state.remediationPlan);
     }
