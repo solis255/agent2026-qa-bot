@@ -6,6 +6,7 @@ from netpilot.remediation.service import ensure_plan, explicit_remediation, foll
 
 
 def enrich_result(task, result, message, *, max_steps=5, trace_enabled=True, trace_limit=50):
+    if result.escalation_requested: return result
     draft = task.model_copy(deep=True)
     if result.task_version_advanced: draft.advance_version()
     if result.environment_profile: draft.environment_profile = result.environment_profile

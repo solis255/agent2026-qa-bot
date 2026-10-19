@@ -124,6 +124,7 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
         snapshot = _sessions(request).get(session_id, user.id)
         return SessionResponse(
             session_id=session_id, created_at=snapshot.created_at,
+            escalation_packages=_sessions(request).task_state(session_id,user.id).escalation_packages,
             resolution=_sessions(request).task_state(session_id,user.id).resolution,
             resolution_transitions=_sessions(request).task_state(session_id,user.id).resolution_transitions,
             environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
@@ -201,6 +202,7 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
     response.diagnostic_target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
     task = _sessions(request).task_state(payload.session_id, owner_id)
+    response.escalation_packages=task.escalation_packages
     response.client_snapshot_summary = task.client_snapshot_summary
     response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
     response.remediation_plan = task.remediation_plan

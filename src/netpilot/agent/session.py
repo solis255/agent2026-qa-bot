@@ -77,6 +77,9 @@ class SessionStore:
         verification_max_cycles: int = 10,
         resolution_max_transitions: int = 30,
         resolution_escalate_after_no_improvement: int = 2,
+        escalation_max_evidence_items: int = 12,
+        escalation_max_packages: int = 5,
+        escalation_mask_private_ip: bool = False,
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -94,6 +97,10 @@ class SessionStore:
         self.verification_max_cycles = verification_max_cycles
         self.resolution_max_transitions = resolution_max_transitions
         self.resolution_escalate_after_no_improvement = resolution_escalate_after_no_improvement
+        self.escalation_max_evidence_items = escalation_max_evidence_items
+        self.escalation_max_packages = escalation_max_packages
+        from netpilot.escalation.models import EscalationPrivacyPolicy
+        self.escalation_privacy_policy = EscalationPrivacyPolicy(mask_private_ip=escalation_mask_private_ip)
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -222,6 +229,10 @@ class SessionStore:
                 )
                 if result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}:
                     task_state.remediation_symptom = user_message
+                    if not task_state.original_symptom or task_state.issue_target_version != target.target_version:
+                        task_state.original_symptom=user_message
+                        task_state.issue_started_at=datetime.now(timezone.utc)
+                    task_state.issue_target_version=target.target_version
                 if result.remediation_updated:
                     task_state.verification_sequence = max(task_state.verification_sequence,max((c.verification_sequence for c in task_state.verification_cycles),default=0))
                     task_state.remediation_plan = result.remediation_plan.model_copy(deep=True) if result.remediation_plan else None
@@ -229,11 +240,26 @@ class SessionStore:
                     if result.remediation_readiness: task_state.remediation_readiness = result.remediation_readiness
                     task_state.remediation_plan_version = max(task_state.remediation_plan_version,result.remediation_plan.plan_version if result.remediation_plan else 0)
             # Persist under this lock, so a PATCH cannot race a completed Turn.
-            if result is not None:
+            if result is not None and not result.escalation_requested:
                 events=self._resolution_update(task_state,source="confirm" if result.resolution_user_confirmation is not None else "turn",
                     confirmation=result.resolution_user_confirmation,request_support=result.resolution_support_requested,
                     reopen_reason="symptom_recurred" if result.resolution_recurred else None)
                 result.reasoning_trace.extend(events)
+            if result is not None and result.escalation_requested:
+                # A material request must not re-evaluate or change Resolution.
+                try:
+                    draft=task_state.model_copy(deep=True)
+                    package,events=self._ensure_escalation(draft)
+                    task_state.escalation_packages=draft.escalation_packages
+                    task_state.escalation_package_sequence=draft.escalation_package_sequence
+                    task_state.reasoning_trace=draft.reasoning_trace
+                    result.reasoning_trace.extend(events)
+                    result.answer=f"已生成报修材料 v{package.package_version}（{package.completeness}）。可在报修材料卡片预览或下载；未提交任何外部工单。"
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("escalation_build_failed: %s",type(exc).__name__)
+                    result.answer="报修材料暂时生成失败，原诊断与处理状态保留；请稍后重试。"
+                state.messages[-1]=ChatMessage(role=ChatRole.ASSISTANT,content=result.answer)
             response = after_finish() if after_finish is not None else None
             task_state.pending_snapshot_trace.clear()
             task_state.pending_remediation_trace.clear()
@@ -450,6 +476,28 @@ class SessionStore:
             count = len(self._sessions)
             self._sessions.clear()
             return count
+
+    def _ensure_escalation(self, task):
+        from netpilot.escalation.service import ensure_package
+        return ensure_package(task,max_evidence=self.escalation_max_evidence_items,max_packages=self.escalation_max_packages,
+            policy=self.escalation_privacy_policy,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
+
+    def escalation(self, session_id, owner_user_id, *, generate=False, persist=None):
+        """Build/persist an isolated draft before publishing; no state re-evaluation."""
+        with self._lock:
+            state=self._require(session_id,owner_user_id)
+            if state.busy: raise SessionBusyError(str(session_id))
+            draft=self.task_state(session_id,owner_user_id)
+            events=[]
+            if generate:
+                _,events=self._ensure_escalation(draft)
+                if events or draft.escalation_package_sequence != _task_state(state).escalation_package_sequence:
+                    persisted=persist(draft) if persist else False
+                    # Standalone artifact persistence may precede a History row.
+                    draft.pending_remediation_trace.extend(events)
+                    state.task_state=draft
+                    state.updated_at=datetime.now(timezone.utc)
+            return draft.model_copy(deep=True),events
 
     def _require(self, session_id: UUID, owner_user_id: UUID) -> SessionState:
         state = self._sessions.get(session_id)

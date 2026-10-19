@@ -226,7 +226,7 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12F 当前为 v10），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12G 当前为 v11），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
 ### 诊断对象（Milestone 12B）
@@ -269,7 +269,7 @@ unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器�
 VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认无依赖时建议短暂对比，并提供恢复方法。
 对象、关键环境、诊断依据或快照时效变化使旧计划失效。completed 只表示步骤流程结束，不等于故障 resolved。
 
-结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v10，SQLite 结构仍 v3，旧记录不会从文本反推计划。
+结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v11，SQLite 结构仍 v3，旧记录不会从文本反推计划。
 完整接口、批准模板、GR-01～GR-20 和人工验收状态见 [12D 验收记录](docs/MILESTONE12D_VALIDATION.md)。
 
 ### 修复前后验证（Milestone 12E）
@@ -282,7 +282,7 @@ VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认�
 - 用户反馈单独记录；与客观证据冲突时显示“暂时无法确认”。过期、不支持或错误结果不会冒充恢复证据。
 
 网页提供 Before/After 表格和主观反馈，History 与 Markdown/JSON 报告保存每轮验证。默认保留最近 `VERIFICATION_MAX_CYCLES=10` 轮；普通重复验证复用已有结果，只有显式“重新验证”才创建下一轮。
-**Verification ≠ Resolution**：本阶段不自动判定 resolved、不自动修复、不生成 Support Package。
+**Verification ≠ Resolution**：12E 本身不判定 resolved、不自动修复；闭环状态见 12F，报修材料见 12G。
 完整接口、BV-01～BV-20 和四个人工验收步骤见 [12E 验收记录](docs/MILESTONE12E_VALIDATION.md)。
 
 ### 诊断闭环状态（Milestone 12F）
@@ -299,6 +299,16 @@ VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认�
 **人工支持只是一项建议，不会提交工单、发送邮件、接入 ITSM、执行高风险修复或提权。** 默认无改善建议阈值为 `RESOLUTION_ESCALATE_AFTER_NO_IMPROVEMENT=2`。
 详细决策规则、API、RS-01～RS-24 和人工验收状态见 [12F 验收记录](docs/MILESTONE12F_VALIDATION.md)。
 
+### 升级报修材料（Milestone 12G）
+
+在“报修材料”卡片点击“生成报修材料”，或输入“我要报修”“帮我整理给运维人员”。未解决、有改善、等待操作等状态也可主动生成；**生成材料不会把处理状态改为 escalated**。
+
+材料不是聊天记录复制，而是当前诊断对象、环境、问题、关键证据、假设、实际步骤反馈、Before/After、处理状态和人工核查建议的脱敏摘要。默认最多 12 条去重证据、保留最近 5 个版本，缺少信息明确标注 `partial` / `limited`；Mock 继续突出模拟身份，RAG 来源不作为实时证据。
+
+支持预览、Markdown/JSON 下载及历史版本原样导出。相同状态重复生成复用原版本；新观察或状态变化生成新版本，旧版不会重写。默认移除设备主机名、MAC、SSID、凭据与敏感 URL 参数；`ESCALATION_MASK_PRIVATE_IP=true` 可额外掩码私有 IP。材料仍可能包含症状和合法诊断目标，转交前请人工复核。
+
+**仅生成报修材料，不会提交工单、发送邮件/短信/Webhook、通知网络中心或接入 ITSM。** 接口、Schema、版本和隐私边界见 [12G 验收记录](docs/MILESTONE12G_VALIDATION.md)。
+
 ### 测试
 
 Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
@@ -307,7 +317,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12F 当前为 v10），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12G 当前为 v11），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -325,7 +335,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-73 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+82 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -336,10 +346,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12F 修改前基线为 `791 passed in 240.97s`；2026-10-19 诊断闭环状态实现后的最终全量回归实测为：
+Milestone 12G 修改前基线为 `880 passed in 212.86s`；2026-10-19 升级报修材料实现后的最终全量回归实测为：
 
 ```text
-880 passed in 187.50s
+954 passed in 193.74s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

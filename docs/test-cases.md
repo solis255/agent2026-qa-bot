@@ -88,6 +88,8 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 
 ## 判定原则
 
+Milestone 12G 新增 EP-01～EP-25：结构化材料包、证据去重、完整度、隐私、不可变版本、所有权、重启读取、导出及 9 个 Web DOM 场景。对应 `tests/test_escalation_{models,builder,privacy,handoff,api,history,export,ui}.py`；完整逐项映射和四项真实人工验收状态见 [12G 验收](MILESTONE12G_VALIDATION.md)。
+
 - 以结构化证据为准，不要求模型自然语言逐字一致。
 - Mock 结果只代表模拟场景；Local 结果只代表运行 NetPilot 的主机。
 - `success=false` 与网络异常不是同义词；`abnormal`、`inconclusive`、`blocked` 必须区分。

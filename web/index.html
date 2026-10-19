@@ -219,6 +219,14 @@
           <p id="resolution-notice" role="status" aria-live="polite"></p>
         </section>
 
+        <section class="status-card" id="escalation-section" aria-label="升级报修材料">
+          <h2>报修材料</h2>
+          <p class="environment-note">仅生成脱敏交接材料，由你自行交给授权人员；不会提交工单或通知网络中心。</p>
+          <button type="button" id="escalation-generate" disabled>生成报修材料</button>
+          <div id="escalation-content" aria-live="polite"></div>
+          <p id="escalation-notice" role="status" aria-live="polite"></p>
+        </section>
+
         <details class="status-card" id="verification-section">
           <summary>修复后验证 <span id="verification-count" class="timeline-count">0 轮</span></summary>
           <p class="environment-note">Verification ≠ Resolution。客观指标对比与用户主观反馈分开记录。</p>

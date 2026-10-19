@@ -154,7 +154,12 @@ class AgentOrchestrator:
         from netpilot.resolution.service import user_action,answer as resolution_answer
         resolution_action=user_action(user_message,was_resolved=bool(task_state and task_state.resolution.state == "resolved")) if task_state else None
         classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
-        if resolution_action == "recurrence":
+        from netpilot.escalation.builder import material_request
+        if task_state is not None and material_request(user_message):
+            trace.intent=TurnIntent.REPORT_REQUEST
+            result=AgentResult(answer="正在整理结构化报修材料，不会提交外部工单。",status=AgentStatus.COMPLETED,
+                tool_rounds=0,turn_intent=TurnIntent.REPORT_REQUEST,response_mode=ResponseMode.REPORT,escalation_requested=True)
+        elif resolution_action == "recurrence":
             trace.intent=TurnIntent.STATE_CHANGED
             result=AgentResult(answer="已记录症状复发，将重新打开案例并收集新任务版本的证据；旧的已解决记录仍保留。",status=AgentStatus.COMPLETED,tool_rounds=0,
                 turn_intent=TurnIntent.STATE_CHANGED,response_mode=ResponseMode.DIAGNOSTIC,task_version_advanced=True,resolution_recurred=True)
@@ -371,6 +376,7 @@ class AgentOrchestrator:
                 remediation_plan=task_state.remediation_plan if task_state else None,
                 verification_cycles=task_state.verification_cycles if task_state else (),
                 resolution=task_state.resolution if task_state else None,
+                escalation_packages=task_state.escalation_packages if task_state else (),
             )
         )
         messages.extend(message.model_copy(deep=True) for message in history)
@@ -457,6 +463,7 @@ class AgentOrchestrator:
                 remediation_plan=task_state.remediation_plan if task_state else None,
                 verification_cycles=task_state.verification_cycles if task_state else (),
                 resolution=task_state.resolution if task_state else None,
+                escalation_packages=task_state.escalation_packages if task_state else (),
             )
 
         while True:

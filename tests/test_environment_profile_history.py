@@ -38,7 +38,7 @@ def test_ep09_three_turn_chat_sse_history_restart_and_report(tmp_path):
     assert repository.count(owner) == 1
     assert record.environment_profile.os_family == "macos"
     assert record.environment_profile.proxy_enabled is None
-    assert record.schema_version == 10
+    assert record.schema_version == 11
     with sqlite3.connect(repository.path) as connection:
         assert connection.execute("SELECT value FROM netpilot_metadata WHERE key='schema_version'").fetchone()[0] == "3"
     report = build_diagnosis_report(record)

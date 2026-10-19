@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     verification_max_cycles: int = Field(default=10, ge=1, le=50)
     resolution_max_transitions: int = Field(default=30, ge=1, le=200)
     resolution_escalate_after_no_improvement: int = Field(default=2, ge=1, le=20)
+    escalation_max_evidence_items: int = Field(default=12, ge=1, le=50)
+    escalation_max_packages: int = Field(default=5, ge=1, le=20)
+    escalation_mask_private_ip: bool = False
     reasoning_trace_enabled: bool = True
     reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
     reasoning_summary_llm_enabled: bool = False

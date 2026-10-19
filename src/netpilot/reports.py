@@ -89,6 +89,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         client_evidence=record.client_evidence,
         remediation_plan=record.remediation_plan,
         resolution=record.resolution,resolution_transitions=record.resolution_transitions,
+        escalation_packages=record.escalation_packages,
         verification_cycles=record.verification_cycles,
         verification_evidence=record.verification_evidence,
         remediation_plan_history=record.remediation_plan_history,

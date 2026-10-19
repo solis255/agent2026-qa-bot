@@ -359,3 +359,5 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .resolution-badge[data-state="resolved"] { background: #e1f5ec; color: #176947; }
 .resolution-badge[data-state="escalated"], .resolution-badge[data-state="unresolved"] { background: #fff0d8; color: #845014; }
 .resolution-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+#escalation-content details { margin-top: 12px; border-top: 1px solid #d9e4f3; padding-top: 10px; overflow-wrap: anywhere; }
+#escalation-content button { margin: 5px 6px 0 0; }

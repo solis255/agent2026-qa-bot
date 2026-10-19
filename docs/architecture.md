@@ -430,6 +430,32 @@ id: n  event: error     data: {schema_version, code, message, retryable}
 
 ## Extension Points
 
+### Escalation Package（12G）
+
+`escalation.models.EscalationPackage` 是独立于 `DiagnosisReportView` 的深度冻结交接合同；`builder.build_package()` 选择当前对象的关键观察，按类别、检测目标、端口、状态和时效去重，优先有效的最新 After 与异常证据。历史观察明确标记，来源为客户端上传 / 服务主机只读 / Mock 模拟，Knowledge Sources 另列。
+
+```text
+显式材料请求（Chat） ─> AgentResult.escalation_requested ─┐
+POST /api/session/escalation-package ────────────────────┤
+                                                        v
+SessionStore [owner / busy / isolated draft] -> escalation.service.ensure_package
+        -> builder [allowlisted summary fields / bounds / completeness]
+        -> privacy.redact + static handoff_catalog
+        -> fingerprint unchanged: reuse; changed: immutable vN + digest
+        -> SQLiteDiagnosisRepository transaction
+             + escalation_packages (owner/session/version, sanitized JSON)
+             + existing diagnosis_records snapshot (v11; no fake Turn)
+        -> Web material card / historical preview / md|json export
+```
+
+新增独立路由均在通用 `/session/{session_id}` 前注册；读取与导出要求当前账号拥有 Session 或持久化工件。Bob 返回 404，匿名返回 401。POST 只接受 `session_id`，不允许注入 Evidence/Resolution/隐私策略。历史工件可在 SessionStore 重启或清理后读取，不恢复现场诊断。
+
+`source_state_fingerprint` 包含结构化摘要、状态/任务/对象版本、计划版本与最后验证 ID，忽略单纯材料请求新增的 Turn 数。`package_digest` 是排除自身字段后规范化 JSON 的 SHA-256；它是内容一致性校验，不是防篡改签名。旧版不在导出时重建。默认保留每 Session 最近 5 版，JSON Snapshot schema 为 v11；原诊断表元数据版本保持 v3，新增工件表为兼容性增量建表。
+
+`exports.export_package()` 生成 12 节 Markdown 加 References，或精确 Schema JSON，沿用 `DIAGNOSIS_REPORT_MAX_BYTES`。Trace 只记录“生成升级报修材料 / 报修材料信息不完整”，Context 只增加 `ESCALATION PACKAGE STATUS`，不注入整个工件。API 构建/保存失败不提交 Session draft；聊天构建失败保留原诊断并返回明确提示。未配置 History 时材料仅在内存，不能声称跨重启持久化。
+
+配置：`ESCALATION_MAX_EVIDENCE_ITEMS=12`、`ESCALATION_MAX_PACKAGES=5`、`ESCALATION_MASK_PRIVATE_IP=false`。强制移除凭据和设备标识的策略不能通过客户端关闭。无任何工单、邮件、Webhook、外部提交或高风险执行接入。详细合同见 [12G 验收](MILESTONE12G_VALIDATION.md)。
+
 - 新 Provider：实现 `NetworkProvider`，保持六 Tool 方法和 `ToolResult` 语义不变；
 - 新只读 Tool：新增严格 input/data schema、Provider/service 实现与 `ToolRegistry` allowlist，并补齐安全测试；
 - 新知识源：加入带真实 `source_type` 和 URL 的文档，重建索引；不得把 community 提升为 official；

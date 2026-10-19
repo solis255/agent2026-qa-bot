@@ -15,6 +15,8 @@ const state = {
   verificationCycles: [],
   resolution: null,
   resolutionTransitions: [],
+  escalationPackages: [],
+  escalationSessionId: null,
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -32,6 +34,9 @@ const elements = {
   resolutionBadge: document.querySelector("#resolution-badge"),
   resolutionContent: document.querySelector("#resolution-content"),
   resolutionNotice: document.querySelector("#resolution-notice"),
+  escalationGenerate: document.querySelector("#escalation-generate"),
+  escalationContent: document.querySelector("#escalation-content"),
+  escalationNotice: document.querySelector("#escalation-notice"),
   verificationContent: document.querySelector("#verification-content"),
   verificationCount: document.querySelector("#verification-count"),
   verificationNotice: document.querySelector("#verification-notice"),
@@ -187,6 +192,8 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 function setBusy(busy, message = "") {
   state.busy = busy;
   for (const control of elements.resolutionContent.querySelectorAll("button,select")) control.disabled = busy || !state.user || state.viewingHistory || (control.dataset.export === "true" && !state.activeRecordId);
+  elements.escalationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
+  for(const control of elements.escalationContent.querySelectorAll("button"))control.disabled=busy || !state.user;
   elements.remediationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   for (const control of elements.verificationContent.querySelectorAll("button,select,textarea")) control.disabled = busy || !state.user || state.viewingHistory;
   for (const control of elements.remediationPlan.querySelectorAll("button, select, textarea")) {
@@ -403,6 +410,7 @@ function showAuthGate(message = "请先登录或注册。") {
   state.remediationReadiness = null;
   state.verificationCycles = [];
   state.resolution = null; state.resolutionTransitions = [];
+  state.escalationPackages=[];state.escalationSessionId=null;renderEscalation();
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -613,6 +621,7 @@ function resetConversation() {
   elements.remediationSection.open = false;
   renderVerification(state.verificationCycles);
   renderResolution(state.resolution,state.resolutionTransitions);
+  renderEscalation(state.escalationPackages);
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -817,7 +826,9 @@ const RESOLUTION_LABELS={diagnosing:"诊断中",action_required:"等待操作",v
 
 function applyResolution(data) {
   state.resolution=data.resolution || null;state.resolutionTransitions=data.resolution_transitions || [];
+  if(Object.hasOwn(data,"escalation_packages"))state.escalationPackages=data.escalation_packages || [];
   renderResolution(state.resolution,state.resolutionTransitions);
+  if(!state.viewingHistory)renderEscalation(state.escalationPackages);
 }
 
 function renderResolution(record,transitions=[],{historical=false,target=state.diagnosticTarget}={}) {
@@ -852,6 +863,67 @@ async function refreshResolution() {
   if(!state.user || !sid || state.viewingHistory)return;
   const data=await requestJSON(`/api/session/resolution?session_id=${encodeURIComponent(sid)}`);
   if(epoch === state.authEpoch && sid === state.sessionId)applyResolution(data);
+}
+
+function renderEscalation(packages=[],{historical=false,sessionId=state.sessionId,staleIds=[]}={}) {
+  if(!historical)packages=packages.filter(p=>!p.session_id || p.session_id === sessionId);
+  state.escalationSessionId=sessionId;
+  elements.escalationContent.replaceChildren();elements.escalationNotice.textContent="";
+  elements.escalationGenerate.hidden=historical;
+  elements.escalationGenerate.textContent=packages.length ? "生成最新版报修材料" : "生成报修材料";
+  elements.escalationGenerate.disabled=state.busy || !state.user || !state.sessionId || historical;
+  for(const p of [...packages].reverse()){
+    const card=document.createElement("details"),summary=document.createElement("summary");
+    const changed=!historical && ((p.created_from_state_version && p.created_from_state_version !== state.resolution?.state_version)
+      || (p.created_from_target_version && p.created_from_target_version !== state.diagnosticTarget?.target_version)
+      || (p.verification_summary?.at(-1)?.verification_id && p.verification_summary.at(-1).verification_id !== state.verificationCycles.at(-1)?.verification_id));
+    const stale=staleIds.includes(p.package_id) || changed ? " · 状态已变化，旧材料仅供历史参考" : "";
+    summary.textContent=`${historical ? "历史材料 · " : ""}v${p.package_version} · ${p.completeness} · ${formatHistoryTime(p.generated_at)}${stale}`;
+    card.append(summary);
+    for(const value of [p.target?.notice,`处理状态：${RESOLUTION_LABELS[p.resolution?.state] || p.resolution?.state || "未知"}；${p.escalation_reason?.summary || ""}`,...(p.completeness_notes || [])]){
+      const line=document.createElement("p");line.textContent=value || "";card.append(line);
+    }
+    for(const [label,format,preview] of [["预览报修材料","md",true],["下载 Markdown","md",false],["下载 JSON","json",false]]){
+      const b=document.createElement("button");b.type="button";b.textContent=label;b.disabled=state.busy || !state.user;
+      b.addEventListener("click",()=>openEscalation(p.package_id,sessionId,format,preview));card.append(b);
+    }
+    elements.escalationContent.append(card);
+  }
+}
+
+async function generateEscalation() {
+  if(!state.user || !state.sessionId || state.busy || state.viewingHistory)return;
+  const epoch=state.authEpoch,sid=state.sessionId;setBusy(true);
+  try{
+    const data=await requestJSON("/api/session/escalation-package",{method:"POST",body:JSON.stringify({session_id:sid})});
+    if(epoch !== state.authEpoch || sid !== state.sessionId || state.viewingHistory)return;
+    state.escalationPackages=data.packages || [];
+    renderEscalation(state.escalationPackages,{staleIds:data.stale_package_ids || []});
+    appendTurnReasoningTrace(data.reasoning_trace || []);
+    elements.escalationNotice.textContent="已生成报修材料；未提交工单、未通知任何外部人员。" + (data.persistence === "memory" ? " 当前仅保存在内存，服务重启后不保留。" : "");
+  }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.escalationNotice.textContent=error.message;}
+  finally{if(epoch === state.authEpoch)setBusy(false);}
+}
+
+async function openEscalation(id,sid,format,preview=false) {
+  if(!state.user || state.busy || sid !== state.escalationSessionId)return;
+  const epoch=state.authEpoch;setBusy(true);
+  const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),30000);
+  try{
+    const url=`/api/session/escalation-package/${encodeURIComponent(id)}/export?session_id=${encodeURIComponent(sid)}&format=${format}`;
+    const response=await fetch(url,{credentials:"same-origin",signal:controller.signal,cache:"no-store"});
+    if(!response.ok){if(response.status === 401 && epoch === state.authEpoch)showAuthGate("登录已过期，请重新登录。");throw new Error(`材料读取失败（HTTP ${response.status}）`);}
+    const content=await response.text();
+    if(epoch !== state.authEpoch || sid !== state.escalationSessionId)return;
+    if(preview){document.querySelector("#report-title").textContent="报修材料预览";elements.reportContent.textContent=content;elements.reportDialog.showModal();}
+    else{
+      const blob=new Blob([content],{type:format === "md" ? "text/markdown;charset=utf-8" : "application/json"});
+      const objectUrl=URL.createObjectURL(blob),link=document.createElement("a");
+      link.href=objectUrl;link.download=`netpilot-escalation-${id}.${format}`;document.body.append(link);link.click();link.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    }
+  }catch(error){if(epoch === state.authEpoch && sid === state.escalationSessionId)elements.escalationNotice.textContent=error.name === "AbortError" ? "材料读取超时，请稍后重试。" : error.message;}
+  finally{window.clearTimeout(timer);if(epoch === state.authEpoch)setBusy(false);}
 }
 
 async function resolutionRequest(action,body) {
@@ -1054,6 +1126,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.remediationPlan = session.remediation_plan || null;
     state.verificationCycles = session.verification_cycles || [];
     state.resolution = session.resolution || null;state.resolutionTransitions = session.resolution_transitions || [];
+    state.escalationPackages=session.escalation_packages || [];
     state.remediationReadiness = session.remediation_readiness || null;
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
@@ -1336,6 +1409,7 @@ async function loadDiagnosisRecord(recordId) {
     renderRemediationPlan(record.remediation_plan,{historical:true});
     renderVerification(record.verification_cycles || [],{historical:true});
     renderResolution(record.resolution,record.resolution_transitions || [],{historical:true,target:record.diagnostic_target});
+    renderEscalation(record.escalation_packages || [],{historical:true,sessionId:record.session_id});
     renderClientSnapshot(record.client_snapshot_summary, record.client_evidence || [], {historical:true, target:record.diagnostic_target});
     elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
@@ -1515,6 +1589,7 @@ async function previewReport() {
     const report = await requestJSON(`/api/diagnoses/${recordId}/report`);
     if (state.authEpoch !== authEpoch) return;
     elements.reportContent.textContent = formatReportPreview(report);
+    document.querySelector("#report-title").textContent="诊断报告预览";
     elements.reportDialog.showModal();
     elements.interactionNote.textContent = "报告已根据保存的诊断证据生成，未额外调用模型。";
   } catch (error) {
@@ -1626,6 +1701,7 @@ async function activateScenario(scenario) {
   state.verificationCycles = [];
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
   state.resolution = null;state.resolutionTransitions = [];
+  state.escalationPackages=[];
   elements.scenarioSelect.value = response.current;
   renderScenarioDescription(response.current, true);
   resetConversation();
@@ -1743,6 +1819,7 @@ async function deleteCurrentCustomScenario() {
       state.remediationPlan = null;
       state.verificationCycles = [];
       state.resolution = null;state.resolutionTransitions = [];
+      state.escalationPackages=[];
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();
@@ -1808,6 +1885,7 @@ elements.environmentScope.addEventListener("change", () => {
   elements.environmentServiceLabel.hidden = elements.environmentScope.value !== "single_service";
 });
 elements.newSession.addEventListener("click", () => createSession());
+elements.escalationGenerate.addEventListener("click",generateEscalation);
 elements.scenarioSelect.addEventListener("change", switchScenario);
 elements.customScenarioNew.addEventListener("click", openCustomScenarioDialog);
 elements.customScenarioDelete.addEventListener("click", deleteCurrentCustomScenario);

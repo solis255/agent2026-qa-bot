@@ -70,6 +70,7 @@ class AgentResult(BaseModel):
     resolution_recurred: bool = False
     resolution_user_confirmation: Literal["resolved","improved","not_resolved","unknown"] | None = None
     resolution_support_requested: bool = False
+    escalation_requested: bool = False
     verification_cycles: list[VerificationCycle] = Field(default_factory=list)
     environment_profile: EnvironmentProfile | None = None
     diagnostic_target: DiagnosticTarget | None = None

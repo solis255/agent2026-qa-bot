@@ -13,6 +13,7 @@ from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 from netpilot.verification.models import VerificationCycle
 from netpilot.resolution.models import ResolutionRecord, ResolutionTransition
+from netpilot.escalation.models import EscalationPackage
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -75,6 +76,11 @@ class SessionTaskState(BaseModel):
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     executed_tool_signatures: set[str] = Field(default_factory=set)
     current_issue: str | None = None
+    original_symptom: str = ""
+    issue_started_at: datetime | None = None
+    issue_target_version: int | None = None
+    escalation_packages: list[EscalationPackage] = Field(default_factory=list, max_length=20)
+    escalation_package_sequence: int = 0
     last_turn_intent: str | None = None
     last_response_mode: str | None = None
     last_fallback_reason: str | None = None

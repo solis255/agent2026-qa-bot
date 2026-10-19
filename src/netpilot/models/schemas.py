@@ -14,6 +14,7 @@ from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 from netpilot.verification.models import VerificationCycle
 from netpilot.resolution.models import ResolutionRecord, ResolutionTransition
+from netpilot.escalation.models import EscalationPackage
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
@@ -38,6 +39,7 @@ class HealthResponse(BaseModel):
 
 
 class RemediationStateView(BaseModel):
+    escalation_packages: list[EscalationPackage] = Field(default_factory=list,max_length=20)
     resolution: ResolutionRecord = Field(default_factory=ResolutionRecord)
     resolution_transitions: list[ResolutionTransition] = Field(default_factory=list,max_length=200)
     verification_cycles: list[VerificationCycle] = Field(default_factory=list,max_length=50)
@@ -219,7 +221,7 @@ def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str
 
 
 class DiagnosisRecordView(RemediationStateView):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] = 10
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] = 11
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     analyzed_snapshot_id: str | None = None
@@ -294,7 +296,7 @@ class DiagnosisHistoryResponse(BaseModel):
 
 
 class DiagnosisReportView(RemediationStateView):
-    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] = 10
+    schema_version: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] = 11
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_evidence: list[EvidenceRecord] = Field(default_factory=list)
     environment_profile: EnvironmentProfile = Field(default_factory=legacy_environment)

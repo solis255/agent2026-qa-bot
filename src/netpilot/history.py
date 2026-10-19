@@ -32,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 10
+SNAPSHOT_SCHEMA_VERSION = 11
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -59,6 +59,8 @@ class DiagnosisRepository(Protocol):
     def update_client_snapshot(self, user_id: UUID, session_id: UUID, task) -> bool: ...
     def update_remediation(self, user_id: UUID, session_id: UUID, task) -> bool: ...
     def update_resolution(self, user_id: UUID, session_id: UUID, task) -> bool: ...
+    def update_escalation(self, user_id: UUID, session_id: UUID, task) -> bool: ...
+    def escalation_packages(self, user_id: UUID, session_id: UUID) -> list: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -114,6 +116,7 @@ class SQLiteDiagnosisRepository:
             resolution=response.resolution,resolution_transitions=response.resolution_transitions,
             verification_cycles=response.verification_cycles,
             verification_evidence=response.verification_evidence,
+            escalation_packages=response.escalation_packages,
             remediation_plan_history=response.remediation_plan_history,
             remediation_readiness=response.remediation_readiness,
             analyzed_snapshot_id=response.client_snapshot_summary.snapshot_id if response.client_snapshot_summary and any(item.evidence_origin == "client_snapshot" for item in response.diagnosis.evidence) else None,
@@ -144,6 +147,9 @@ class SQLiteDiagnosisRepository:
         try:
             with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                from netpilot.escalation.persistence import write, read
+                write(connection,user_id,response.session_id,response.escalation_packages)
+                current.escalation_packages=read(connection,user_id,response.session_id)
                 row = connection.execute(
                     "SELECT * FROM diagnosis_records "
                     "WHERE user_id = ? AND session_id = ?",
@@ -290,6 +296,31 @@ class SQLiteDiagnosisRepository:
         """Use the same atomic Session update; never fabricate a chat Turn."""
         return self.update_remediation(user_id,session_id,task)
 
+    def update_escalation(self,user_id,session_id,task) -> bool:
+        """Persist even before first chat, without manufacturing a History Turn."""
+        from netpilot.escalation.persistence import write
+        try:
+            with self._lock,self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                write(connection,user_id,session_id,task.escalation_packages)
+                row=connection.execute("SELECT * FROM diagnosis_records WHERE user_id=? AND session_id=?",(str(user_id),str(session_id))).fetchone()
+                if row:
+                    record=_record_from_row(row)
+                    trace=merge_reasoning_trace(record.reasoning_trace,task.reasoning_trace,self.reasoning_trace_max_steps)
+                    _update_record(connection,record.model_copy(update={"schema_version":SNAPSHOT_SCHEMA_VERSION,
+                        "escalation_packages":task.escalation_packages,"reasoning_trace":trace,
+                        "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)})}))
+            return True
+        except (sqlite3.Error,ValueError) as exc:
+            raise DiagnosisStorageError("报修材料保存失败") from exc
+
+    def escalation_packages(self,user_id,session_id):
+        from netpilot.escalation.persistence import read
+        try:
+            with self._lock,self._connection() as connection: return read(connection,user_id,session_id)
+        except (sqlite3.Error,ValueError) as exc:
+            raise DiagnosisStorageError("报修材料读取失败") from exc
+
     def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView:
         try:
             with self._lock, self._connection() as connection:
@@ -435,6 +466,8 @@ class SQLiteDiagnosisRepository:
                     )
                     """
                 )
+                from netpilot.escalation.persistence import initialize
+                initialize(connection)
                 version_row = connection.execute(
                     "SELECT value FROM netpilot_metadata WHERE key = 'schema_version'"
                 ).fetchone()
@@ -593,6 +626,7 @@ def _merge_session_records(
         resolution=current.resolution,resolution_transitions=current.resolution_transitions,
         verification_cycles=current.verification_cycles,
         verification_evidence=current.verification_evidence,
+        escalation_packages=current.escalation_packages or existing.escalation_packages,
         remediation_plan_history=current.remediation_plan_history,
         remediation_readiness=current.remediation_readiness,
         analyzed_snapshot_id=current.analyzed_snapshot_id or existing.analyzed_snapshot_id,
