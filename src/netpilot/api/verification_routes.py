@@ -16,9 +16,11 @@ def operate(request,user,sid,**kwargs):
         if request.app.state.settings.diagnosis_history_enabled: raise DiagnosisStorageError("history_unavailable")
         return False
     try:
-        task,events = request.app.state.sessions.verification(sid,user.id,registry=request.app.state.tool_registry,persist=persist,**kwargs)
+        with request.app.state.runtime_lock:
+            task,events = request.app.state.sessions.verification(sid,user.id,registry=request.app.state.tool_registry,persist=persist,**kwargs)
         from netpilot.api.presenters import _present_tool_call
         return {"session_id":str(sid),"verification_cycles":[c.model_dump(mode="json") for c in task.verification_cycles],
+                "resolution":task.resolution.model_dump(mode="json"),"resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],
                 "verification_tool_calls":[_present_tool_call(s).model_dump(mode="json") for s in task.verification_tool_steps],
                 "reasoning_trace":[e.model_dump(mode="json") for e in events],"task_version":task.task_version}
     except SessionNotFoundError as exc: raise HTTPException(404,"会话不存在或已失效。") from exc

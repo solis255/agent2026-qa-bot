@@ -34,7 +34,7 @@ def test_dt12_history_report_switch_archive_and_chat_sse_match_after_restart(tmp
         assert "DNS 正常" not in response["answer"]
     repository = SQLiteDiagnosisRepository(tmp_path / "target.db")
     record = repository.get(owner,UUID(rid))
-    assert record.schema_version == 9 and repository.count(owner) == 1
+    assert record.schema_version == 10 and repository.count(owner) == 1
     assert record.turn_count == len(record.conversation_turns) == 2
     assert record.diagnostic_target.subject == "user_client"
     assert record.tool_calls[0].target_subject == "netpilot_host"  # Archive preserved.
@@ -83,7 +83,7 @@ def test_target_patch_storage_failure_does_not_commit_session(tmp_path,monkeypat
     with TestClient(app) as client:
         register_test_user(client)
         session = client.post("/api/session").json()
-        def fail(*args):
+        def fail(*args,**kwargs):
             raise DiagnosisStorageError("private-error-detail")
         monkeypatch.setattr(app.state.diagnosis_repository,"update_diagnostic_target",fail)
         failed = client.patch("/api/session/diagnostic-target",json={"session_id":session["session_id"],"subject":"netpilot_host"})

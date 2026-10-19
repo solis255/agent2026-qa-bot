@@ -12,6 +12,7 @@ from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 from netpilot.verification.models import VerificationCycle
+from netpilot.resolution.models import ResolutionRecord, ResolutionTransition
 
 from netpilot.agent.coverage import DiagnosticCoverage, EvidenceSufficiency
 from netpilot.agent.evidence import finding_status, json_data
@@ -96,6 +97,8 @@ class SessionTaskState(BaseModel):
     verification_cycles: list[VerificationCycle] = Field(default_factory=list, max_length=50)
     verification_sequence: int = 0
     verification_tool_steps: list[AgentToolStep] = Field(default_factory=list,max_length=100)
+    resolution: ResolutionRecord = Field(default_factory=ResolutionRecord)
+    resolution_transitions: list[ResolutionTransition] = Field(default_factory=list,max_length=200)
 
     def reusable_evidence(self) -> list[EvidenceRecord]:
         now = datetime.now(timezone.utc)

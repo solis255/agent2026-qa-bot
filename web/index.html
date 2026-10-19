@@ -64,6 +64,7 @@
             <p class="eyebrow">诊断会话</p>
             <h1 id="chat-title">你好，我是 NetPilot</h1>
             <p class="session-label" id="session-label">正在创建安全会话…</p>
+            <span id="resolution-badge" class="resolution-badge" role="status">诊断中</span>
           </div>
           <button type="button" class="secondary-button" id="new-session" disabled>
             新建会话
@@ -211,6 +212,12 @@
           <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
           <div id="remediation-plan"></div>
         </details>
+
+        <section class="status-card" id="resolution-section" aria-label="诊断闭环状态">
+          <h2>处理状态</h2>
+          <div id="resolution-content" aria-live="polite"></div>
+          <p id="resolution-notice" role="status" aria-live="polite"></p>
+        </section>
 
         <details class="status-card" id="verification-section">
           <summary>修复后验证 <span id="verification-count" class="timeline-count">0 轮</span></summary>

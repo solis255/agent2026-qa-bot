@@ -112,17 +112,28 @@ def bind_snapshot(task, records):
 
 
 def host_refresh(task, cycle, registry):
+    return _readonly_refresh(task,cycle,registry,mock=False)
+
+
+def mock_refresh(task, cycle, registry):
+    """Simulation-only counterpart, never permits a Local host handler."""
+    return _readonly_refresh(task,cycle,registry,mock=True)
+
+
+def _readonly_refresh(task, cycle, registry, *, mock):
     from netpilot.agent.target_capabilities import evaluate_target_capabilities
     from netpilot.agent.schemas import AgentToolStep
     from netpilot.agent.task_state import evidence_from_step
     from netpilot.diagnostic_target import binding_for
     capability = evaluate_target_capabilities(task.diagnostic_target,registry.provider_kind)
-    if task.diagnostic_target.subject != "netpilot_host" or not capability.can_use_host_network_tools: raise ValueError("host_verification_forbidden")
+    subject="mock_client" if mock else "netpilot_host"
+    scope="mock_target" if mock else "execution_host"
+    if task.diagnostic_target.subject != subject or not (capability.can_use_mock_tools if mock else capability.can_use_host_network_tools): raise ValueError("host_verification_forbidden")
     if cycle.status in {"completed","inconclusive","failed"}: return []
     if cycle.status != "awaiting_after_evidence": raise ValueError("verification_not_waiting")
     baseline_ids = set(cycle.baseline.evidence_ids)
     critical_keys = {(c.metric,c.target) for c in cycle.checks if c.importance == "critical"}
-    selected = [r for r in task.evidence if r.evidence_id in baseline_ids and r.target_subject == "netpilot_host" and r.target_version == cycle.target_version and r.execution_scope == "execution_host" and r.evidence_origin == "tool" and metric_value(r) and metric_value(r)[:2] in critical_keys][:10]
+    selected = [r for r in task.evidence if r.evidence_id in baseline_ids and r.target_subject == subject and r.target_version == cycle.target_version and r.execution_scope == scope and r.evidence_origin == "tool" and metric_value(r) and metric_value(r)[:2] in critical_keys][:10]
     records,seen = [],set()
     try:
         for record in selected:
@@ -132,7 +143,7 @@ def host_refresh(task, cycle, registry):
             # Arguments are ONLY baseline arguments. Registry revalidates all
             # inputs and provider security policy (including HTTP SSRF checks).
             execution = registry.execute(record.tool_name,json.dumps(record.arguments),target=task.diagnostic_target)
-            step = AgentToolStep(**binding_for(task.diagnostic_target,"execution_host"),round=1,
+            step = AgentToolStep(**binding_for(task.diagnostic_target,scope),round=1,
                 tool_call_id=f"verification-{uuid4()}",tool_name=record.tool_name,arguments=execution.arguments,
                 result=execution.result,purpose="verification",verification_id=cycle.verification_id)
             after = evidence_from_step(step,turn_index=max(1,task.turn_index),task_version=task.task_version)

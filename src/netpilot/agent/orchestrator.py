@@ -151,12 +151,24 @@ class AgentOrchestrator:
             enabled=self.reasoning_trace_enabled, max_steps=self.reasoning_trace_max_steps,
         )
         from netpilot.remediation.service import explicit_remediation
+        from netpilot.resolution.service import user_action,answer as resolution_answer
+        resolution_action=user_action(user_message,was_resolved=bool(task_state and task_state.resolution.state == "resolved")) if task_state else None
         classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
-        if task_state is not None and task_state.verification_cycles and re.fullmatch(r"(?:请问)?(?:现在怎么样|验证结果(?:怎么样)?|修复后怎么样|修复前后对比)[？?。！!]?",user_message.strip()):
+        if resolution_action == "recurrence":
+            trace.intent=TurnIntent.STATE_CHANGED
+            result=AgentResult(answer="已记录症状复发，将重新打开案例并收集新任务版本的证据；旧的已解决记录仍保留。",status=AgentStatus.COMPLETED,tool_rounds=0,
+                turn_intent=TurnIntent.STATE_CHANGED,response_mode=ResponseMode.DIAGNOSTIC,task_version_advanced=True,resolution_recurred=True)
+        elif resolution_action in {"resolved","improved","not_resolved","support"}:
+            trace.intent=TurnIntent.META_FEEDBACK
+            result=AgentResult(answer="已记录人工支持请求，可导出诊断报告；仅建议人工进一步处理，未提交外部工单。" if resolution_action == "support" else "已记录你的症状确认；用户声明与客观复核分开保存，最终处理状态由确定性规则计算。",
+                status=AgentStatus.COMPLETED,tool_rounds=0,turn_intent=TurnIntent.META_FEEDBACK,response_mode=ResponseMode.META,
+                resolution_user_confirmation=resolution_action if resolution_action != "support" else None,resolution_support_requested=resolution_action == "support")
+        elif task_state is not None and task_state.verification_cycles and re.fullmatch(r"(?:请问)?(?:现在怎么样|验证结果(?:怎么样)?|修复后怎么样|修复前后对比)[？?。！!]?",user_message.strip()):
             cycle = task_state.verification_cycles[-1]
             valid = (cycle.target_subject,cycle.target_version) == (target.subject,target.target_version) and cycle.status != "superseded"
             answer = (f"修复后验证 #{cycle.verification_sequence}：{cycle.result_summary or '尚未取得修复后证据。'}\n\n" + "\n".join(f"- {d.metric} {d.target or ''}：{d.before or '未知'} → {d.after or '未采集'}（{d.change}）" for d in cycle.diffs[:10]) + "\n\n这是结构化指标对比；improved 不等于故障已解决。") if valid else "旧验证属于其他对象或已失效，不能用于当前对象结论。"
             result = AgentResult(answer=answer,status=AgentStatus.COMPLETED,tool_rounds=0,turn_intent=TurnIntent.ANALYZE_EXISTING,response_mode=ResponseMode.ANALYSIS)
+            result.answer=resolution_answer(task_state.resolution)+"\n\n"+result.answer
         elif task_state is not None and explicit_remediation(user_message) and classification.intent not in {TurnIntent.STATE_CHANGED,TurnIntent.KNOWLEDGE_REQUEST}:
             trace.intent = TurnIntent.FOLLOWUP_ACTION
             trace.append("decision","复用诊断生成手动计划","复用当前证据与用户步骤反馈，不运行新的网络工具或自动重测。")
@@ -358,6 +370,7 @@ class AgentOrchestrator:
                 diagnostic_target=target,
                 remediation_plan=task_state.remediation_plan if task_state else None,
                 verification_cycles=task_state.verification_cycles if task_state else (),
+                resolution=task_state.resolution if task_state else None,
             )
         )
         messages.extend(message.model_copy(deep=True) for message in history)
@@ -443,6 +456,7 @@ class AgentOrchestrator:
                 diagnostic_target=target,
                 remediation_plan=task_state.remediation_plan if task_state else None,
                 verification_cycles=task_state.verification_cycles if task_state else (),
+                resolution=task_state.resolution if task_state else None,
             )
 
         while True:

@@ -226,7 +226,7 @@ GET  /api/scenarios
 正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
 Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
 仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12E 当前为 v9），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
+12A 快照新增 `environment_profile` 并升级到 v5（12F 当前为 v10），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
 ### 诊断对象（Milestone 12B）
@@ -269,7 +269,7 @@ unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器�
 VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认无依赖时建议短暂对比，并提供恢复方法。
 对象、关键环境、诊断依据或快照时效变化使旧计划失效。completed 只表示步骤流程结束，不等于故障 resolved。
 
-结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v9，SQLite 结构仍 v3，旧记录不会从文本反推计划。
+结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v10，SQLite 结构仍 v3，旧记录不会从文本反推计划。
 完整接口、批准模板、GR-01～GR-20 和人工验收状态见 [12D 验收记录](docs/MILESTONE12D_VALIDATION.md)。
 
 ### 修复前后验证（Milestone 12E）
@@ -285,6 +285,20 @@ VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认�
 **Verification ≠ Resolution**：本阶段不自动判定 resolved、不自动修复、不生成 Support Package。
 完整接口、BV-01～BV-20 和四个人工验收步骤见 [12E 验收记录](docs/MILESTONE12E_VALIDATION.md)。
 
+### 诊断闭环状态（Milestone 12F）
+
+每个 Session 保存确定性的 Support Case 状态：诊断中、等待操作、正在验证、已解决、有改善、未解决、建议人工处理。
+状态由结构化复核、低风险步骤、用户确认、对象/任务版本及证据时效计算，不能由 LLM 或前端直接指定。
+
+- “已解决”要求关键异常指标恢复、有效客观复核和用户明确确认，单独说“好了”、计划完成或复核 improved 均不充分。
+- DNS 有改善但用户仍报告网页故障，状态为“有改善”；12E 的主客观冲突记录继续保留。
+- 连续有效复核无改善且无安全步骤、权限/风险边界、充分支持的基础设施假设或用户请求，可建议人工处理；跳过和动作失败不算修复无效。
+- 症状复发开启新 task version，切换对象重回诊断中；旧闭环记录保留。默认保留最近 `RESOLUTION_MAX_TRANSITIONS=30` 次真实状态转换，重复确认不增加状态版本。
+- 用户可确认原始症状或请求人工支持，History、Trace、Markdown/JSON 报告保存闭环依据。Mock 继续明确标注为模拟终端。
+
+**人工支持只是一项建议，不会提交工单、发送邮件、接入 ITSM、执行高风险修复或提权。** 默认无改善建议阈值为 `RESOLUTION_ESCALATE_AFTER_NO_IMPROVEMENT=2`。
+详细决策规则、API、RS-01～RS-24 和人工验收状态见 [12F 验收记录](docs/MILESTONE12F_VALIDATION.md)。
+
 ### 测试
 
 Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
@@ -293,7 +307,7 @@ API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有
 默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
 `REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
 显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12E 当前为 v9），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
+Milestone 11 当时快照升级到 v4（12F 当前为 v10），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
 实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
 
 Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
@@ -311,7 +325,7 @@ cd ..
 ```
 
 需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-64 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
+73 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
 依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
 最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
 上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
@@ -322,10 +336,10 @@ cd ..
 python -m pytest -q
 ```
 
-Milestone 12E 修改前基线为 `711 passed in 152.29s`；2026-10-19 修复前后验证实现后的最终全量回归实测为：
+Milestone 12F 修改前基线为 `791 passed in 240.97s`；2026-10-19 诊断闭环状态实现后的最终全量回归实测为：
 
 ```text
-791 passed in 148.75s
+880 passed in 187.50s
 ```
 
 测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。

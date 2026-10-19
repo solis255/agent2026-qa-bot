@@ -16,6 +16,7 @@ def enrich_result(task, result, message, *, max_steps=5, trace_enabled=True, tra
     invalidate(draft)
     intent = getattr(result.turn_intent,"value",None)
     generate = intent in {"diagnose","state_changed","followup_action"} or explicit_remediation(message)
+    if result.resolution_recurred: generate=False
     events = []
     if intent in {"diagnose","state_changed"}:
         draft.remediation_symptom = message

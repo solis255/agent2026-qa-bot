@@ -75,6 +75,8 @@ class SessionStore:
         environment_client_mode: ClientMode = "unknown",
         provider_kind: ProviderKind = "unavailable",
         verification_max_cycles: int = 10,
+        resolution_max_transitions: int = 30,
+        resolution_escalate_after_no_improvement: int = 2,
     ) -> None:
         if max_history_messages < 1:
             raise ValueError("max_history_messages must be at least 1")
@@ -90,6 +92,8 @@ class SessionStore:
         self.environment_client_mode = environment_client_mode
         self.provider_kind = provider_kind
         self.verification_max_cycles = verification_max_cycles
+        self.resolution_max_transitions = resolution_max_transitions
+        self.resolution_escalate_after_no_improvement = resolution_escalate_after_no_improvement
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
@@ -105,6 +109,8 @@ class SessionStore:
             environment_profile=initial_environment(self.environment_client_mode),
         )
         state.task_state.diagnostic_target = derive_diagnostic_target(state.task_state.environment_profile, self.provider_kind)
+        target=state.task_state.diagnostic_target
+        state.task_state.resolution=state.task_state.resolution.model_copy(update={"target_subject":target.subject,"target_version":target.target_version})
         with self._lock:
             if len(self._sessions) >= self.max_sessions:
                 idle = [item for item in self._sessions.values() if not item.busy]
@@ -223,6 +229,11 @@ class SessionStore:
                     if result.remediation_readiness: task_state.remediation_readiness = result.remediation_readiness
                     task_state.remediation_plan_version = max(task_state.remediation_plan_version,result.remediation_plan.plan_version if result.remediation_plan else 0)
             # Persist under this lock, so a PATCH cannot race a completed Turn.
+            if result is not None:
+                events=self._resolution_update(task_state,source="confirm" if result.resolution_user_confirmation is not None else "turn",
+                    confirmation=result.resolution_user_confirmation,request_support=result.resolution_support_requested,
+                    reopen_reason="symptom_recurred" if result.resolution_recurred else None)
+                result.reasoning_trace.extend(events)
             response = after_finish() if after_finish is not None else None
             task_state.pending_snapshot_trace.clear()
             task_state.pending_remediation_trace.clear()
@@ -276,6 +287,8 @@ class SessionStore:
                 _,events = ensure_plan(draft,max_steps=max_steps,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
             if feedback is not None:
                 events = update_step(draft,step_id,feedback,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
+            if generate or feedback is not None:
+                events.extend(self._resolution_update(draft,source="remediation"))
             if draft.model_dump() != original.model_dump():
                 draft.verification_cycles = draft.verification_cycles[-self.verification_max_cycles:]
                 persisted = persist(draft) if persist else False
@@ -286,7 +299,7 @@ class SessionStore:
 
     def verification(self, session_id, owner_user_id, *, action="get", cycle_id=None, observation=None, reverify=False, registry=None, persist=None):
         """Owner-scoped draft -> persistence -> memory commit; no fake chat Turn."""
-        from netpilot.verification.service import ensure_baseline, activate, host_refresh, invalidate_cycles, emit
+        from netpilot.verification.service import ensure_baseline, activate, host_refresh, mock_refresh, invalidate_cycles, emit
         from netpilot.verification.evaluator import VerificationEvaluator
         with self._lock:
             state = self._require(session_id,owner_user_id)
@@ -306,6 +319,7 @@ class SessionStore:
                 if cycle.status == "baseline_ready" and not any(s.status == "completed" for s in draft.remediation_plan.steps): raise ValueError("complete_manual_step_first")
                 events.extend(activate(draft,cycle))
                 if cycle.target_subject == "netpilot_host": events.extend(host_refresh(draft,cycle,registry))
+                if cycle.target_subject == "mock_client": events.extend(mock_refresh(draft,cycle,registry))
             if action == "observation":
                 if cycle.user_observation is None or cycle.user_observation.model_dump(exclude={"observed_at"}) != observation.model_dump(exclude={"observed_at"}):
                     cycle.user_observation = observation
@@ -314,6 +328,8 @@ class SessionStore:
                         if cycle.after: cycle.status = "inconclusive" if cycle.result == "inconclusive" else "completed"
                     cycle.updated_at = datetime.now(timezone.utc)
                     events.append(emit(draft,"记录用户验证反馈","用户主观症状反馈已单独保存，不冒充客观网络检测；冲突会明确保留。",cycle,"observation"))
+            if action != "get":
+                events.extend(self._resolution_update(draft,source="verification"))
             if not self.reasoning_trace_enabled:
                 draft.reasoning_trace = [e for e in draft.reasoning_trace if e not in events]; events = []
             if draft.model_dump() != original.model_dump():
@@ -338,6 +354,10 @@ class SessionStore:
                 return self.task_state(session_id, owner_user_id), True, []
             draft = current.model_copy(deep=True)
             records, events = normalize_snapshot(snapshot, digest, draft, freshness_minutes=freshness_minutes, trace_enabled=self.reasoning_trace_enabled)
+            old_cycle=current.verification_cycles[-1] if current.verification_cycles else None
+            new_cycle=draft.verification_cycles[-1] if draft.verification_cycles else None
+            if old_cycle and new_cycle and (old_cycle.status,old_cycle.completed_at) != (new_cycle.status,new_cycle.completed_at):
+                events.extend(self._resolution_update(draft,source="verification"))
             # Preserve replaced snapshot observations for audit while bounding memory.
             # Reserve some slots for actual Tool evidence; reject rather than lose audit.
             if sum(item.evidence_origin == "client_snapshot" for item in draft.evidence) > max(1, self.max_evidence_records * 4 // 5):
@@ -378,10 +398,11 @@ class SessionStore:
             state = self._require(session_id, owner_user_id)
             task_state = _task_state(state)
             task_state.advance_version()
+            self._resolution_update(task_state,source="task",reopen_reason="task_changed")
             state.updated_at = datetime.now(timezone.utc)
             return task_state.task_version
 
-    def update_diagnostic_target(self, session_id: UUID, owner_user_id: UUID, subject, *, persist=None) -> DiagnosticTarget:
+    def update_diagnostic_target(self, session_id: UUID, owner_user_id: UUID, subject, *, persist=None, persist_task=None) -> DiagnosticTarget:
         with self._lock:
             state = self._require(session_id, owner_user_id)
             if state.busy:
@@ -390,11 +411,39 @@ class SessionStore:
                 raise ValueError("Mock 模拟终端由系统管理，不可切换为真实设备。")
             task = _task_state(state)
             target = merge_diagnostic_target(task.diagnostic_target, user_target(subject, task.environment_profile, self.provider_kind), self.provider_kind)
-            if persist is not None:
+            draft=task.model_copy(deep=True)
+            draft.set_target(target)
+            events=self._resolution_update(draft,source="target")
+            if persist_task is not None:
+                persisted=persist_task(target,draft)
+                if not persisted: draft.pending_remediation_trace.extend(events)
+            elif persist is not None:
                 persist(target)
-            task.set_target(target)
+            state.task_state=draft
             state.updated_at = datetime.now(timezone.utc)
             return target.model_copy(deep=True)
+
+    def _resolution_update(self, task, **kwargs):
+        from netpilot.resolution.service import sync
+        return sync(task,threshold=self.resolution_escalate_after_no_improvement,transition_limit=self.resolution_max_transitions,
+            trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps,**kwargs)
+
+    def resolution_action(self, session_id, owner_user_id, *, action="get", confirmation=None, persist=None):
+        """Owner-scoped explicit user input; state is always computed server-side."""
+        with self._lock:
+            state=self._require(session_id,owner_user_id)
+            if state.busy: raise SessionBusyError(str(session_id))
+            original=_task_state(state)
+            draft=self.task_state(session_id,owner_user_id)
+            events=[]
+            if action != "get":
+                events=self._resolution_update(draft,source="confirm" if action == "confirm" else "support",
+                    confirmation=confirmation,request_support=action == "support")
+                if draft.model_dump() != original.model_dump():
+                    persisted=persist(draft) if persist else False
+                    if not persisted: draft.pending_remediation_trace.extend(events)
+                    state.task_state=draft;state.updated_at=datetime.now(timezone.utc)
+            return draft.model_copy(deep=True),events
 
     def clear(self) -> int:
         with self._lock:

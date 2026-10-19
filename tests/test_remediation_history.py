@@ -36,7 +36,7 @@ def test_gr17_gr18_history_reopens_and_report_retains_feedback(tmp_path):
         assert sum(counts.values()) == 0
     repo=SQLiteDiagnosisRepository(tmp_path/"target.db")
     record=repo.get(owner,rid)
-    assert record.schema_version == 9 and record.remediation_plan.steps[0].outcome == "no_change"
+    assert record.schema_version == 10 and record.remediation_plan.steps[0].outcome == "no_change"
     report=build_diagnosis_report(record)
     markdown=render_report_markdown(report)
     assert "## 修复计划" in markdown and "no_change" in markdown and "回滚" in markdown and "验证" in markdown

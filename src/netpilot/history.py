@@ -32,7 +32,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 9
+SNAPSHOT_SCHEMA_VERSION = 10
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -55,9 +55,10 @@ class DiagnosisRepository(Protocol):
     ) -> DiagnosisRecordView: ...
 
     def update_environment_profile(self, user_id: UUID, session_id: UUID, profile: EnvironmentProfile) -> None: ...
-    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None: ...
+    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget, *, task=None) -> bool: ...
     def update_client_snapshot(self, user_id: UUID, session_id: UUID, task) -> bool: ...
     def update_remediation(self, user_id: UUID, session_id: UUID, task) -> bool: ...
+    def update_resolution(self, user_id: UUID, session_id: UUID, task) -> bool: ...
 
     def save(
         self, user_id: UUID, user_message: str, response: ChatResponse
@@ -110,6 +111,7 @@ class SQLiteDiagnosisRepository:
             client_snapshot_summary=response.client_snapshot_summary,
             client_evidence=response.client_evidence,
             remediation_plan=response.remediation_plan,
+            resolution=response.resolution,resolution_transitions=response.resolution_transitions,
             verification_cycles=response.verification_cycles,
             verification_evidence=response.verification_evidence,
             remediation_plan_history=response.remediation_plan_history,
@@ -196,7 +198,7 @@ class SQLiteDiagnosisRepository:
         except (sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("用户环境保存失败") from exc
 
-    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget) -> None:
+    def update_diagnostic_target(self, user_id: UUID, session_id: UUID, target: DiagnosticTarget, *, task=None) -> bool:
         try:
             with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -204,11 +206,17 @@ class SQLiteDiagnosisRepository:
                 if row is not None:
                     existing = _record_from_row(row)
                     updates = {"diagnostic_target":target, "schema_version":SNAPSHOT_SCHEMA_VERSION}
+                    if task is not None:
+                        updates.update(resolution=task.resolution,resolution_transitions=task.resolution_transitions,
+                            reasoning_trace=merge_reasoning_trace(existing.reasoning_trace,task.reasoning_trace,self.reasoning_trace_max_steps))
+                        updates["metrics"]=existing.metrics.model_copy(update={"reasoning_trace_steps":len(updates["reasoning_trace"])})
                     if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (target.subject, target.target_version):
                         from netpilot.remediation.service import supersede
                         supersede(existing.remediation_plan)
                         updates["diagnosis"] = DiagnosisView(status="completed", summary="诊断对象已切换，尚无当前对象的直接网络检测结论。", tool_rounds=0)
                     _update_record(connection, existing.model_copy(update=updates))
+                    return True
+                return False
         except (sqlite3.Error, ValueError) as exc:
             raise DiagnosisStorageError("诊断对象保存失败") from exc
 
@@ -232,6 +240,7 @@ class SQLiteDiagnosisRepository:
                 record = record.model_copy(update={
                     "schema_version":SNAPSHOT_SCHEMA_VERSION,
                     "client_snapshot_summary":task.client_snapshot_summary,
+                    "resolution":task.resolution,"resolution_transitions":task.resolution_transitions,
                     "verification_cycles":task.verification_cycles,
                     "verification_evidence":[e for e in task.evidence if e.evidence_origin == "tool"],
                     "remediation_plan":task.remediation_plan,
@@ -263,6 +272,7 @@ class SQLiteDiagnosisRepository:
                 calls = _merge_tool_calls(record.tool_calls,[_present_tool_call(s) for s in task.verification_tool_steps])
                 _update_record(connection,record.model_copy(update={
                     "tool_calls":calls,
+                    "resolution":task.resolution,"resolution_transitions":task.resolution_transitions,
                     "schema_version":SNAPSHOT_SCHEMA_VERSION,"remediation_plan":task.remediation_plan,
                     "verification_cycles":task.verification_cycles,
                     "verification_evidence":[e for e in task.evidence if e.evidence_origin == "tool"],
@@ -275,6 +285,10 @@ class SQLiteDiagnosisRepository:
                 return True
         except (sqlite3.Error,ValueError) as exc:
             raise DiagnosisStorageError("修复计划保存失败") from exc
+
+    def update_resolution(self,user_id,session_id,task) -> bool:
+        """Use the same atomic Session update; never fabricate a chat Turn."""
+        return self.update_remediation(user_id,session_id,task)
 
     def get(self, user_id: UUID, record_id: UUID) -> DiagnosisRecordView:
         try:
@@ -356,6 +370,7 @@ class SQLiteDiagnosisRepository:
                         confidence=row["confidence"],
                         metrics=snapshot.metrics,
                         client_snapshot_summary=snapshot.client_snapshot_summary,
+                        resolution=snapshot.resolution,
                     )
                 )
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
@@ -575,6 +590,7 @@ def _merge_session_records(
         client_snapshot_summary=current.client_snapshot_summary,
         client_evidence=current.client_evidence,
         remediation_plan=current.remediation_plan,
+        resolution=current.resolution,resolution_transitions=current.resolution_transitions,
         verification_cycles=current.verification_cycles,
         verification_evidence=current.verification_evidence,
         remediation_plan_history=current.remediation_plan_history,

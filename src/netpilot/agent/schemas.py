@@ -67,6 +67,9 @@ class AgentResult(BaseModel):
     remediation_plan_history: list[RemediationPlan] = Field(default_factory=list)
     remediation_readiness: RemediationReadiness | None = None
     remediation_updated: bool = False
+    resolution_recurred: bool = False
+    resolution_user_confirmation: Literal["resolved","improved","not_resolved","unknown"] | None = None
+    resolution_support_requested: bool = False
     verification_cycles: list[VerificationCycle] = Field(default_factory=list)
     environment_profile: EnvironmentProfile | None = None
     diagnostic_target: DiagnosticTarget | None = None

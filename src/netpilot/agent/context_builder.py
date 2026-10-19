@@ -37,6 +37,7 @@ def build_task_context_message(
     diagnostic_target: DiagnosticTarget | None = None,
     remediation_plan=None,
     verification_cycles=(),
+    resolution=None,
 ) -> ChatMessage:
     """Return a compact summary; never inject persisted raw Tool JSON."""
 
@@ -110,6 +111,8 @@ def build_task_context_message(
     content += "\n\n" + remediation_context(remediation_plan)
     from netpilot.verification.service import context as verification_context
     content += "\n\n" + verification_context(verification_cycles, diagnostic_target, task_version)
+    from netpilot.resolution.service import context as resolution_context
+    content += "\n\n" + resolution_context(resolution,diagnostic_target,task_version)
     from netpilot.client_snapshot.service import snapshot_context
     content += "\n\n" + snapshot_context([item for item in records if item.evidence_origin == "client_snapshot"])
     chunks = knowledge_results(records, current_steps)

@@ -89,6 +89,7 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
         )
         del snapshot
         body = SessionResponse(
+            resolution=task.resolution,resolution_transitions=task.resolution_transitions,
             session_id=sid, created_at=session.created_at,
             environment_profile=task.environment_profile, diagnostic_target=task.diagnostic_target,
             client_snapshot_summary=task.client_snapshot_summary,

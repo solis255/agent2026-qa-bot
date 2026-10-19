@@ -27,7 +27,7 @@ def test_gr10_gr11_feedback_statuses_idempotence_and_no_turns(tmp_path):
         plan=result.json()["remediation_plan"]
         assert plan["status"] == "in_progress" and plan["steps"][0]["status"] == "completed"
         assert plan["steps"][0]["outcome"] == "no_change"
-        assert [e["title"] for e in result.json()["reasoning_trace"]] == ["用户执行修复步骤","开始修复后验证"]
+        assert [e["title"] for e in result.json()["reasoning_trace"]] == ["用户执行修复步骤","开始修复后验证","诊断状态更新"]
         duplicate=client.patch(url,json=body)
         assert duplicate.json()["reasoning_trace"] == []
         assert duplicate.json()["remediation_plan"] == plan

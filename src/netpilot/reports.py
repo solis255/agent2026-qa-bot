@@ -88,6 +88,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         client_snapshot_summary=summary,
         client_evidence=record.client_evidence,
         remediation_plan=record.remediation_plan,
+        resolution=record.resolution,resolution_transitions=record.resolution_transitions,
         verification_cycles=record.verification_cycles,
         verification_evidence=record.verification_evidence,
         remediation_plan_history=record.remediation_plan_history,
@@ -289,6 +290,17 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
     if report.remediation_plan_history:
         lines.extend(["", "### 历史失效计划（不可继续执行）", ""])
         lines.extend(f"- v{item.plan_version} / {item.target_subject} v{item.target_version} / {item.status}" for item in report.remediation_plan_history)
+    from netpilot.resolution.models import STATE_LABELS
+    resolution=report.resolution
+    lines.extend(["", "## 最终处理状态", "",f"- 当前状态：{STATE_LABELS[resolution.state]}（状态版本 {resolution.state_version}）",
+        f"- 诊断对象：{SUBJECT_LABELS[report.diagnostic_target.subject]} v{report.diagnostic_target.target_version}",
+        f"- 客观验证：{resolution.objective_result}；用户确认（主观）：{resolution.user_confirmation}",
+        f"- 状态原因：{_markdown_text(resolution.reason_summary or '尚在诊断')}",
+        f"- 最后 Verification：{resolution.based_on_verification_id or '无'}",
+        f"- 状态记录时间：{resolution.updated_at.isoformat()}；仅代表当时的闭环结论，不保证此后永不复发。",
+        f"- 人工支持建议：{_markdown_text(resolution.escalation_summary or '无')}；未提交外部工单。",""])
+    for audit in report.resolution_transitions:
+        lines.append(f"- v{audit.state_version}：{STATE_LABELS[audit.from_state]} → {STATE_LABELS[audit.to_state]}；{_markdown_text(audit.summary)}")
     lines.extend(["", "## 修复前后验证", "", "Verification ≠ Resolution；有改善不代表故障已解决。", ""])
     for cycle in report.verification_cycles:
         labels = {"improved":"有改善","unchanged":"无变化","worsened":"变差","inconclusive":"暂时无法确认","unknown":"尚未验证"}

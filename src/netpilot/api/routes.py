@@ -108,6 +108,7 @@ def create_session(request: Request, user: CurrentUser) -> SessionResponse:
             detail="会话容量已满，请稍后重试。",
         ) from exc
     return SessionResponse(
+        resolution=_sessions(request).task_state(snapshot.session_id,user.id).resolution,
         session_id=snapshot.session_id,
         created_at=snapshot.created_at,
         environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
@@ -123,6 +124,8 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
         snapshot = _sessions(request).get(session_id, user.id)
         return SessionResponse(
             session_id=session_id, created_at=snapshot.created_at,
+            resolution=_sessions(request).task_state(session_id,user.id).resolution,
+            resolution_transitions=_sessions(request).task_state(session_id,user.id).resolution_transitions,
             environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
             diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
             client_snapshot_summary=_sessions(request).task_state(session_id, user.id).client_snapshot_summary,
@@ -173,14 +176,14 @@ def user_environment(payload: UserEnvironmentRequest, request: Request, user: Cu
 
 @router.patch("/session/diagnostic-target", response_model=DiagnosticTarget, tags=["chat"])
 def update_target(payload: DiagnosticTargetRequest, request: Request, user: CurrentUser) -> DiagnosticTarget:
-    def persist(target):
+    def persist(target,task):
         repository = request.app.state.diagnosis_repository
         if repository is not None:
-            repository.update_diagnostic_target(user.id, payload.session_id, target)
+            return repository.update_diagnostic_target(user.id, payload.session_id, target,task=task)
         elif request.app.state.settings.diagnosis_history_enabled:
             raise DiagnosisStorageError("诊断历史不可用")
     try:
-        return _sessions(request).update_diagnostic_target(payload.session_id, user.id, payload.subject, persist=persist)
+        return _sessions(request).update_diagnostic_target(payload.session_id, user.id, payload.subject, persist_task=persist)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
     except SessionBusyError as exc:
@@ -201,6 +204,8 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     response.client_snapshot_summary = task.client_snapshot_summary
     response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
     response.remediation_plan = task.remediation_plan
+    response.resolution=task.resolution
+    response.resolution_transitions=task.resolution_transitions
     response.verification_cycles = task.verification_cycles
     response.verification_evidence = [e for e in task.evidence if e.evidence_origin == "tool"]
     response.remediation_plan_history = task.remediation_plan_history

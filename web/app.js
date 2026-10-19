@@ -13,6 +13,8 @@ const state = {
   remediationPlan: null,
   remediationReadiness: null,
   verificationCycles: [],
+  resolution: null,
+  resolutionTransitions: [],
   environmentTouched: new Set(),
   viewingHistory: false,
   health: null,
@@ -27,6 +29,9 @@ const state = {
 };
 
 const elements = {
+  resolutionBadge: document.querySelector("#resolution-badge"),
+  resolutionContent: document.querySelector("#resolution-content"),
+  resolutionNotice: document.querySelector("#resolution-notice"),
   verificationContent: document.querySelector("#verification-content"),
   verificationCount: document.querySelector("#verification-count"),
   verificationNotice: document.querySelector("#verification-notice"),
@@ -181,6 +186,7 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  for (const control of elements.resolutionContent.querySelectorAll("button,select")) control.disabled = busy || !state.user || state.viewingHistory || (control.dataset.export === "true" && !state.activeRecordId);
   elements.remediationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   for (const control of elements.verificationContent.querySelectorAll("button,select,textarea")) control.disabled = busy || !state.user || state.viewingHistory;
   for (const control of elements.remediationPlan.querySelectorAll("button, select, textarea")) {
@@ -396,6 +402,7 @@ function showAuthGate(message = "请先登录或注册。") {
   state.remediationPlan = null;
   state.remediationReadiness = null;
   state.verificationCycles = [];
+  state.resolution = null; state.resolutionTransitions = [];
   state.viewingHistory = false;
   state.scenarios = [];
   resetHistoryPagination();
@@ -605,6 +612,7 @@ function resetConversation() {
   renderRemediationPlan(state.remediationPlan);
   elements.remediationSection.open = false;
   renderVerification(state.verificationCycles);
+  renderResolution(state.resolution,state.resolutionTransitions);
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
@@ -805,6 +813,58 @@ function renderRemediationPlan(plan, {historical = false} = {}) {
   elements.remediationPlan.append(list);
 }
 
+const RESOLUTION_LABELS={diagnosing:"诊断中",action_required:"等待操作",verifying:"正在验证",resolved:"已解决",improved:"有改善",unresolved:"未解决",escalated:"建议人工处理"};
+
+function applyResolution(data) {
+  state.resolution=data.resolution || null;state.resolutionTransitions=data.resolution_transitions || [];
+  renderResolution(state.resolution,state.resolutionTransitions);
+}
+
+function renderResolution(record,transitions=[],{historical=false,target=state.diagnosticTarget}={}) {
+  const status=Object.hasOwn(RESOLUTION_LABELS,record?.state) ? record.state : "diagnosing";
+  const mock=target?.subject === "mock_client" ? " · Mock 模拟终端（非真实校园网络）" : "";
+  elements.resolutionBadge.textContent=`${historical ? "历史状态：" : ""}${RESOLUTION_LABELS[status]}${mock}`;
+  elements.resolutionBadge.dataset.state=status;
+  elements.resolutionContent.replaceChildren();elements.resolutionNotice.textContent="";
+  for(const text of [record?.reason_summary || "尚在收集诊断依据。",`客观复核：${record?.objective_result || "unknown"}；用户确认（主观）：${record?.user_confirmation || "unknown"}`,`状态版本：${record?.state_version || 1}；最后 Verification：${record?.based_on_verification_id || "无"}`]){const p=document.createElement("p");p.textContent=text;elements.resolutionContent.append(p);}
+  if(record?.escalation_recommended){const p=document.createElement("p");p.textContent=`人工支持建议：${record.escalation_summary || record.escalation_reason || "建议人工核验"}。仅为建议，未提交外部工单。`;elements.resolutionContent.append(p);}
+  const details=document.createElement("details"),summary=document.createElement("summary");summary.textContent=`状态变化记录（${transitions.length}）`;details.append(summary);
+  for(const t of transitions){const p=document.createElement("p");p.textContent=`v${t.state_version} ${RESOLUTION_LABELS[t.from_state] || "未知"} → ${RESOLUTION_LABELS[t.to_state] || "未知"}：${t.summary}`;details.append(p);}elements.resolutionContent.append(details);
+  if(historical || state.viewingHistory || !state.user || !state.sessionId)return;
+  const controls=document.createElement("div");controls.className="resolution-controls";
+  const button=(label,callback)=>{const b=document.createElement("button");b.type="button";b.textContent=label;b.addEventListener("click",callback);b.disabled=state.busy;controls.append(b);return b;};
+  if(status === "resolved")button("查看修复过程",()=>{elements.remediationSection.open=true;document.querySelector("#verification-section").open=true;});
+  if(["resolved","escalated"].includes(status)){
+    const b=button("导出诊断报告",()=>elements.exportMarkdown.click());b.dataset.export="true";b.disabled=state.busy || !state.activeRecordId;
+  }else{
+    const select=document.createElement("select");select.setAttribute("aria-label","原始症状确认");
+    for(const [value,label] of [["unknown","暂不确定"],["resolved","原始症状已恢复"],["improved","有改善但未完全恢复"],["not_resolved","仍未解决"]]){const o=document.createElement("option");o.value=value;o.textContent=label;select.append(o);}
+    select.value=record?.user_confirmation || "unknown";controls.append(select);
+    button("确认症状",()=>resolutionRequest("confirm",{session_id:state.sessionId,status:select.value}));
+    button("请求人工支持",()=>resolutionRequest("request-support",{session_id:state.sessionId}));
+    if(["improved","unresolved","action_required"].includes(status) && state.remediationPlan?.steps?.some(s=>s.status === "pending" && s.risk === "low" && !s.requires_admin))button("继续下一步",()=>{elements.remediationSection.open=true;elements.remediationSection.scrollIntoView?.({block:"nearest"});});
+  }
+  elements.resolutionContent.append(controls);
+}
+
+async function refreshResolution() {
+  const epoch=state.authEpoch,sid=state.sessionId;
+  if(!state.user || !sid || state.viewingHistory)return;
+  const data=await requestJSON(`/api/session/resolution?session_id=${encodeURIComponent(sid)}`);
+  if(epoch === state.authEpoch && sid === state.sessionId)applyResolution(data);
+}
+
+async function resolutionRequest(action,body) {
+  if(!state.user || !state.sessionId || state.busy || state.viewingHistory)return;
+  const epoch=state.authEpoch,sid=state.sessionId;setBusy(true);
+  try{
+    const result=await requestJSON(`/api/session/resolution/${action}`,{method:"POST",body:JSON.stringify(body)});
+    if(epoch !== state.authEpoch || sid !== state.sessionId)return;
+    applyResolution(result);appendTurnReasoningTrace(result.reasoning_trace || []);
+  }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.resolutionNotice.textContent=error.message;}
+  finally{if(epoch === state.authEpoch)setBusy(false);}
+}
+
 const VERIFICATION_RESULT = {improved:"有改善",unchanged:"无变化",worsened:"变差",inconclusive:"暂时无法确认",unknown:"尚未验证"};
 const METRIC_LABEL = {dns_resolution:"DNS 解析",gateway_reachability:"网关可达性",tcp_connectivity:"TCP 连通性",http_reachability:"HTTP 可达性",network_configuration:"网络配置",campus_auth:"校园认证",vpn_state:"VPN 状态",proxy_state:"代理状态",user_observed_symptom:"用户症状"};
 
@@ -840,8 +900,12 @@ function renderVerification(cycles = [], {historical = false} = {}) {
         const download=document.createElement("a");download.href="/static/scripts/client_diagnostic_windows.ps1";download.textContent="下载诊断脚本";download.setAttribute("download","client_diagnostic_windows.ps1");
         const upload=document.createElement("button");upload.type="button";upload.textContent="上传新的诊断快照";upload.addEventListener("click",()=>{const details=elements.snapshotForm.closest("details");if(details)details.open=true;elements.snapshotFile.focus();elements.snapshotFile.click();});
         card.append(prompt,download,upload);
-      } else if(cycle.target_subject === "netpilot_host"){
-        const start=document.createElement("button");start.type="button";start.textContent="开始验证";start.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(start);
+        if(cycle.status === "baseline_ready" && state.remediationPlan?.steps?.some(s=>s.status === "completed")){
+          const begin=document.createElement("button");begin.type="button";begin.textContent="开始等待新快照";
+          begin.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(begin);
+        }
+      } else if(["netpilot_host","mock_client"].includes(cycle.target_subject)){
+        const start=document.createElement("button");start.type="button";start.textContent=cycle.target_subject === "mock_client" ? "开始模拟验证" : "开始验证";start.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(start);
       }
     }
     if(current){
@@ -867,6 +931,7 @@ async function verificationRequest(suffix, body) {
     const result=await requestJSON(`/api/session/verification${suffix}`,{method:"POST",body:JSON.stringify(body)});
     if(epoch !== state.authEpoch || sid !== state.sessionId)return;
     state.verificationCycles=result.verification_cycles || [];renderVerification(state.verificationCycles);appendTurnReasoningTrace(result.reasoning_trace || []);
+    applyResolution(result);
     if(result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
   }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.verificationNotice.textContent=error.message;}
   finally{if(epoch === state.authEpoch)setBusy(false);}
@@ -880,6 +945,7 @@ async function remediationRequest(url, options) {
     const result=await requestJSON(url, options);
     if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
     state.remediationPlan=result.remediation_plan || null;
+    applyResolution(result);
     state.verificationCycles=result.verification_cycles || [];
     renderVerification(state.verificationCycles);
     state.remediationReadiness=result.remediation_readiness || null;
@@ -917,6 +983,7 @@ async function uploadClientSnapshot(event) {
     state.clientSnapshotSummary = result.client_snapshot_summary;
     state.clientEvidence = result.client_evidence || [];
     state.remediationPlan = result.remediation_plan || null;
+    applyResolution(result);
     state.verificationCycles = result.verification_cycles || [];
     elements.verificationNotice.textContent = "正在对比修复前后状态…";
     renderVerification(state.verificationCycles);
@@ -952,6 +1019,7 @@ async function saveDiagnosticTarget(event) {
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     elements.snapshotFile.value = "";
     if (changed) { renderDiagnosis(null); renderTools([]); if (state.remediationPlan) state.remediationPlan={...state.remediationPlan,status:"superseded"};renderRemediationPlan(state.remediationPlan); state.verificationCycles=state.verificationCycles.map(c=>["baseline_ready","awaiting_after_evidence","verifying"].includes(c.status)?{...c,status:"superseded"}:c);renderVerification(state.verificationCycles); }
+    if(changed){applyResolution({resolution:{state:"diagnosing",reason_summary:"诊断对象已切换，旧处理状态不沿用。"}});await refreshResolution();}
     elements.targetStatus.textContent = "诊断对象已保存；其他对象的旧检测仅保留于历史，不参与当前结论。";
   } catch (error) {
     if (state.authEpoch === epoch) elements.targetStatus.textContent = error.message;
@@ -985,6 +1053,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.clientEvidence = session.client_evidence || [];
     state.remediationPlan = session.remediation_plan || null;
     state.verificationCycles = session.verification_cycles || [];
+    state.resolution = session.resolution || null;state.resolutionTransitions = session.resolution_transitions || [];
     state.remediationReadiness = session.remediation_readiness || null;
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
@@ -1173,7 +1242,7 @@ function renderHistoryItems(items) {
     const meta = document.createElement("span");
     const issue = ISSUE_LABELS[item.primary_issue] || item.primary_issue;
     const confidence = CONFIDENCE_LABELS[item.confidence] || item.confidence;
-    meta.textContent = `${formatHistoryTime(item.updated_at)} · ${Number(item.turn_count || 1)} 轮对话 · ${issue} · 置信度 ${confidence}`;
+    meta.textContent = `${formatHistoryTime(item.updated_at)} · ${Number(item.turn_count || 1)} 轮对话 · ${issue} · 置信度 ${confidence} · 状态：${RESOLUTION_LABELS[item.resolution?.state] || "诊断中"}`;
     const metrics = document.createElement("small");
     metrics.textContent = `${Number(item.metrics?.token_usage?.total_tokens || 0)} Token · ${Number(item.metrics?.tool_calls || 0)} 次 Tool · ${formatDuration(item.metrics?.llm_duration_ms)}`;
     button.append(question, meta, metrics);
@@ -1266,6 +1335,7 @@ async function loadDiagnosisRecord(recordId) {
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
     renderRemediationPlan(record.remediation_plan,{historical:true});
     renderVerification(record.verification_cycles || [],{historical:true});
+    renderResolution(record.resolution,record.resolution_transitions || [],{historical:true,target:record.diagnostic_target});
     renderClientSnapshot(record.client_snapshot_summary, record.client_evidence || [], {historical:true, target:record.diagnostic_target});
     elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
@@ -1334,6 +1404,7 @@ async function submitChat(event) {
     state.clientEvidence = response.client_evidence || [];
     state.remediationPlan = response.remediation_plan || null;
     state.verificationCycles = response.verification_cycles || [];
+    applyResolution(response);
     renderVerification(state.verificationCycles);
     state.remediationReadiness = response.remediation_readiness || null;
     renderRemediationPlan(state.remediationPlan);
@@ -1371,6 +1442,8 @@ function formatReportPreview(report) {
   const plan = report.remediation_plan;
   const lines = [
     report.title || "TJU NetPilot 故障诊断报告",
+    `最终处理状态：${RESOLUTION_LABELS[report.resolution?.state] || "诊断中"}；${report.resolution?.reason_summary || "尚未记录闭环结论"}`,
+    `客观复核：${report.resolution?.objective_result || "unknown"}；用户确认（主观）：${report.resolution?.user_confirmation || "unknown"}；仅建议人工处理，不提交外部工单。`,
     ...(report.verification_cycles || []).flatMap(c=>[`修复前后验证 #${c.verification_sequence}：${VERIFICATION_RESULT[c.result] || c.result} · ${c.status}；改善不等于故障解决。`,...(c.checks || []).map(k=>`${METRIC_LABEL[k.metric] || k.metric} ${k.target || ""}：${k.baseline_value || "未知"} → ${k.after_value || "未采集"}（${k.change}）`),c.result_summary || "",c.user_observation ? `用户主观反馈：${c.user_observation.symptom_status} ${c.user_observation.note || ""}` : ""]),
     ...(plan ? [`修复计划 v${plan.plan_version}：${REMEDIATION_STATUS[plan.status]}；仅用户手动操作，不代表故障已解决。`,...(plan.steps || []).flatMap(step=>[`${step.order}. ${step.title} · ${step.risk} · ${STEP_STATUS[step.status]} · ${STEP_OUTCOME[step.outcome]}`,`理由：${step.rationale}`,`操作：${step.instructions.join("；")}`,`验证：${step.verification}`,`回滚：${step.rollback_instructions.join("；")}`,`备注：${step.user_note || "无"}`])] : []),
     ...(snapshot ? [`客户端诊断快照：#${snapshot.snapshot_sequence}，${formatHistoryTime(snapshot.generated_at)}，${snapshot.stale || Date.now() > Date.parse(snapshot.expires_at) ? "已过期（历史）" : snapshot.clock_skew_suspected ? "疑似时钟偏差" : "采集时点证据"}，非远程执行。`, ...(report.client_evidence || []).map(item => `${item.superseded ? "历史归档" : "采集证据"}：${item.summary}`)] : []),
@@ -1552,6 +1625,7 @@ async function activateScenario(scenario) {
   window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
   state.verificationCycles = [];
   elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
+  state.resolution = null;state.resolutionTransitions = [];
   elements.scenarioSelect.value = response.current;
   renderScenarioDescription(response.current, true);
   resetConversation();
@@ -1668,6 +1742,7 @@ async function deleteCurrentCustomScenario() {
       state.clientEvidence = [];
       state.remediationPlan = null;
       state.verificationCycles = [];
+      state.resolution = null;state.resolutionTransitions = [];
       window.history?.replaceState(null, "", `#session=${encodeURIComponent(response.session_id)}`);
       elements.sessionLabel.textContent = `会话 ${response.session_id.slice(0, 8)}`;
       resetConversation();

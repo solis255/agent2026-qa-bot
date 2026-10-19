@@ -354,3 +354,8 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .verification-table th, .verification-table td { padding: 7px; border: 1px solid #d9e4f3; text-align: left; overflow-wrap: anywhere; }
 .verification-controls { display: grid; gap: 8px; margin-top: 12px; }
 .verification-controls textarea { min-height: 65px; max-width: 100%; }
+/* Case state is authoritative server data, not assistant prose. */
+.resolution-badge { display: inline-block; padding: 5px 10px; border-radius: 12px; background: #eef4fc; color: #174f94; font-size: .85rem; }
+.resolution-badge[data-state="resolved"] { background: #e1f5ec; color: #176947; }
+.resolution-badge[data-state="escalated"], .resolution-badge[data-state="unresolved"] { background: #fff0d8; color: #845014; }
+.resolution-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
