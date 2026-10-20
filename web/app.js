@@ -7,6 +7,7 @@ const state = {
   authEpoch: 0,
   sessionId: null,
   environmentProfile: null,
+  activeContextGroup: null,
   diagnosticTarget: null,
   clientSnapshotSummary: null,
   clientEvidence: [],
@@ -192,6 +193,9 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  for (const button of document.querySelectorAll(".context-choice")) {
+    button.disabled = busy || !state.user || state.viewingHistory || button.closest(".context-choices") !== state.activeContextGroup;
+  }
   for (const control of elements.resolutionContent.querySelectorAll("button,select")) control.disabled = busy || !state.user || state.viewingHistory || (control.dataset.export === "true" && !state.activeRecordId);
   elements.escalationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   for(const control of elements.escalationContent.querySelectorAll("button"))control.disabled=busy || !state.user;
@@ -402,6 +406,7 @@ function setAuthMode(mode) {
 }
 
 function showAuthGate(message = "请先登录或注册。") {
+  retireContextQuestions();
   state.authEpoch += 1;
   state.user = null;
   state.health = null;
@@ -619,6 +624,7 @@ function appendMessage(role, text, sources = []) {
 }
 
 function resetConversation() {
+  retireContextQuestions();
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
   renderDiagnosticTarget(state.diagnosticTarget);
@@ -675,6 +681,50 @@ function renderEnvironmentProfile(profile, { historical = false } = {}) {
     control.value = String(value);
   }
   elements.environmentServiceLabel.hidden = p.affected_scope !== "single_service";
+  const provenance = document.querySelector("#environment-provenance");
+  provenance.replaceChildren();
+  const sourceNames = {user:"用户", browser:"浏览器", snapshot:"快照", mock:"模拟", server:"服务端", inferred:"推断"};
+  const confidenceNames = {high:"高", medium:"中", low:"低"};
+  const fields = {os_family:"系统", network_access:"网络", vpn_enabled:"VPN", proxy_enabled:"代理", affected_scope:"影响范围"};
+  for (const [name, label] of Object.entries(fields)) {
+    const source = p.field_sources?.[name];
+    const value = name === "os_family" ? ENVIRONMENT_OS[p[name]] : name === "network_access" ? ENVIRONMENT_ACCESS[p[name]] : name === "affected_scope" ? ENVIRONMENT_SCOPE[p[name]] : environmentBoolLabel(p[name]);
+    const row = document.createElement("li");
+    row.textContent = `${label}：${value || "未知"} · 来源：${sourceNames[source?.source] || "未记录"} · 置信度：${confidenceNames[source?.confidence] || "未记录"}`;
+    provenance.append(row);
+  }
+}
+
+function retireContextQuestions() {
+  for (const button of elements.conversation.querySelectorAll(".context-choice")) button.disabled = true;
+  state.activeContextGroup = null;
+}
+
+function renderContextQuestion(body, action) {
+  retireContextQuestions();
+  if (!action || action.type !== "context_question" || !Array.isArray(action.choices)) return;
+  const group = document.createElement("div");
+  group.className = "context-choices";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", action.question);
+  for (const choice of action.choices) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "context-choice";
+    button.textContent = choice.label;
+    button.setAttribute("aria-pressed", "false");
+    button.addEventListener("click", async () => {
+      if (state.busy || state.activeContextGroup !== group || !state.user || state.viewingHistory) return;
+      button.setAttribute("aria-pressed", "true");
+      await submitChat({preventDefault() {}}, {message:choice.label, contextAnswer:{field:action.field, value:choice.value}});
+      if (state.activeContextGroup === group) button.setAttribute("aria-pressed", "false");
+    });
+    button.disabled = state.busy || !state.user || state.viewingHistory;
+    group.append(button);
+  }
+  body.after(group);
+  state.activeContextGroup = group;
+  elements.conversation.scrollTop = elements.conversation.scrollHeight;
 }
 
 function collectBrowserEnvironment() {
@@ -1412,6 +1462,7 @@ async function loadHistory({ pageIndex = 0, refresh = true } = {}) {
 }
 
 async function loadDiagnosisRecord(recordId) {
+  retireContextQuestions();
   if (!recordId || !state.user || state.busy) return;
   const authEpoch = state.authEpoch;
   setBusy(true, "正在读取历史诊断…");
@@ -1450,9 +1501,9 @@ async function loadDiagnosisRecord(recordId) {
   }
 }
 
-async function submitChat(event) {
+async function submitChat(event, options = {}) {
   event.preventDefault();
-  const message = elements.messageInput.value.trim();
+  const message = (options.message ?? elements.messageInput.value).trim();
   if (!message || !state.user || !state.sessionId || state.busy) return;
   const authEpoch = state.authEpoch;
   state.viewingHistory = false;
@@ -1471,7 +1522,7 @@ async function submitChat(event) {
       "/api/chat/stream",
       {
         method: "POST",
-        body: JSON.stringify({ session_id: state.sessionId, message }),
+        body: JSON.stringify({ session_id: state.sessionId, message, ...(options.contextAnswer ? {context_answer:options.contextAnswer} : {}) }),
       },
       async (eventName, data) => {
         if (state.authEpoch !== authEpoch) return;
@@ -1502,6 +1553,7 @@ async function submitChat(event) {
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
+    renderContextQuestion(streamedAnswer, response.ui_action);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     if (state.isDemo) await refreshDemoStatus();

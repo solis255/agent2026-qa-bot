@@ -155,10 +155,10 @@ def extract_environment_updates(message: str) -> EnvironmentUpdate:
     if re.search(r'如果|假如|假设|比如|例如|他说|同学|有人|["“”‘’]', message):
         return EnvironmentUpdate()
     clauses = re.split(r"[，,。；;\n]", message[:4000].casefold())
-    statements = [text for text in clauses if not re.search(r"[?？吗\"“”‘’]|如果|假如|假设|比如|例如|是否|怎么|如何|怎样|能否|会不会|什么|可能|好像|也许|不确定|不知道|请|建议|他说|同学|有人|打算|准备|计划|想|需要|不要", text)]
+    statements = [text for text in clauses if not re.search(r"[?？吗\"“”‘’]|如果|假如|假设|比如|例如|是否|是不是|怎么|如何|怎样|能否|会不会|什么|可能|好像|也许|不确定|不清楚|不知道|请|建议|他说|同学|有人|打算|准备|计划|想|需要|不要", text)]
     for text in statements:
         negated_connection = bool(re.search(r"(?:没(?:有)?|未|不|尚未)(?:连|接|用|使用|通过|在)", text))
-        if not negated_connection and re.search(r"我(?:现在|目前|其实)?(?:是|用|使用|在用)|我的|(?:设备|系统|电脑|手机)(?:是|为|用)", text):
+        if not negated_connection and re.search(r"我(?:现在|目前|其实|实际)?(?:是|用|使用|在用)|我的|(?:设备|系统|电脑|手机)(?:是|为|用)", text):
             for pattern, family in [(r"windows|win(?:10|11)\b", "windows"), (r"macos|mac os|macbook|苹果电脑", "macos"), (r"linux|ubuntu|debian", "linux"), (r"android|安卓", "android"), (r"ios|iphone|ipad|苹果手机", "ios")]:
                 if re.search(pattern, text):
                     values["os_family"] = family
@@ -170,7 +170,7 @@ def extract_environment_updates(message: str) -> EnvironmentUpdate:
             values["network_access"] = "off_campus"
         if not negated_connection and re.search(r"(?:连(?:接)?|使用|用的是|用着).{0,6}(?:手机|移动)热点", text):
             values["network_access"] = "mobile_hotspot"
-        for word, field in [("vpn", "vpn_enabled"), ("proxy|代理", "proxy_enabled")]:
+        for word, field in [("vpn", "vpn_enabled"), ("proxy|代理|clash", "proxy_enabled")]:
             if re.search(rf"(?:没(?:有)?|未)(?:开(?:启)?|启用|打开|使用)\s*(?:{word})|(?:已关闭|关闭了|关了|停用了)\s*(?:{word})|(?:{word})\s*(?:未开启|没开|已关闭|关闭|未启用)", text):
                 values[field] = False
             elif re.search(rf"(?:已开启|开启了|启用了|打开了|开着|开了)\s*(?:{word})|我(?:现在|目前)?(?:开启|打开|启用)\s*(?:{word})|(?:{word})\s*(?:已开启|开启中|开着|已启用)", text):
@@ -189,7 +189,7 @@ def extract_environment_updates(message: str) -> EnvironmentUpdate:
             except ValueError:
                 pass  # Never copy an IP/identifier into the profile from chat.
     explicit_text = "，".join(statements)
-    if re.search(r"(?:微信|qq|聊天软件)\s*(?:仍然|仍|依然)?\s*正常", explicit_text) and re.search(r"(?:网页|浏览器)\s*(?:却|但|都|还是|仍然|仍)?\s*(?:打不开|无法访问)", explicit_text):
+    if re.search(r"(?:微信|qq|聊天软件)\s*(?:仍然|仍|依然)?\s*(?:正常|能用|能正常联网)", explicit_text) and re.search(r"(?:网页|浏览器)\s*(?:却|但|都|还是|仍然|仍)?\s*(?:打不开|无法访问)", explicit_text):
         values["affected_scope"] = "web_only"
     return EnvironmentUpdate(**values)
 

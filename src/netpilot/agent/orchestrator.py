@@ -45,7 +45,6 @@ from netpilot.agent.schemas import (
 from netpilot.agent.task_state import EvidenceRecord, SessionTaskState
 from netpilot.environment import (
     EnvironmentProfile, environment_context, environment_summary,
-    extract_environment_updates, merge_environment,
 )
 from netpilot.agent.tool_policy import build_tool_policy
 from netpilot.agent.tool_registry import ToolRegistry
@@ -64,6 +63,8 @@ from netpilot.llm import (
 )
 from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 from netpilot.history_context import HistoryContext
+from netpilot.conversation_context.acquisition import acquire_context
+from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer
 from netpilot.observability import log_event
 
 
@@ -122,11 +123,22 @@ class AgentOrchestrator:
         history: Sequence[ChatMessage] = (),
         task_state: SessionTaskState | None = None,
         history_context: HistoryContext | None = None,
+        context_answer: ContextAnswer | None = None,
     ) -> AgentResult:
-        environment = merge_environment(
+        acquired = acquire_context(
+            user_message,
             task_state.environment_profile if task_state is not None else EnvironmentProfile(),
-            extract_environment_updates(user_message).model_dump(exclude_unset=True), source="user",
+            task_state.context_acquisition if task_state is not None else ContextAcquisitionState(),
+            context_answer=context_answer,
+            has_evidence=bool(task_state and task_state.reusable_evidence()),
+            task_version=task_state.task_version if task_state else 1,
+            target_version=task_state.diagnostic_target.target_version if task_state else 1,
+            host_target=bool(task_state and task_state.diagnostic_target.subject == "netpilot_host"),
+            resume_message=next((m.content for m in reversed(history) if m.role == ChatRole.USER), None),
         )
+        environment = acquired.environment
+        if acquired.answered and acquired.state.topic != "platform_setup" and task_state and task_state.remediation_symptom:
+            acquired.message = task_state.remediation_symptom + "\n请根据已知上下文继续诊断。"
         if any(message.role not in {ChatRole.USER, ChatRole.ASSISTANT} or message.tool_calls or message.tool_call_id is not None for message in history):
             raise ValueError("history must contain text-only user and assistant messages")
         provider = self.registry.provider_kind
@@ -137,6 +149,7 @@ class AgentOrchestrator:
             target = merge_diagnostic_target(target, user_target(requested_subject, environment, provider), provider)
         if task_state is not None:
             task_state = task_state.model_copy(deep=True)
+            task_state.context_acquisition = acquired.state
             task_state.set_target(target)
             from netpilot.client_snapshot.service import snapshot_evidence
             if snapshot_evidence(task_state) and target.subject == "user_client" and target.relationship_to_netpilot == "remote":
@@ -155,7 +168,17 @@ class AgentOrchestrator:
         resolution_action=user_action(user_message,was_resolved=bool(task_state and task_state.resolution.state == "resolved")) if task_state else None
         classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
         from netpilot.escalation.builder import material_request
-        if task_state is not None and material_request(user_message):
+        if acquired.question is not None and not resolution_action and not material_request(user_message):
+            trace.intent = TurnIntent.CLARIFY
+            self._trace_target(trace, task_state, target)
+            capabilities = evaluate_target_capabilities(target, provider, has_client_snapshot_evidence=False)
+            if not (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools) and (task_state.last_target_limit_version if task_state else 0) != target.target_version:
+                trace.append("decision", "限制不适用的检测", "服务主机工具不能直接观测远程客户端；当前只补充环境上下文，不执行网络检测。")
+            trace.append("decision", "补充必要环境", "当前缺少一项会影响判断的上下文，只询问这一项；未执行网络检测。")
+            result = AgentResult(answer=acquired.question.question, ui_action=acquired.question,
+                status=AgentStatus.COMPLETED, tool_rounds=0, turn_intent=TurnIntent.CLARIFY,
+                response_mode=ResponseMode.CLARIFICATION)
+        elif task_state is not None and material_request(user_message):
             trace.intent=TurnIntent.REPORT_REQUEST
             result=AgentResult(answer="正在整理结构化报修材料，不会提交外部工单。",status=AgentStatus.COMPLETED,
                 tool_rounds=0,turn_intent=TurnIntent.REPORT_REQUEST,response_mode=ResponseMode.REPORT,escalation_requested=True)
@@ -181,13 +204,13 @@ class AgentOrchestrator:
                                  tool_rounds=0,turn_intent=TurnIntent.FOLLOWUP_ACTION,response_mode=ResponseMode.ANALYSIS)
         else:
             result = self._run_turn(
-                user_message, history=history, task_state=task_state,
+                acquired.message, history=history, task_state=task_state,
                 history_context=history_context, trace=trace, environment=environment, target=target,
             )
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
-        if self.reasoning_summary_llm_enabled:
+        if self.reasoning_summary_llm_enabled and result.ui_action is None:
             result = trace.optional_summary(self.llm, result)
         if result.status is not AgentStatus.LLM_ERROR and result.response_mode not in {ResponseMode.KNOWLEDGE, ResponseMode.META, ResponseMode.HISTORY} and (
             result.turn_intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}
@@ -195,16 +218,24 @@ class AgentOrchestrator:
         ):
             result = result.model_copy(update={"answer":scoped_answer(result.answer, target)})
         pending = [*task_state.pending_snapshot_trace,*task_state.pending_remediation_trace] if task_state is not None else []
-        result = result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target})
-        if task_state is not None:
+        result = result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target,
+                                           "context_acquisition":acquired.state, "context_answered":acquired.answered})
+        if task_state is not None and result.ui_action is None:
             from netpilot.remediation.integration import enrich_result
             try:
-                result = enrich_result(task_state,result,user_message,max_steps=self.remediation_max_steps,
+                result = enrich_result(task_state,result,acquired.message,max_steps=self.remediation_max_steps,
                                        trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
             except Exception as exc:
                 # Planning must never break the authoritative diagnosis.
                 logger.warning("remediation_integration_failed error_type=%s",type(exc).__name__)
         return result
+
+    def _trace_target(self, trace, task_state, target):
+        previous = task_state.last_target_trace_version if task_state else 0
+        if previous != target.target_version:
+            trace.append("state_change" if previous else "planning",
+                         "切换诊断对象" if previous else "确认诊断对象",
+                         f"诊断对象为{SUBJECT_LABELS[target.subject]}，关系 {target.relationship_to_netpilot}，网络工具实际执行位置 {target.execution_context}；仅使用此对象 v{target.target_version} 的网络证据。")
 
     def _run_turn(
         self, user_message: str, *, history: Sequence[ChatMessage],
@@ -284,11 +315,7 @@ class AgentOrchestrator:
             history_available=bool(history_context and history_context.available),
         )
         trace.assess(sufficiency, hypotheses)
-        previous_target_version = task_state.last_target_trace_version if task_state else 0
-        if previous_target_version != target.target_version:
-            trace.append("state_change" if previous_target_version else "planning",
-                         "切换诊断对象" if previous_target_version else "确认诊断对象",
-                         f"诊断对象为{SUBJECT_LABELS[target.subject]}，关系 {target.relationship_to_netpilot}，网络工具实际执行位置 {target.execution_context}；仅使用此对象 v{target.target_version} 的网络证据。")
+        self._trace_target(trace, task_state, target)
         network_question = classification.intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.CLARIFY, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE, TurnIntent.FOLLOWUP_ACTION} or bool(re.search(r"网络|dns|网关|路由|上网|网页|ping|诊断", user_message, flags=re.I))
         if classification.intent not in {TurnIntent.KNOWLEDGE_REQUEST, TurnIntent.HISTORY_ANALYSIS, TurnIntent.META_FEEDBACK} and network_question:
             if self.registry.provider_kind == "mock" and extract_target_subject(user_message) == "netpilot_host":

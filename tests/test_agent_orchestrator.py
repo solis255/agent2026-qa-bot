@@ -234,7 +234,7 @@ def test_agent_stops_before_a_seventh_tool_execution() -> None:
     llm = EndlessToolLLM()
     agent = AgentOrchestrator(llm, registry(), max_tool_rounds=6)
 
-    answer = agent.run("网页打不开，请按照排障流程完整诊断")
+    answer = agent.run("只有网页打不开，微信正常，请按照排障流程完整诊断")
 
     assert answer.status is AgentStatus.MAX_TOOL_ROUNDS
     assert answer.answer != MAX_TOOL_ROUNDS_ANSWER
@@ -281,7 +281,7 @@ def test_agent_signature_treats_changed_ping_count_as_new_call() -> None:
     )
     agent = AgentOrchestrator(llm, registry())
 
-    answer = agent.run("网页打不开，请按照排障流程完整诊断")
+    answer = agent.run("只有网页打不开，微信正常，请按照排障流程完整诊断")
 
     assert answer.status is AgentStatus.COMPLETED
     assert len(answer.steps) == 2
@@ -340,7 +340,7 @@ def test_agent_uses_existing_evidence_when_final_llm_response_is_malformed() -> 
     answer = AgentOrchestrator(
         EvidenceThenErrorLLM(),
         registry("dns_failure"),
-    ).run("我能访问公网 IP，但 github.com 打不开，请自动诊断。")
+    ).run("我能访问公网 IP，只有 github.com 打不开，请自动诊断。")
 
     assert answer.status is AgentStatus.COMPLETED
     assert answer.answer != MAX_TOOL_ROUNDS_ANSWER

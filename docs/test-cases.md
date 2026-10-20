@@ -88,6 +88,8 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 
 ## 判定原则
 
+Milestone 13A 新增 TC-13A-01～14：知识/平台需求、单题规划、明确环境提取、unknown/provenance、Chips 严格校验/真实会话、Chat/SSE 一致性、旧状态兼容与高级表单。测试见 `test_context_{needs,questions,acquisition,ui_action}.py`，并包含 6 项 Web DOM 用例；完整规则、旧测试调整依据与人工 A–E 步骤见 [13A 验收](MILESTONE13A_VALIDATION.md)。12I 六条演示和原完整回归继续执行。
+
 Milestone 12G 新增 EP-01～EP-25：结构化材料包、证据去重、完整度、隐私、不可变版本、所有权、重启读取、导出及 9 个 Web DOM 场景。对应 `tests/test_escalation_{models,builder,privacy,handoff,api,history,export,ui}.py`；完整逐项映射和四项真实人工验收状态见 [12G 验收](MILESTONE12G_VALIDATION.md)。
 
 - 以结构化证据为准，不要求模型自然语言逐字一致。

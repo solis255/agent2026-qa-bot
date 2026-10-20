@@ -105,6 +105,7 @@ class SQLiteDiagnosisRepository:
 
         now = datetime.now(timezone.utc)
         current = DiagnosisRecordView(
+            context_acquisition=response.context_acquisition,
             is_demo=response.is_demo, demo_scenario_id=response.demo_scenario_id, data_notice=response.data_notice,
             schema_version=SNAPSHOT_SCHEMA_VERSION,
             record_id=uuid4(),
@@ -258,6 +259,7 @@ class SQLiteDiagnosisRepository:
                     "remediation_readiness":task.remediation_readiness,
                     "client_evidence":[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
                     "environment_profile":task.environment_profile,
+                    "context_acquisition":task.context_acquisition,
                     "diagnostic_target":task.diagnostic_target,
                     "reasoning_trace":trace,
                     "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)}),
@@ -619,6 +621,7 @@ def _merge_session_records(
         for step in current.reasoning_trace
     ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
+        context_acquisition=current.context_acquisition,
         is_demo=current.is_demo, demo_scenario_id=current.demo_scenario_id, data_notice=current.data_notice,
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         record_id=(current.record_id if keep_latest_record_id else existing.record_id),

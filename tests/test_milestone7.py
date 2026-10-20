@@ -143,7 +143,7 @@ def test_knowledge_tool_is_gated_by_campus_information_intent() -> None:
     registry = ToolRegistry(build_network_tools(settings), EmptyRetriever())
 
     general_llm = RecordingLLM()
-    AgentOrchestrator(general_llm, registry).run("www.google.com 打不开，请自动诊断")
+    AgentOrchestrator(general_llm, registry).run("只有 www.google.com 打不开，其他应用正常，请自动诊断")
     assert "knowledge_search" not in _schema_names(general_llm.calls[0])
 
     campus_llm = RecordingLLM()

@@ -141,6 +141,10 @@ _INFORMATION_TERMS = (
     "资料",
     "文档",
     "连接",
+    "是什么",
+    "下载",
+    "安装",
+    "客服电话",
 )
 
 _FOLLOWUP_TERMS = (
@@ -168,6 +172,8 @@ _DIAGNOSE_TERMS = (
     "断网",
     "异常",
     "故障",
+    "一直失败",
+    "连接失败",
     "ping_host",
     "dns_lookup",
     "tcp_check",
@@ -247,6 +253,11 @@ def classify_turn_intent(
             TurnIntent.REPORT_REQUEST, 0.98,
             reason="request to format existing work as a report",
         )
+    if re.search(r"如果|假如|假设|一个同学|同学.{0,12}(?:用|连接)", text):
+        return _classification(TurnIntent.KNOWLEDGE_REQUEST, 0.95, rag=True,
+                               reason="hypothetical or third-party scenario, not live client state")
+    if re.search(r"vpn.{0,8}(?:连不上|连接失败|一直失败)", text) and not re.search(r"怎么|如何|知识库|资料|来源", text):
+        return _classification(TurnIntent.DIAGNOSE, 0.95, tools=True, reason="current VPN connectivity fault")
     # A comparison may itself be a sourced knowledge question. Select its data
     # requirement before the evidence-only comparison branch removes all Tools.
     campus_information = (

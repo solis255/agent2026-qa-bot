@@ -18,6 +18,7 @@ from netpilot.escalation.models import EscalationPackage
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
+from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer, ContextQuestion
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, TargetSubject, legacy_target
 from netpilot.rag import SourceType
 from netpilot.rag.schemas import StableSourceRef
@@ -41,6 +42,7 @@ class HealthResponse(BaseModel):
 
 
 class RemediationStateView(BaseModel):
+    context_acquisition: ContextAcquisitionState = Field(default_factory=ContextAcquisitionState)
     is_demo: bool = False
     demo_scenario_id: str | None = None
     data_notice: str = ""
@@ -84,6 +86,14 @@ class ChatRequest(BaseModel):
 
     session_id: UUID
     message: str = Field(min_length=1, max_length=4000)
+    context_answer: ContextAnswer | None = None
+
+    @model_validator(mode="after")
+    def canonical_context_message(self):
+        if self.context_answer is not None:
+            from netpilot.conversation_context.questions import LABELS
+            self.message = LABELS[self.context_answer.field][self.context_answer.value]
+        return self
 
     @field_validator("message")
     @classmethod
@@ -174,6 +184,7 @@ class ExecutionMetricsView(BaseModel):
 
 
 class ChatResponse(RemediationStateView):
+    ui_action: ContextQuestion | None = None
     redacted_user_message: str | None = None
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)

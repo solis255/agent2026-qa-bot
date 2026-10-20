@@ -378,3 +378,9 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .demo-controls button {
   margin: 0.3rem 0.3rem 0.3rem 0;
 }
+
+.context-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.context-choice { border: 1px solid #b6cce4; border-radius: 18px; padding: 8px 13px; background: #f4f8fd; color: #174f94; cursor: pointer; }
+.context-choice:hover:not(:disabled), .context-choice[aria-pressed="true"] { background: #dcecff; border-color: #2372bd; }
+.context-choice:focus-visible { outline: 3px solid #2372bd; outline-offset: 3px; }
+.context-choice:disabled { opacity: .6; cursor: default; }

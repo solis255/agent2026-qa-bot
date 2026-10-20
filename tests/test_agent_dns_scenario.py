@@ -74,7 +74,8 @@ def test_dns_failure_mock_completes_an_automatic_diagnosis(
     registry = ToolRegistry(build_network_tools(settings))
     llm = DNSDiagnosisLLM()
 
-    diagnosis = AgentOrchestrator(llm, registry).run("为什么 github.com 打不开？")
+    # 13A: explicitly provide scope so this remains a tool-loop acceptance test.
+    diagnosis = AgentOrchestrator(llm, registry).run("只有 github.com 打不开，其他服务正常，请诊断。")
 
     assert diagnosis.status is AgentStatus.COMPLETED
     assert diagnosis.tool_rounds == 1

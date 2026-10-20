@@ -134,13 +134,20 @@ class SessionStore:
         with self._lock:
             return _snapshot(self._require(session_id, owner_user_id))
 
-    def begin_turn(self, session_id: UUID, owner_user_id: UUID) -> list[ChatMessage]:
+    def begin_turn(self, session_id: UUID, owner_user_id: UUID, *, context_answer=None) -> list[ChatMessage]:
         """Mark one session busy and return a defensive history copy."""
 
         with self._lock:
             state = self._require(session_id, owner_user_id)
             if state.busy:
                 raise SessionBusyError(str(session_id))
+            if context_answer is not None:
+                task = _task_state(state)
+                acquisition = task.context_acquisition
+                if (acquisition.last_question_field != context_answer.field
+                        or not acquisition.topic
+                        or (acquisition.task_version, acquisition.target_version) != (task.task_version, task.diagnostic_target.target_version)):
+                    raise ValueError("context_answer_not_pending")
             state.busy = True
             state.updated_at = datetime.now(timezone.utc)
             target = _task_state(state).diagnostic_target
@@ -181,6 +188,8 @@ class SessionStore:
             if result is not None:
                 if result.environment_profile is not None:
                     task_state.environment_profile = result.environment_profile.model_copy(deep=True)
+                if result.context_acquisition is not None:
+                    task_state.context_acquisition = result.context_acquisition.model_copy(deep=True)
                 for item in result.reasoning_trace:
                     if item.title == "确认用户环境":
                         task_state.last_environment_trace_summary = item.summary
@@ -231,7 +240,9 @@ class SessionStore:
                     diagnostic=result.turn_intent
                     in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED},
                 )
-                if result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}:
+                if (result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}
+                        and not result.context_answered
+                        and not (result.context_acquisition and result.context_acquisition.topic == "platform_setup")):
                     task_state.remediation_symptom = user_message
                     if not task_state.original_symptom or task_state.issue_target_version != target.target_version:
                         task_state.original_symptom=user_message

@@ -116,8 +116,11 @@ def test_clarify_returns_deterministic_questions_without_llm_or_tools() -> None:
     assert result.turn_intent is TurnIntent.CLARIFY
     assert result.response_mode is ResponseMode.CLARIFICATION
     assert result.steps == []
-    assert "Wi-Fi" in result.answer
-    assert "VPN" in result.answer
+    # 13A replaces the old four-question questionnaire with one typed question.
+    assert result.ui_action.field == "affected_scope"
+    assert result.answer == result.ui_action.question
+    assert any(choice.value == "unknown" for choice in result.ui_action.choices)
+    assert "VPN" not in result.answer
     assert llm.calls == []
 
 
@@ -136,7 +139,7 @@ def test_knowledge_request_exposes_only_rag() -> None:
 def test_diagnose_exposes_only_six_network_tools() -> None:
     llm = DirectLLM()
     result = AgentOrchestrator(llm, _registry()).run(
-        "请诊断 github.com 打不开"
+        "只有 github.com 打不开，其他应用正常，请诊断。"
     )
 
     names = {item["function"]["name"] for item in llm.calls[0]["tools"]}

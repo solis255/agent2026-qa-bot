@@ -312,6 +312,10 @@ Campus knowledge intent
 
 ## Session and Persistence
 
+13A 在原 Orchestrator 入口复用 deterministic extractor 和 `merge_environment(source="user")`，通过独立 `conversation_context` 的 needs/questions/acquisition 规则评估最少上下文；缺信息时返回一个 `ContextQuestion`，不调用网络 Tool 或额外 LLM。Chips 作为严格 allowlisted `context_answer` 进入普通 Chat/SSE，在原 Session owner/busy 锁内检查待回答字段与版本；回答仍写真实聊天历史。只有既有 EnvironmentProfile 保存环境，轻量 acquisition state 只保存字段名、主题与阶段版本，旧数据缺字段默认空。后续明确请求沿用原 Tool/RAG/Target/Evidence 流程；服务主机结果不能充当客户端证据。
+
+`ChatResponse.ui_action` 当前为可选 `context_question`，SSE complete 携带同一响应合同；Web 使用安全文本 DOM 构造原生按钮，高级环境表单默认折叠并显示 provenance/置信度。History/JSON Report 保留轻量 acquisition 状态，不保存可点击 DOM，也不从历史答案反推已问字段。详见 [13A 验收](MILESTONE13A_VALIDATION.md)；DiagnosticReadiness、网络检查向导和整体布局仍属 13B–13D。
+
 | 维度 | `SessionStore` | `SQLiteDiagnosisRepository` |
 |---|---|---|
 | 用途 | 给下一轮 Agent 提供对话上下文与可复用 Tool Evidence | 回看、分页、报告和导出 |

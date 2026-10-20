@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from netpilot.privacy import RedactionMetadata, PRIVACY_POLICY_VERSION, safe_value
 from netpilot.environment import EnvironmentProfile
+from netpilot.conversation_context.models import ContextAcquisitionState
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
@@ -81,6 +82,7 @@ class SessionTaskState(BaseModel):
     data_notice: str = ""
     owner_user_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
+    context_acquisition: ContextAcquisitionState = Field(default_factory=ContextAcquisitionState)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
     last_target_trace_version: int = 0
     last_target_limit_version: int = 0

@@ -90,10 +90,4 @@ def response_mode_message(mode: ResponseMode) -> ChatMessage:
 def clarification_answer() -> str:
     """Return a deterministic first clarification without running the model."""
 
-    return (
-        "为了避免无意义的检测，请先补充以下信息：\n"
-        "1. 当前使用 Wi-Fi 还是有线网络？\n"
-        "2. 是所有网站都打不开，还是只有特定网站/服务？\n"
-        "3. 微信、QQ 等聊天软件是否能正常收发消息？\n"
-        "4. 当前是否开启 VPN 或系统/浏览器代理？"
-    )
+    return "目前的信息还不足以确认根因。可以继续描述具体失败的操作或错误提示，不清楚的环境信息无需反复确认。"
