@@ -76,6 +76,9 @@ class SessionTaskState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: UUID
+    is_demo: bool = False
+    demo_scenario_id: str | None = None
+    data_notice: str = ""
     owner_user_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)

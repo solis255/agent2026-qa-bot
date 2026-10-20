@@ -1,3 +1,4 @@
+from netpilot.demo.runtime import store_for, runtime_for
 """Authenticated verification endpoints; no arbitrary tool arguments accepted."""
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -17,7 +18,7 @@ def operate(request,user,sid,**kwargs):
         return False
     try:
         with request.app.state.runtime_lock:
-            task,events = request.app.state.sessions.verification(sid,user.id,registry=request.app.state.tool_registry,persist=persist,**kwargs)
+            task,events = store_for(request, sid).verification(sid,user.id,registry=(runtime_for(request, sid).registry if runtime_for(request, sid) else request.app.state.tool_registry),persist=persist,**kwargs)
         from netpilot.api.presenters import _present_tool_call
         return {"session_id":str(sid),"verification_cycles":[c.model_dump(mode="json") for c in task.verification_cycles],
                 "resolution":task.resolution.model_dump(mode="json"),"resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],

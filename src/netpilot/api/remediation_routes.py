@@ -1,3 +1,4 @@
+from netpilot.demo.runtime import store_for, runtime_for
 """Manual plan generation/feedback only. There is intentionally no execute API."""
 from typing import Annotated
 from uuid import UUID
@@ -20,7 +21,7 @@ def operate(request,user,session_id,**kwargs):
         if request.app.state.settings.diagnosis_history_enabled: raise DiagnosisStorageError("history_unavailable")
         return False
     try:
-        task,events=request.app.state.sessions.remediation(session_id,user.id,
+        task,events=store_for(request, session_id).remediation(session_id,user.id,
             max_steps=request.app.state.settings.remediation_max_steps,persist=persist,**kwargs)
         return {"session_id":str(session_id),"remediation_plan":task.remediation_plan.model_dump(mode="json") if task.remediation_plan else None,
                 "resolution":task.resolution.model_dump(mode="json"),"resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],

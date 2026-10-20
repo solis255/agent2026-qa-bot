@@ -105,13 +105,14 @@ class SessionStore:
         self._sessions: dict[UUID, SessionState] = {}
         self._lock = RLock()
 
-    def create(self, owner_user_id: UUID) -> SessionSnapshot:
+    def create(self, owner_user_id: UUID, *, is_demo=False, demo_scenario_id=None) -> SessionSnapshot:
         now = datetime.now(timezone.utc)
         state = SessionState(
             session_id=uuid4(), owner_user_id=owner_user_id,
             created_at=now, updated_at=now,
         )
         state.task_state = SessionTaskState(
+            is_demo=is_demo, demo_scenario_id=demo_scenario_id, data_notice="DEMO / 模拟数据" if is_demo else "",
             session_id=state.session_id,
             owner_user_id=owner_user_id,
             environment_profile=initial_environment(self.environment_client_mode),

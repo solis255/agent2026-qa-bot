@@ -105,6 +105,7 @@ class SQLiteDiagnosisRepository:
 
         now = datetime.now(timezone.utc)
         current = DiagnosisRecordView(
+            is_demo=response.is_demo, demo_scenario_id=response.demo_scenario_id, data_notice=response.data_notice,
             schema_version=SNAPSHOT_SCHEMA_VERSION,
             record_id=uuid4(),
             user_id=user_id,
@@ -391,6 +392,7 @@ class SQLiteDiagnosisRepository:
                     raise DiagnosisStorageError("诊断历史数据损坏")
                 items.append(
                     DiagnosisRecordSummaryView(
+                        is_demo=snapshot.is_demo, demo_scenario_id=snapshot.demo_scenario_id, data_notice=snapshot.data_notice,
                         record_id=UUID(row["record_id"]),
                         session_id=UUID(row["session_id"]),
                         created_at=snapshot.created_at,
@@ -424,7 +426,7 @@ class SQLiteDiagnosisRepository:
 
         if not 1 <= limit <= 10:
             raise ValueError("context limit must be between 1 and 10")
-        clauses = ["user_id = ?", "primary_issue != 'undetermined'"]
+        clauses = ["user_id = ?", "primary_issue != 'undetermined'", "COALESCE(json_extract(snapshot_json, '$.is_demo'), 0) = 0"]
         parameters: list[object] = [str(user_id)]
         if start_at is not None:
             clauses.append("updated_at >= ?")
@@ -617,6 +619,7 @@ def _merge_session_records(
         for step in current.reasoning_trace
     ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
+        is_demo=current.is_demo, demo_scenario_id=current.demo_scenario_id, data_notice=current.data_notice,
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         record_id=(current.record_id if keep_latest_record_id else existing.record_id),
         user_id=existing.user_id,

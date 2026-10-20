@@ -29,6 +29,7 @@ def test_health_reports_milestone_one_readiness() -> None:
         "tool_mode": "mock",
         "rag_ready": False,
         "history_ready": False,
+        "demo_mode": False,
         "reasoning_trace_max_steps": 50,
         "client_snapshot_max_bytes": 262144,
     }

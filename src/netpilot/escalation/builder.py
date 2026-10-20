@@ -31,7 +31,7 @@ def _json(value):
 def package_digest(package):
     excluded = {"package_digest"}
     # Old 12G immutable artifacts were signed before these fields existed.
-    excluded.update({k for k in ("privacy_metadata", "privacy_policy_version") if k not in package.model_fields_set})
+    excluded.update({k for k in ("privacy_metadata", "privacy_policy_version", "is_demo", "demo_scenario_id", "data_notice") if k not in package.model_fields_set})
     return digest(package.model_dump(mode="json", exclude=excluded))
 
 
@@ -173,6 +173,7 @@ def build_package(task, *, version=1, max_evidence=12, policy=None, now=None):
     now = now or datetime.now(timezone.utc)
     policy = escalation_policy(policy)
     package = EscalationPackage(session_id=task.session_id,package_version=version,generated_at=now,
+        is_demo=task.is_demo, demo_scenario_id=task.demo_scenario_id, data_notice=task.data_notice,
         created_from_state_version=task.resolution.state_version,created_from_task_version=task.task_version,created_from_target_version=task.diagnostic_target.target_version,
         source_state_fingerprint=state_fingerprint(task,max_evidence=max_evidence,policy=policy,now=now),**_content(task,max_evidence,policy,now))
     from netpilot.privacy import export_safe

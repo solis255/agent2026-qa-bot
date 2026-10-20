@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Shanghai"
     app_port: int = Field(default=8000, ge=1, le=65535)
     debug: bool = False
+    demo_mode: bool = False
 
     @field_validator("app_timezone")
     @classmethod

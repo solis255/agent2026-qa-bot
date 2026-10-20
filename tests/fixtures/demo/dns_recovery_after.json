@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-01-01T00:01:00Z",
+  "client": {
+    "client_instance_id": "aacd0efb-a236-4962-a6a6-ac6599e3776a",
+    "hostname": null
+  },
+  "os": {
+    "family": "windows",
+    "version": "10.0.26100",
+    "build": "26100",
+    "architecture": "x64"
+  },
+  "adapters": [
+    {
+      "adapter_id": "if-1",
+      "name": "if-1",
+      "interface_alias": null,
+      "status": "up",
+      "interface_type": "wifi",
+      "ipv4_addresses": [
+        "172.23.221.167"
+      ],
+      "ipv6_addresses": [],
+      "has_default_gateway": true
+    }
+  ],
+  "active_adapter_id": "if-1",
+  "default_gateway": "172.23.128.1",
+  "dns_servers": [
+    "172.23.0.1"
+  ],
+  "dns_servers_scope": "active_adapter",
+  "connection_profile": null,
+  "proxy": {
+    "winhttp_proxy_enabled": null,
+    "winhttp_proxy": null
+  },
+  "route_summary": [],
+  "checks": [
+    {
+      "check_id": "dns-tju",
+      "type": "dns",
+      "target": "www.tju.edu.cn",
+      "status": "normal",
+      "latency_ms": 12.0,
+      "result": {
+        "addresses": [
+          "203.0.113.10"
+        ]
+      }
+    },
+    {
+      "check_id": "dns-baidu",
+      "type": "dns",
+      "target": "www.baidu.com",
+      "status": "normal",
+      "latency_ms": 12.0,
+      "result": {
+        "addresses": [
+          "203.0.113.10"
+        ]
+      }
+    },
+    {
+      "check_id": "gateway",
+      "type": "gateway_reachability",
+      "target": "172.23.128.1",
+      "status": "normal",
+      "latency_ms": 3.0,
+      "result": {
+        "reachable": true
+      }
+    },
+    {
+      "check_id": "tcp-443",
+      "type": "tcp_connectivity",
+      "target": "1.1.1.1",
+      "status": "normal",
+      "latency_ms": 20.0,
+      "result": {
+        "reachable": true,
+        "port": 443
+      }
+    }
+  ],
+  "redaction": {
+    "hostname_redacted": true,
+    "mac_removed": true,
+    "ssid_removed": true,
+    "secrets_removed": true
+  }
+}

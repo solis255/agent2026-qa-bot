@@ -1,3 +1,4 @@
+from netpilot.demo.runtime import store_for, runtime_for
 """Explicit authenticated case confirmation/support recommendation, not tickets."""
 from uuid import UUID
 from fastapi import APIRouter,HTTPException,Request,Response
@@ -16,7 +17,7 @@ def operate(request,user,sid,**kwargs):
         if request.app.state.settings.diagnosis_history_enabled: raise DiagnosisStorageError("history_unavailable")
         return False
     try:
-        task,events=request.app.state.sessions.resolution_action(sid,user.id,persist=persist,**kwargs)
+        task,events=store_for(request, sid).resolution_action(sid,user.id,persist=persist,**kwargs)
         return {"session_id":str(sid),"resolution":task.resolution.model_dump(mode="json"),
             "resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],
             "reasoning_trace":[e.model_dump(mode="json") for e in events],"task_version":task.task_version}

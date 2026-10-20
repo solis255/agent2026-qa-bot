@@ -36,6 +36,7 @@ STATUS_LABELS = {
 }
 CONFIDENCE_LABELS = {"high": "高", "medium": "中", "low": "低"}
 ISSUE_LABELS = {
+    "single_service": "单一服务访问异常（不代表全局断网）",
     "undetermined": "尚未确定",
     "no_issue_observed": "未发现异常",
     "insufficient_evidence": "证据不足",
@@ -82,6 +83,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
     if summary and summary.applicable and (summary.stale or summary.clock_skew_suspected):
         conclusion = "快照已过期或疑似时钟偏差；以下仅为历史采集状态，不代表现在。\n\n" + conclusion
     return DiagnosisReportView(
+        is_demo=record.is_demo, demo_scenario_id=record.demo_scenario_id, data_notice=record.data_notice,
         privacy_metadata=record.privacy_metadata,
         privacy_policy_version=record.privacy_policy_version,
         report_id=record.record_id,
@@ -375,6 +377,7 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
             "",
         ]
     )
+    if report.is_demo: lines.insert(2, "> **DEMO / 模拟数据 — 不可作为真实网络测量或实际报修依据。**")
     return "\n".join(lines)
 
 

@@ -176,6 +176,7 @@ const STATUS_LABELS = {
 };
 
 const ISSUE_LABELS = {
+  single_service: "单服务访问异常",
   undetermined: "尚未确定",
   no_issue_observed: "未发现异常",
   insufficient_evidence: "证据不足",
@@ -209,7 +210,7 @@ function setBusy(busy, message = "") {
     control.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   }
   elements.conversation.setAttribute("aria-busy", String(busy));
-  const ready = Boolean(state.user && state.sessionId && state.health?.llm_configured);
+  const ready = Boolean(state.user && state.sessionId && (state.health?.llm_configured || state.isDemo));
   elements.messageInput.disabled = busy || !ready;
   elements.sendButton.disabled = busy || !ready;
   elements.newSession.disabled = busy || !state.user || !state.health;
@@ -225,6 +226,9 @@ function setBusy(busy, message = "") {
   elements.logoutButton.disabled = busy || !state.user;
   elements.changePasswordOpen.disabled = busy || !state.user;
   for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy || !state.user;
+  for(const id of ["demo-create","demo-scenario-select","demo-fill-prompt","demo-refresh"]){const control=document.querySelector(`#${id}`);if(control)control.disabled=busy || !state.user;}
+  const demoReset=document.querySelector("#demo-reset");if(demoReset)demoReset.disabled=busy || !state.user || !state.isDemo;
+  for(const button of document.querySelectorAll("#demo-fixtures button"))button.disabled=busy || !state.user || button.dataset.available!=="true";
   elements.sendButton.textContent = busy ? "诊断中…" : "开始诊断";
   if (message) elements.interactionNote.textContent = message;
 }
@@ -402,6 +406,8 @@ function showAuthGate(message = "请先登录或注册。") {
   state.user = null;
   state.health = null;
   state.sessionId = null;
+  state.isDemo = false;
+  document.querySelector("#demo-controls")?.setAttribute("hidden", "");
   state.environmentProfile = null;
   state.diagnosticTarget = null;
   state.clientSnapshotSummary = null;
@@ -459,6 +465,7 @@ async function enterAuthenticated(user) {
     await Promise.all([
       createSession({ announce: false, restore: true }),
       loadScenarios(),
+      loadDemoScenarios(),
       loadHistory(),
     ]);
   } catch (error) {
@@ -1092,6 +1099,7 @@ async function saveDiagnosticTarget(event) {
     state.diagnosticTarget = target;
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+    if (state.isDemo) await refreshDemoStatus();
     elements.snapshotFile.value = "";
     if (changed) { renderDiagnosis(null); renderTools([]); if (state.remediationPlan) state.remediationPlan={...state.remediationPlan,status:"superseded"};renderRemediationPlan(state.remediationPlan); state.verificationCycles=state.verificationCycles.map(c=>["baseline_ready","awaiting_after_evidence","verifying"].includes(c.status)?{...c,status:"superseded"}:c);renderVerification(state.verificationCycles); }
     if(changed){applyResolution({resolution:{state:"diagnosing",reason_summary:"诊断对象已切换，旧处理状态不沿用。"}});await refreshResolution();}
@@ -1122,6 +1130,8 @@ async function createSession({ announce = true, restore = false } = {}) {
     if (!session) session = await requestJSON("/api/session", { method: "POST" });
     if (state.authEpoch !== authEpoch) return;
     state.sessionId = session.session_id;
+    state.isDemo = Boolean(session.is_demo);
+    state.demoScenarioId = session.demo_scenario_id || null;
     state.environmentProfile = session.environment_profile || null;
     state.diagnosticTarget = session.diagnostic_target || null;
     state.clientSnapshotSummary = session.client_snapshot_summary || null;
@@ -1134,7 +1144,9 @@ async function createSession({ announce = true, restore = false } = {}) {
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
-    await uploadBrowserEnvironment(authEpoch, session.session_id);
+    if (!state.isDemo) await uploadBrowserEnvironment(authEpoch, session.session_id);
+    if (state.isDemo) await refreshDemoStatus();
+    else clearDemoSessionUI();
     if (state.authEpoch !== authEpoch) return;
     elements.interactionNote.textContent = state.health?.llm_configured
       ? "会话已就绪。Enter 发送，Shift + Enter 换行。"
@@ -1314,7 +1326,7 @@ function renderHistoryItems(items) {
     button.type = "button";
     button.dataset.recordId = item.record_id;
     const question = document.createElement("strong");
-    question.textContent = item.user_message;
+    question.textContent = (item.is_demo ? "[Demo] " : "") + item.user_message;
     const meta = document.createElement("span");
     const issue = ISSUE_LABELS[item.primary_issue] || item.primary_issue;
     const confidence = CONFIDENCE_LABELS[item.confidence] || item.confidence;
@@ -1492,6 +1504,7 @@ async function submitChat(event) {
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
+    if (state.isDemo) await refreshDemoStatus();
     renderTools(response.tool_calls);
     appendTurnReasoningTrace(response.reasoning_trace);
     setReportRecord(response.record_id);
@@ -1924,6 +1937,84 @@ for (const button of document.querySelectorAll("[data-prompt]")) {
     elements.messageInput.focus();
   });
 }
+
+function clearDemoSessionUI() {
+  const reset=document.querySelector("#demo-reset");if(reset)reset.disabled=true;
+  document.querySelector("#demo-fixtures")?.replaceChildren();
+  const status=document.querySelector("#demo-status");if(status)status.textContent="请选择场景并创建独立的 Demo Session。";
+  const banner=document.querySelector("#demo-banner");if(banner)banner.textContent="网络状态来自 Mock / Fixture，不代表现场真实网络。";
+}
+
+async function loadDemoScenarios() {
+  const panel=document.querySelector("#demo-controls");
+  if(!panel)return;
+  panel.hidden=!state.health?.demo_mode;
+  if(panel.hidden)return;
+  const epoch=state.authEpoch;
+  const data=await requestJSON("/api/demo/scenarios");
+  if(epoch!==state.authEpoch)return;
+  state.demoScenarios=data.scenarios || [];
+  const select=document.querySelector("#demo-scenario-select");select.replaceChildren();
+  for(const item of state.demoScenarios){const option=document.createElement("option");option.value=item.scenario_id;option.textContent=item.title;select.append(option);}
+  if(state.demoScenarioId)select.value=state.demoScenarioId;
+}
+
+function applyDemoSession(session,{reset=false}={}) {
+  state.sessionId=session.session_id;state.isDemo=Boolean(session.is_demo);state.demoScenarioId=session.demo_scenario_id;
+  state.environmentProfile=session.environment_profile;state.diagnosticTarget=session.diagnostic_target;
+  state.clientSnapshotSummary=session.client_snapshot_summary || null;state.clientEvidence=session.client_evidence || [];
+  state.remediationPlan=session.remediation_plan || null;state.remediationReadiness=session.remediation_readiness || null;
+  state.verificationCycles=session.verification_cycles || [];state.escalationPackages=session.escalation_packages || [];
+  state.resolution=session.resolution;state.resolutionTransitions=session.resolution_transitions || [];
+  state.viewingHistory=false;
+  window.history?.replaceState(null,"",`#session=${encodeURIComponent(session.session_id)}`);
+  elements.sessionLabel.textContent=`Demo · ${session.session_id.slice(0,8)}`;
+  if(reset){resetConversation();setReportRecord(null);renderDiagnosis(null);renderTools([]);}
+  else {renderEnvironmentProfile(state.environmentProfile);renderDiagnosticTarget(state.diagnosticTarget);renderClientSnapshot(state.clientSnapshotSummary,state.clientEvidence);renderRemediationPlan(state.remediationPlan);renderVerification(state.verificationCycles);applyResolution(session);appendTurnReasoningTrace(session.reasoning_trace || []);}
+}
+
+async function refreshDemoStatus() {
+  if(!state.isDemo || !state.user || state.viewingHistory)return;
+  const sid=state.sessionId,epoch=state.authEpoch;
+  const data=await requestJSON(`/api/demo/session/${encodeURIComponent(sid)}`);
+  if(sid!==state.sessionId || epoch!==state.authEpoch)return;
+  const banner=document.querySelector("#demo-banner");
+  banner.textContent=data.data_source==="uploaded" ? "当前使用真实客户端诊断快照；会话仍带 Demo 标记。" : "当前为演示模式，网络状态来自 Mock / Fixture。";
+  document.querySelector("#demo-reset").disabled=false;
+  document.querySelector("#demo-scenario-select").value=data.demo_scenario_id;
+  document.querySelector("#demo-status").textContent=`${data.demo_scenario_id} · task v${data.task_version} / target v${data.target_version} · Resolution=${data.resolution} · Verification=${data.latest_verification || "尚无"}${data.latest_verification_historical ? "（历史轮次）" : ""} · Plan v${data.latest_plan_version || 0} · Host Tool=${data.host_handler_calls} · ${data.metrics.verification_cycles} 轮验证`;
+  const fixtures=document.querySelector("#demo-fixtures");fixtures.replaceChildren();
+  for(const [index,id] of (data.snapshot_fixtures || []).entries()){
+    const button=document.createElement("button");button.type="button";button.textContent=`加载 ${index===0 ? "Before" : `After ${index}`} 快照`;
+    button.dataset.available=String(!data.loaded_fixtures.includes(id) && index<=data.loaded_fixtures.length);
+    button.disabled=state.busy || button.dataset.available!=="true";
+    button.addEventListener("click",()=>{if(state.isDemo && state.sessionId===sid)demoOperation(`/api/demo/session/${encodeURIComponent(sid)}/load-snapshot/${encodeURIComponent(id)}`,{},false);});fixtures.append(button);
+  }
+}
+
+async function demoOperation(url,body={},reset=true) {
+  if(!state.user || state.busy)return;
+  const epoch=state.authEpoch;setBusy(true);
+  try {
+    const session=await requestJSON(url,{method:"POST",body:JSON.stringify(body)});
+    if(epoch!==state.authEpoch)return;
+    applyDemoSession(session,{reset});
+    await refreshDemoStatus();await loadHistory();
+  } catch(error) {if(epoch===state.authEpoch)document.querySelector("#demo-status").textContent=error.message;}
+  finally {if(epoch===state.authEpoch){setBusy(false);if(state.isDemo)await refreshDemoStatus();}}
+}
+
+document.querySelector("#demo-create")?.addEventListener("click",()=>{
+  const id=document.querySelector("#demo-scenario-select").value;
+  demoOperation(state.isDemo ? `/api/demo/session/${encodeURIComponent(state.sessionId)}/scenario/${encodeURIComponent(id)}` : "/api/demo/session",{scenario_id:id});
+});
+document.querySelector("#demo-reset")?.addEventListener("click",()=>{if(state.isDemo)demoOperation(`/api/demo/session/${encodeURIComponent(state.sessionId)}/reset`);});
+document.querySelector("#demo-refresh")?.addEventListener("click",()=>refreshDemoStatus().catch(error=>{document.querySelector("#demo-status").textContent=error.message;}));
+document.querySelector("#demo-fill-prompt")?.addEventListener("click",()=>{
+  const id=document.querySelector("#demo-scenario-select").value;
+  const scenario=state.demoScenarios?.find(item=>item.scenario_id===id);
+  if(scenario){elements.messageInput.value=scenario.recommended_input;elements.messageInput.focus();}
+});
 
 initialize();
 window.addEventListener("pageshow", (event) => {

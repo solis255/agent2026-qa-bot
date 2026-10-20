@@ -137,6 +137,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.runtime_lock = RLock()
     app.state.auth_lock = RLock()
     app.state.auth_service = None
+    from netpilot.demo.runtime import DemoManager
+    app.state.demo_manager = DemoManager(app.state.settings, app.state.llm_client)
 
     from netpilot.api.remediation_routes import router as remediation_router
     app.include_router(remediation_router,prefix="/api")
@@ -150,6 +152,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api")
     from netpilot.api.client_snapshot_routes import router as snapshot_router
     app.include_router(snapshot_router)
+    from netpilot.api.demo_routes import router as demo_router
+    app.include_router(demo_router, prefix="/api")
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 

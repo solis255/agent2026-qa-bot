@@ -35,11 +35,15 @@ class HealthResponse(BaseModel):
     tool_mode: ToolMode
     rag_ready: bool
     history_ready: bool
+    demo_mode: bool = False
     reasoning_trace_max_steps: int = Field(default=50, ge=1, le=200)
     client_snapshot_max_bytes: int = Field(default=262144, ge=1024)
 
 
 class RemediationStateView(BaseModel):
+    is_demo: bool = False
+    demo_scenario_id: str | None = None
+    data_notice: str = ""
     privacy_metadata: RedactionMetadata | None = None
     privacy_policy_version: str = PRIVACY_POLICY_VERSION
     escalation_packages: list[EscalationPackage] = Field(default_factory=list,max_length=20)
@@ -278,6 +282,9 @@ class DiagnosisRecordView(RemediationStateView):
 
 
 class DiagnosisRecordSummaryView(BaseModel):
+    is_demo: bool = False
+    demo_scenario_id: str | None = None
+    data_notice: str = ""
     resolution: ResolutionRecord = Field(default_factory=ResolutionRecord)
     client_snapshot_summary: ClientSnapshotSummary | None = None
     record_id: UUID

@@ -63,6 +63,8 @@ from netpilot.tools.custom_scenarios import (
 )
 
 
+from netpilot.demo.runtime import runtime_for, store_for
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 CurrentUser = Annotated[UserRecord, Depends(require_current_user)]
@@ -90,6 +92,7 @@ def health(request: Request) -> HealthResponse:
         tool_mode=settings.tool_mode,
         rag_ready=bool(request.app.state.rag_ready),
         history_ready=bool(request.app.state.history_ready),
+        demo_mode=settings.demo_mode,
     )
 
 
@@ -121,21 +124,23 @@ def create_session(request: Request, user: CurrentUser) -> SessionResponse:
 def get_session(session_id: UUID, request: Request, user: CurrentUser, response: Response) -> SessionResponse:
     response.headers["Cache-Control"] = "no-store"
     try:
-        snapshot = _sessions(request).get(session_id, user.id)
+        snapshot = _sessions(request, session_id).get(session_id, user.id)
+        task = _sessions(request, session_id).task_state(session_id, user.id)
         return SessionResponse(
+            is_demo=task.is_demo, demo_scenario_id=task.demo_scenario_id, data_notice=task.data_notice,
             session_id=session_id, created_at=snapshot.created_at,
-            escalation_packages=_sessions(request).task_state(session_id,user.id).escalation_packages,
-            resolution=_sessions(request).task_state(session_id,user.id).resolution,
-            resolution_transitions=_sessions(request).task_state(session_id,user.id).resolution_transitions,
-            environment_profile=_sessions(request).task_state(session_id, user.id).environment_profile,
-            diagnostic_target=_sessions(request).task_state(session_id, user.id).diagnostic_target,
-            client_snapshot_summary=_sessions(request).task_state(session_id, user.id).client_snapshot_summary,
-            remediation_plan=_sessions(request).task_state(session_id,user.id).remediation_plan,
-            verification_cycles=_sessions(request).task_state(session_id,user.id).verification_cycles,
-            verification_evidence=[e for e in _sessions(request).task_state(session_id,user.id).evidence if e.evidence_origin == "tool"],
-            remediation_plan_history=_sessions(request).task_state(session_id,user.id).remediation_plan_history,
-            remediation_readiness=_sessions(request).task_state(session_id,user.id).remediation_readiness,
-            client_evidence=[item for item in _sessions(request).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
+            escalation_packages=_sessions(request, session_id).task_state(session_id,user.id).escalation_packages,
+            resolution=_sessions(request, session_id).task_state(session_id,user.id).resolution,
+            resolution_transitions=_sessions(request, session_id).task_state(session_id,user.id).resolution_transitions,
+            environment_profile=_sessions(request, session_id).task_state(session_id, user.id).environment_profile,
+            diagnostic_target=_sessions(request, session_id).task_state(session_id, user.id).diagnostic_target,
+            client_snapshot_summary=_sessions(request, session_id).task_state(session_id, user.id).client_snapshot_summary,
+            remediation_plan=_sessions(request, session_id).task_state(session_id,user.id).remediation_plan,
+            verification_cycles=_sessions(request, session_id).task_state(session_id,user.id).verification_cycles,
+            verification_evidence=[e for e in _sessions(request, session_id).task_state(session_id,user.id).evidence if e.evidence_origin == "tool"],
+            remediation_plan_history=_sessions(request, session_id).task_state(session_id,user.id).remediation_plan_history,
+            remediation_readiness=_sessions(request, session_id).task_state(session_id,user.id).remediation_readiness,
+            client_evidence=[item for item in _sessions(request, session_id).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
@@ -152,7 +157,7 @@ def _update_environment(
         elif request.app.state.settings.diagnosis_history_enabled:
             raise DiagnosisStorageError("诊断历史不可用")
     try:
-        return _sessions(request).update_environment(
+        return _sessions(request, payload.session_id).update_environment(
             payload.session_id, user.id,
             payload.model_dump(exclude_unset=True, exclude={"session_id"}),
             source=source, persist=persist,
@@ -184,7 +189,7 @@ def update_target(payload: DiagnosticTargetRequest, request: Request, user: Curr
         elif request.app.state.settings.diagnosis_history_enabled:
             raise DiagnosisStorageError("诊断历史不可用")
     try:
-        return _sessions(request).update_diagnostic_target(payload.session_id, user.id, payload.subject, persist_task=persist)
+        return _sessions(request, payload.session_id).update_diagnostic_target(payload.session_id, user.id, payload.subject, persist_task=persist)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
     except SessionBusyError as exc:
@@ -197,13 +202,16 @@ def update_target(payload: DiagnosticTargetRequest, request: Request, user: Curr
 
 def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest, result: AgentResult) -> ChatResponse:
     from netpilot.privacy import redact_text, safe_value
-    target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
+    target = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).diagnostic_target
     result = result.model_copy(update={"diagnostic_target":target})
     response = present_chat(payload.session_id, result)
     response.redacted_user_message = redact_text(payload.message).value
-    response.environment_profile = _sessions(request).task_state(payload.session_id, owner_id).environment_profile
-    response.diagnostic_target = _sessions(request).task_state(payload.session_id, owner_id).diagnostic_target
-    task = _sessions(request).task_state(payload.session_id, owner_id)
+    response.environment_profile = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).environment_profile
+    response.diagnostic_target = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).diagnostic_target
+    task = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id)
+    response.is_demo=task.is_demo
+    response.demo_scenario_id=task.demo_scenario_id
+    response.data_notice=task.data_notice
     response.escalation_packages=task.escalation_packages
     response.client_snapshot_summary = task.client_snapshot_summary
     response.client_evidence = [item for item in task.evidence if item.evidence_origin == "client_snapshot"]
@@ -225,13 +233,13 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
     """Run one bounded Agent turn and append only text history to the session."""
 
     llm_client: TJUClient = request.app.state.llm_client
-    if not llm_client.configured:
+    if not llm_client.configured and runtime_for(request, payload.session_id) is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
         )
     session_token = set_session_id(payload.session_id)
-    sessions = _sessions(request)
+    sessions = _sessions(request, payload.session_id)
     try:
         history = sessions.begin_turn(payload.session_id, user.id)
         task_state = sessions.task_state(payload.session_id, user.id)
@@ -304,12 +312,12 @@ def chat_stream(
     """Run one Agent turn and emit a versioned JSON SSE event sequence."""
 
     llm_client: TJUClient = request.app.state.llm_client
-    if not llm_client.configured:
+    if not llm_client.configured and runtime_for(request, payload.session_id) is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
         )
-    sessions = _sessions(request)
+    sessions = _sessions(request, payload.session_id)
     try:
         history = sessions.begin_turn(payload.session_id, user.id)
         task_state = sessions.task_state(payload.session_id, user.id)
@@ -667,8 +675,8 @@ def _validate_scenario_name(value: str) -> None:
         )
 
 
-def _sessions(request: Request) -> SessionStore:
-    return request.app.state.sessions
+def _sessions(request: Request, session_id=None) -> SessionStore:
+    return store_for(request, session_id) if session_id is not None else request.app.state.sessions
 
 
 def _diagnoses(request: Request) -> DiagnosisRepository | None:
@@ -694,7 +702,9 @@ def _run_agent_turn(request: Request, user_id: UUID, message: str, history, task
                 log_event(logger, "history_context_read", success=False,
                           error_type="diagnosis_storage_error")
         kwargs["history_context"] = context
-    return request.app.state.agent.run(message, **kwargs)
+    runtime = runtime_for(request, task_state.session_id)
+    agent = runtime.agent if runtime else request.app.state.agent
+    return agent.run(message, **kwargs)
 
 
 def _persist_session_diagnosis(

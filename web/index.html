@@ -98,6 +98,19 @@
       </section>
 
       <aside class="diagnostics-panel" aria-label="诊断状态">
+        <details class="status-card demo-controls" id="demo-controls" hidden>
+          <summary>演示模式 · Demo / Mock</summary>
+          <p id="demo-banner" class="privacy-notice">网络状态来自 Mock / Fixture，不代表现场真实网络。</p>
+          <label for="demo-scenario-select">演示场景</label>
+          <select id="demo-scenario-select"></select>
+          <button type="button" id="demo-create">创建 / 切换当前演示</button>
+          <button type="button" id="demo-reset" disabled>重置当前演示</button>
+          <button type="button" id="demo-fill-prompt">填入推荐测试语句</button>
+          <p class="environment-note">按钮只加载受控快照。手动步骤的模拟完成、症状确认和材料生成请使用下方正式卡片；不会执行网络修复。</p>
+          <div id="demo-fixtures"></div>
+          <button type="button" id="demo-refresh">刷新演示状态</button>
+          <p id="demo-status" role="status" aria-live="polite"></p>
+        </details>
         <section class="status-card">
           <div class="section-heading compact">
             <div>

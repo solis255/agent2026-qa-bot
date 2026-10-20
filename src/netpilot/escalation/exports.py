@@ -28,6 +28,7 @@ def markdown(package):
         *[f"- {text(c)}" for c in p.recommended_handoff_checks], "", "## 11. 完整度与限制", f"- {p.completeness}", *[f"- {text(n)}" for n in p.completeness_notes],
         "", "## 12. 隐私处理", f"- 已移除 / 不采集：{text(', '.join(p.privacy.redacted_fields))}", f"- 私有 IP 掩码：{'开启' if p.privacy.private_ip_masked else '未开启（保留已有私有 IP 便于授权人员排查）'}",
         "- 未包含完整聊天、原始快照、原始 Tool JSON、模型隐藏推理、系统提示词或数据库转储。", "", "## References（参考资料，不是实时证据）", *[f"- {text(r)}" for r in p.source_refs]]
+    if p.is_demo: lines.insert(2, "> **DEMO / 模拟数据 — 不可作为真实网络测量或实际报修依据。**")
     return "\n".join(lines) + "\n"
 
 

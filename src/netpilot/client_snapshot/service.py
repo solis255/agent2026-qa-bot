@@ -163,6 +163,10 @@ def apply_snapshot_diagnosis(response, records):
     fresh = not any(item.stale or item.clock_skew_suspected for item in records)
     dns_failed = fresh and any(item.tool_name.endswith("dns_check") and item.status == "abnormal" for item in records)
     response.diagnosis.primary_issue = "dns_resolution_failure" if dns_failed else "insufficient_evidence"
+    if fresh and not dns_failed:
+        from netpilot.remediation.planner import infer_issue
+        if infer_issue(records, response.environment_profile) == "single_service":
+            response.diagnosis.primary_issue = "single_service"
     response.diagnosis.confidence = "medium" if dns_failed else "low"
     response.diagnosis.limitations = ["用户上传快照未签名，仅代表采集时点；不是实时远程检测。", "固定 DNS、网关与单一 TCP 探测不覆盖所有网络或应用。"]
     if not fresh:

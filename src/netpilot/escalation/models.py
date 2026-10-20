@@ -113,6 +113,9 @@ class PackagePrivacy(FrozenModel):
 
 
 class EscalationPackage(FrozenModel):
+    is_demo: bool = False
+    demo_scenario_id: str | None = None
+    data_notice: str = ""
     privacy_policy_version: str = PRIVACY_POLICY_VERSION
     privacy_metadata: RedactionMetadata | None = None
     package_id: UUID = Field(default_factory=uuid4)

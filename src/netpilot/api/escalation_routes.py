@@ -1,3 +1,4 @@
+from netpilot.demo.runtime import store_for, runtime_for
 """Authenticated artifact generation/read/export; no external submission routes."""
 import logging
 from typing import Literal
@@ -23,8 +24,8 @@ def _view(request, user, sid, *, generate=False):
         if request.app.state.settings.diagnosis_history_enabled: raise DiagnosisStorageError("history_unavailable")
         return False
     try:
-        task,events=request.app.state.sessions.escalation(sid,user.id,generate=generate,persist=persist)
-        store=request.app.state.sessions
+        task,events=store_for(request, sid).escalation(sid,user.id,generate=generate,persist=persist)
+        store=store_for(request, sid)
         try:
             fingerprint=state_fingerprint(task,max_evidence=store.escalation_max_evidence_items,policy=store.escalation_privacy_policy)
         except Exception as exc:

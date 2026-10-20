@@ -12,6 +12,7 @@ from netpilot.remediation.safety import validate_catalog, validate_template
 
 CRITICAL_ENVIRONMENT = ("os_family", "os_version", "network_access", "vpn_enabled", "proxy_enabled", "affected_scope", "affected_service")
 ISSUE_CATEGORIES = {"dns_resolution_failure":"dns", "local_network_configuration":"gateway_connectivity",
+                    "single_service":"single_service",
                     "icmp_unreachable":"gateway_connectivity", "tcp_connectivity_failure":"single_service",
                     "http_connectivity_failure":"web_only", "proxy_fake_ip_mapping":"proxy"}
 
@@ -48,6 +49,12 @@ def infer_issue(evidence, environment):
         return "http_connectivity_failure"
     if abnormal("tcp_check", "client_snapshot.tcp_connectivity"):
         return "tcp_connectivity_failure"
+    # This classifies the reported scope, not a proven service-side root cause.
+    # Positive basic connectivity is required; absence of evidence is not health.
+    checked = {item.tool_name for item in evidence if item.status == "normal"}
+    if environment.affected_scope == "single_service" and {
+            "client_snapshot.network_config", "client_snapshot.dns_check", "client_snapshot.gateway_reachability", "client_snapshot.tcp_connectivity"}.issubset(checked):
+        return "single_service"
     return "insufficient_evidence"
 
 

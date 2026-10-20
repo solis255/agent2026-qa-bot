@@ -180,6 +180,18 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 
 
 
+### Milestone 12I 场景演示与验收
+
+设置 `DEMO_MODE=true` 后，登录并展开右侧“演示模式 · Demo / Mock”，可创建独立的 DNS 恢复、两轮失败升级、VPN（含未知状态对照）、单服务和复发演示。默认关闭；所有场景经过正式快照、修复反馈、复核、处理状态与隐私导出流程，重置保留已有历史。
+
+完整启动命令、A/B 比赛操作脚本、真实客户端展示及验收结果见 [Demo 操作手册](docs/DEMO_SCENARIOS.md)。离线自动验收：
+
+```powershell
+python scripts/run_demo_scenarios.py
+```
+
+Runner 使用临时账号和数据库；这些远程快照 Demo 无需模型 Key。普通聊天的配置要求保持不变。
+
 ### RAG 索引
 
 ```bash

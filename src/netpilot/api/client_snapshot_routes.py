@@ -1,3 +1,4 @@
+from netpilot.demo.runtime import store_for, runtime_for
 """Bounded authenticated multipart transport; all snapshot logic lives separately."""
 
 from pathlib import Path
@@ -67,7 +68,7 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
             sid = UUID(sid_value)
         except ValueError as exc:
             raise HTTPException(422, "session_id 格式不正确。") from exc
-        sessions = request.app.state.sessions
+        sessions = store_for(request, sid)
         session = sessions.get(sid, user.id)
         if not (file.filename or "").lower().endswith(".json"):
             raise HTTPException(415, "仅接受 .json 快照。")
@@ -87,6 +88,8 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
             sid, user.id, snapshot, digest,
             freshness_minutes=settings.client_snapshot_freshness_minutes, persist=persist,
         )
+        runtime = runtime_for(request, sid)
+        if runtime: runtime.data_source = "uploaded"
         del snapshot
         body = SessionResponse(
             resolution=task.resolution,resolution_transitions=task.resolution_transitions,

@@ -368,3 +368,13 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
   border-left: 2px solid var(--accent, #237a64);
   padding-left: 0.65rem;
 }
+.demo-controls {
+  border: 1px solid #b68432;
+}
+.demo-controls select {
+  width: 100%;
+  margin: 0.5rem 0;
+}
+.demo-controls button {
+  margin: 0.3rem 0.3rem 0.3rem 0;
+}
