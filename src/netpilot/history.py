@@ -668,6 +668,10 @@ def _merge_session_diagnosis(
 
     if (existing.diagnostic_target.subject, existing.diagnostic_target.target_version) != (current.diagnostic_target.subject, current.diagnostic_target.target_version):
         return current.diagnosis
+    if existing.resolution.task_version != current.resolution.task_version:
+        # A new environment/task cannot inherit a meaningful conclusion from
+        # the old host measurements just because this Turn is a context update.
+        return current.diagnosis
     if (existing.client_snapshot_summary and current.client_snapshot_summary
             and existing.client_snapshot_summary.applicable and not current.client_snapshot_summary.applicable):
         # A changed task invalidates the client's old observations even when the

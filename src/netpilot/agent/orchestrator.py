@@ -18,7 +18,7 @@ from netpilot.agent.context_builder import build_task_context_message
 from netpilot.agent.evidence import llm_tool_feedback, model_safe_data
 from netpilot.agent.fallbacks import build_intent_fallback
 from netpilot.agent.hypotheses import Hypothesis, track_hypotheses
-from netpilot.agent.intent import TurnIntent, classify_turn_intent
+from netpilot.agent.intent import TurnIntent, IntentClassification, classify_turn_intent
 from netpilot.agent.knowledge import (
     citation_refs,
     is_knowledge_followup,
@@ -63,7 +63,7 @@ from netpilot.llm import (
 )
 from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 from netpilot.history_context import HistoryContext
-from netpilot.conversation_context.acquisition import acquire_context
+from netpilot.conversation_context.acquisition import acquire_context, environment_confirmation
 from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer
 from netpilot.observability import log_event
 
@@ -157,18 +157,27 @@ class AgentOrchestrator:
                 task_state.set_target(target)
         if (initial_target.subject, initial_target.target_version) != (target.subject, target.target_version):
             history = ()
+        if acquired.environment_transition:
+            history = ()  # Previous live conclusions describe the old environment.
         trace = ReasoningTraceBuilder(
             previous=task_state.reasoning_trace if task_state is not None else (),
             turn_index=task_state.turn_index + 1 if task_state is not None else 1,
-            task_version=task_state.task_version if task_state is not None else 1,
+            task_version=(task_state.task_version if task_state is not None else 1) + int(acquired.environment_transition),
             enabled=self.reasoning_trace_enabled, max_steps=self.reasoning_trace_max_steps,
         )
         from netpilot.remediation.service import explicit_remediation
         from netpilot.resolution.service import user_action,answer as resolution_answer
         resolution_action=user_action(user_message,was_resolved=bool(task_state and task_state.resolution.state == "resolved")) if task_state else None
-        classification = classify_turn_intent(user_message,has_evidence=bool(task_state and task_state.reusable_evidence()))
+        classification = acquired.classification
         from netpilot.escalation.builder import material_request
-        if acquired.question is not None and not resolution_action and not material_request(user_message):
+        if acquired.update_only:
+            trace.intent = classification.intent
+            confirmation = environment_confirmation(acquired)
+            trace.append("state_change" if acquired.environment_transition else "planning", "更新环境记录", confirmation)
+            result = AgentResult(answer=confirmation, status=AgentStatus.COMPLETED, tool_rounds=0,
+                turn_intent=classification.intent, response_mode=ResponseMode.META,
+                task_version_advanced=acquired.environment_transition, environment_update_only=True)
+        elif acquired.question is not None and not resolution_action and not material_request(user_message):
             trace.intent = TurnIntent.CLARIFY
             self._trace_target(trace, task_state, target)
             capabilities = evaluate_target_capabilities(target, provider, has_client_snapshot_evidence=False)
@@ -206,11 +215,15 @@ class AgentOrchestrator:
             result = self._run_turn(
                 acquired.message, history=history, task_state=task_state,
                 history_context=history_context, trace=trace, environment=environment, target=target,
+                classification_override=acquired.classification if acquired.environment_transition else None,
+                environment_transition=acquired.environment_transition,
             )
+        if acquired.environment_transition:
+            result.task_version_advanced = True
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
-        if self.reasoning_summary_llm_enabled and result.ui_action is None:
+        if self.reasoning_summary_llm_enabled and result.ui_action is None and not result.environment_update_only:
             result = trace.optional_summary(self.llm, result)
         if result.status is not AgentStatus.LLM_ERROR and result.response_mode not in {ResponseMode.KNOWLEDGE, ResponseMode.META, ResponseMode.HISTORY} and (
             result.turn_intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}
@@ -220,7 +233,7 @@ class AgentOrchestrator:
         pending = [*task_state.pending_snapshot_trace,*task_state.pending_remediation_trace] if task_state is not None else []
         result = result.model_copy(update={"reasoning_trace": [*pending, *trace.steps], "environment_profile": environment, "diagnostic_target":target,
                                            "context_acquisition":acquired.state, "context_answered":acquired.answered})
-        if task_state is not None and result.ui_action is None:
+        if task_state is not None and result.ui_action is None and not result.environment_update_only:
             from netpilot.remediation.integration import enrich_result
             try:
                 result = enrich_result(task_state,result,acquired.message,max_steps=self.remediation_max_steps,
@@ -228,6 +241,8 @@ class AgentOrchestrator:
             except Exception as exc:
                 # Planning must never break the authoritative diagnosis.
                 logger.warning("remediation_integration_failed error_type=%s",type(exc).__name__)
+        if acquired.changed_fields and not result.environment_update_only:
+            result.answer = environment_confirmation(acquired) + "\n\n" + result.answer
         return result
 
     def _trace_target(self, trace, task_state, target):
@@ -243,6 +258,8 @@ class AgentOrchestrator:
         trace: ReasoningTraceBuilder,
         environment: EnvironmentProfile,
         target: DiagnosticTarget,
+        classification_override: IntentClassification | None = None,
+        environment_transition: bool = False,
     ) -> AgentResult:
         """Run one bounded diagnosis with text history and structured evidence."""
 
@@ -257,13 +274,13 @@ class AgentOrchestrator:
         effective_task_state = (
             task_state.model_copy(deep=True) if task_state is not None else None
         )
-        classification = classify_turn_intent(
+        classification = classification_override or classify_turn_intent(
             user_message,
             has_evidence=bool(
                 effective_task_state and effective_task_state.reusable_evidence()
             ),
         )
-        task_version_advanced = classification.intent is TurnIntent.STATE_CHANGED
+        task_version_advanced = environment_transition or classification.intent is TurnIntent.STATE_CHANGED
         if task_version_advanced and effective_task_state is not None:
             effective_task_state.advance_version()
         response_mode = response_mode_for(classification.intent)

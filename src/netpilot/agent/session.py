@@ -242,6 +242,7 @@ class SessionStore:
                 )
                 if (result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}
                         and not result.context_answered
+                        and not result.environment_update_only
                         and not (result.context_acquisition and result.context_acquisition.topic == "platform_setup")):
                     task_state.remediation_symptom = user_message
                     if not task_state.original_symptom or task_state.issue_target_version != target.target_version:

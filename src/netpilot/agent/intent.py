@@ -6,6 +6,7 @@ import re
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
+from netpilot.environment import has_environment_transition_signal, extract_environment_updates
 
 
 class TurnIntent(str, Enum):
@@ -227,6 +228,8 @@ def classify_turn_intent(
             TurnIntent.STATE_CHANGED, 0.96, tools=True, force_recheck=True,
             reason="explicit request to refresh observations",
         )
+    if has_environment_transition_signal(message) and extract_environment_updates(message).model_fields_set:
+        return _classification(TurnIntent.STATE_CHANGED, 0.98, tools=False, reason="explicit_environment_transition")
     meta_context = any(term in text for term in ("你刚才", "你之前", "上一轮"))
     meta_complaint = any(
         term in text

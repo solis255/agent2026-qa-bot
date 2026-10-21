@@ -65,7 +65,9 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
 
     record = export_safe(record)
     target = record.diagnostic_target
-    current_calls = [call for call in record.tool_calls if target.subject == "unknown" or matches_target(call, target)]
+    superseded_ids = {e.evidence_id for e in record.verification_evidence if e.superseded}
+    current_calls = [call for call in record.tool_calls if call.evidence_id not in superseded_ids
+                     and (target.subject == "unknown" or matches_target(call, target))]
     archived_calls = [call for call in record.tool_calls if call not in current_calls]
     conclusion = record.answer
     if record.conversation_turns and target.subject != "unknown":

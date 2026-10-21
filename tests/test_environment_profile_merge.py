@@ -31,7 +31,7 @@ def test_ep03_user_override_browser_and_no_heartbeat_change():
 ])
 def test_explicit_statement_only_updates_mentioned_fields(message):
     assert extract_environment_updates(message).model_dump(exclude_unset=True) == {
-        "os_family":"windows", "network_access":"campus_wifi", "vpn_enabled":False, "affected_scope":"web_only",
+        "os_family":"windows", "os_version":"11", "network_access":"campus_wifi", "vpn_enabled":False, "affected_scope":"web_only",
     }
 
 

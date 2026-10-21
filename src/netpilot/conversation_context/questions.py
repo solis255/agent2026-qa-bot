@@ -46,8 +46,8 @@ def free_text_answer(field, message):
         if text == re.sub(r"\s", "", label).casefold():
             return ContextAnswer(field=field, value=value)
     aliases = {
-        "os_family": {"win11":"windows", "win10":"windows", "windows11":"windows", "苹果电脑":"macos", "安卓":"android", "iphone":"ios"},
-        "network_access": {"校园无线":"campus_wifi", "校园网线":"campus_wired", "在校外":"off_campus"},
+        "os_family": {"mac":"macos", "mac系统":"macos", "win11":"windows", "win10":"windows", "windows11":"windows", "windows10":"windows", "苹果电脑":"macos", "安卓":"android", "iphone":"ios"},
+        "network_access": {"wifi":"campus_wifi", "wi-fi":"campus_wifi", "无线":"campus_wifi", "无线网":"campus_wifi", "校园无线":"campus_wifi", "有线":"campus_wired", "有线网":"campus_wired", "有线网络":"campus_wired", "网线":"campus_wired", "校园网线":"campus_wired", "校外":"off_campus", "在校外":"off_campus"},
         "affected_scope": {"能正常使用":"web_only", "微信能用":"web_only", "微信正常":"web_only", "也不能联网":"all_network", "都不能联网":"all_network", "只有部分网站":"single_service"},
         "vpn_enabled": {"开着":"true", "开了":"true", "没开":"false", "关了":"false"},
         "proxy_enabled": {"开着":"true", "开了":"true", "没开":"false", "关了":"false"},

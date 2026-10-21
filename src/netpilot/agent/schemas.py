@@ -77,6 +77,7 @@ class AgentResult(BaseModel):
     ui_action: ContextQuestion | None = None
     context_acquisition: ContextAcquisitionState | None = None
     context_answered: bool = False
+    environment_update_only: bool = False
     diagnostic_target: DiagnosticTarget | None = None
     status: AgentStatus
     tool_rounds: int = Field(ge=0)

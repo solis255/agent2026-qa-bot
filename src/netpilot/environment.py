@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import ipaddress
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -148,28 +149,111 @@ def merge_environment(profile: EnvironmentProfile, values: dict, *, source: Envi
     return EnvironmentProfile.model_validate(data)
 
 
+ENVIRONMENT_TRANSITION_WORDS = r"改用|改成|改为|换成|换到|切换到|切到|切换至|换为"
+_NON_FACT = re.compile(r"[?？吗\"“”‘’]|是否|是不是|怎么|如何|怎样|能否|会不会|什么|可能|好像|也许|不确定|不清楚|不知道|请|建议|应该|他说|同学|有人|打算|准备|计划|想|需要|不要")
+_NEGATED_USE = re.compile(r"(?:没(?:有)?|未|不|尚未)(?:连|接|插|用|使用|通过|在|换|改|切换)")
+
+
+def _current_statements(message: str) -> list[str]:
+    text = unicodedata.normalize("NFKC", message[:4000]).casefold()
+    # Keep the established fail-closed policy for quotations and other people.
+    if re.search(r'如果|假如|假设|比如|例如|他说|同学|有人|["“”‘’]', text):
+        return []
+    statements = []
+    for clause in re.split(r"[，,。；;\n]", text):
+        if not clause.strip() or _NON_FACT.search(clause):
+            continue
+        if re.search(r"之前|原来|原先|以前|曾经", clause) and not re.search(fr"{ENVIRONMENT_TRANSITION_WORDS}|现在|目前", clause):
+            continue
+        statements.append(clause)
+    return statements
+
+
+def _current_tail(text: str) -> str:
+    """A transition/current marker makes its right-hand destination authoritative."""
+    markers = list(re.finditer(fr"{ENVIRONMENT_TRANSITION_WORDS}|现在|目前", text))
+    return text[markers[-1].end():] if markers else text
+
+
+def _extract_os_family(text: str) -> dict:
+    tail = _current_tail(text)
+    if _NEGATED_USE.search(text) or re.search(r"mac\s*(?:地址|address)|网卡\s*mac", text):
+        return {}
+    if not re.search(fr"我(?:现在|目前|其实|实际)?(?:是|用|使用|在用|从|改|换)|我的|(?:设备|系统|电脑|手机)(?:是|为|用)|{ENVIRONMENT_TRANSITION_WORDS}|现在|目前", text):
+        return {}
+    patterns = [
+        (r"(?<![a-z0-9])(?:windows|win(?:10|11))(?![a-z])", "windows"),
+        (r"(?<![a-z0-9])mac(?:os|\s+os|book)?(?![a-z0-9])|苹果电脑", "macos"),
+        (r"(?<![a-z0-9])(?:linux|ubuntu|debian)(?![a-z0-9])", "linux"),
+        (r"(?<![a-z0-9])android(?![a-z0-9])|安卓", "android"),
+        (r"(?<![a-z0-9])(?:ios|iphone|ipad)(?![a-z0-9])|苹果手机", "ios"),
+    ]
+    candidates = [(match.start(), family) for pattern, family in patterns for match in re.finditer(pattern, tail)]
+    if not candidates or len({family for _, family in candidates}) != 1:
+        return {}  # A list of alternative systems is not a current-state claim.
+    position, family = max(candidates)
+    result = {"os_family": family}
+    version = re.match(r"(?:windows\s*|win)([0-9]+(?:\.[0-9]+)*)", tail[position:])
+    if family == "windows" and version and len(version.group(1)) <= 24:
+        result["os_version"] = version.group(1)
+    return result
+
+
+def _extract_network_access(text: str, *, off_campus: bool) -> str | None:
+    tail = _current_tail(text)
+    if _NEGATED_USE.search(text):
+        return None
+    if not re.search(fr"连|接入|使用|用|插|接|通过|在|{ENVIRONMENT_TRANSITION_WORDS}|现在|目前", text):
+        return None
+    if re.search(r"(?:手机|移动)热点", tail):
+        return "mobile_hotspot"
+    if off_campus:
+        return "off_campus"
+    candidates = [value for pattern, value in [
+        (r"(?<![a-z0-9])(?:wi-?fi|wlan)(?![a-z0-9])|无线(?:网)?", "campus_wifi"),
+        (r"有线(?:网(?:络)?)?|网线", "campus_wired"),
+    ] if re.search(pattern, tail)]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def has_environment_transition_signal(message: str) -> bool:
+    return any(re.search(ENVIRONMENT_TRANSITION_WORDS, text) and not _NEGATED_USE.search(text)
+               for text in _current_statements(message))
+
+
+def is_environment_update_only(message: str) -> bool:
+    statements = _current_statements(message)
+    # A real symptom, question, or request still needs its original response path.
+    if not statements or re.search(r"[?？吗]|怎么|如何|打不开|连不上|没网|不通|不行|问题|失败|故障|异常|正常|微信|qq|诊断|检查|分析|报告|报修|验证|恢复", message.casefold()):
+        return False
+    return any(re.search(ENVIRONMENT_TRANSITION_WORDS, text) or _extract_os_family(text)
+               or _extract_network_access(text, off_campus=False)
+               or re.search(r"我(?:现在|目前|实际)?(?:的|用|使用).{0,24}(?:系统|网络|接入方式|环境)", text)
+               or {"vpn_enabled", "proxy_enabled"}.intersection(extract_environment_updates(text).model_fields_set)
+               for text in statements)
+
+
 def extract_environment_updates(message: str) -> EnvironmentUpdate:
-    """Conservative explicit statements only; no independent LLM classification."""
+    """Normalize -> current clauses -> destinations -> conflict resolution -> schema."""
     values = {}
-    # Do not borrow the omitted subject from a quotation/third-party scenario.
-    if re.search(r'如果|假如|假设|比如|例如|他说|同学|有人|["“”‘’]', message):
-        return EnvironmentUpdate()
-    clauses = re.split(r"[，,。；;\n]", message[:4000].casefold())
-    statements = [text for text in clauses if not re.search(r"[?？吗\"“”‘’]|如果|假如|假设|比如|例如|是否|是不是|怎么|如何|怎样|能否|会不会|什么|可能|好像|也许|不确定|不清楚|不知道|请|建议|他说|同学|有人|打算|准备|计划|想|需要|不要", text)]
+    statements = _current_statements(message)
+    off_campus = False
     for text in statements:
-        negated_connection = bool(re.search(r"(?:没(?:有)?|未|不|尚未)(?:连|接|用|使用|通过|在)", text))
-        if not negated_connection and re.search(r"我(?:现在|目前|其实|实际)?(?:是|用|使用|在用)|我的|(?:设备|系统|电脑|手机)(?:是|为|用)", text):
-            for pattern, family in [(r"windows|win(?:10|11)\b", "windows"), (r"macos|mac os|macbook|苹果电脑", "macos"), (r"linux|ubuntu|debian", "linux"), (r"android|安卓", "android"), (r"ios|iphone|ipad|苹果手机", "ios")]:
-                if re.search(pattern, text):
-                    values["os_family"] = family
-        if not negated_connection and re.search(r"(?:连(?:接)?|接入|用|通过).{0,8}(?:校园|校内|天津大学|天大)\s*(?:wi-?fi|无线|wlan)", text):
-            values["network_access"] = "campus_wifi"
-        if not negated_connection and re.search(r"(?:连(?:接)?|接入|用|通过).{0,8}(?:校园|校内)\s*(?:有线|网线)", text):
-            values["network_access"] = "campus_wired"
-        if not negated_connection and re.search(r"我(?:现在|目前)?(?:在|用|连接).{0,5}(?:校外|家里|校外网络)", text):
-            values["network_access"] = "off_campus"
-        if not negated_connection and re.search(r"(?:连(?:接)?|使用|用的是|用着).{0,6}(?:手机|移动)热点", text):
-            values["network_access"] = "mobile_hotspot"
+        os_values = _extract_os_family(text)
+        if os_values:
+            # A later family in this message cannot inherit an earlier version.
+            if values.get("os_family") not in {None, os_values["os_family"]}:
+                values.pop("os_version", None)
+            values.update(os_values)
+        tail = _current_tail(text)
+        if not _NEGATED_USE.search(tail):
+            if re.search(r"(?:在|用|接|连).{0,8}(?:家里|校外)|家里(?:的)?网", tail):
+                off_campus = True
+            elif re.search(r"回到(?:学校|校园)|现在在校内", text):
+                off_campus = False
+        access = _extract_network_access(text, off_campus=off_campus)
+        if access:
+            values["network_access"] = access
         for word, field in [("vpn", "vpn_enabled"), ("proxy|代理|clash", "proxy_enabled")]:
             if re.search(rf"(?:没(?:有)?|未)(?:开(?:启)?|启用|打开|使用)\s*(?:{word})|(?:已关闭|关闭了|关了|停用了)\s*(?:{word})|(?:{word})\s*(?:未开启|没开|已关闭|关闭|未启用)", text):
                 values[field] = False

@@ -168,3 +168,125 @@ git diff --check
 | 11. 全量 pytest | 1129 passed，0 failed。 |
 | 12. 后续范围 | DiagnosticReadiness / Client Check / Collector / 向导 / 学生版整体布局明确保留 13B–13D。 |
 | 13. 人工步骤 | 上方 A–E 逐项操作与实际结果，浏览器全部通过；明确离线模型替身的验证边界。 |
+
+## Environment updates and state transitions
+
+本节记录 13A 后续修复，日期 2026-10-21。修复前新增真实会话回归，先取得 **3 failed**：Windows/WiFi 无法覆盖为 Mac/有线、`Mac系统` 无法覆盖浏览器 Windows、`我现在改用有线网了` 仍保持 WiFi。修改前完整基线为 **1129 passed in 343.83s**，没有先修改失败测试期望来掩盖问题。
+
+### 根因与修复范围
+
+1. 原 OS 词形没有独立 Mac/Mac系统；网络规则要求“校园/校内 + 有线”，也没有目的状态解析。
+2. 没有提取 Windows 11 的显式版本；同句出现历史值和新值时，原循环按固定正则顺序覆盖，不能可靠表达时间关系。
+3. `acquire_context` 只合并环境，没有返回真实前后差异，也未把已知关键值变化接到原 task version 失效路径。
+4. 纯环境陈述可能进入普通模型回答。模型可以声称“已更新”，而提取器实际上没产生任何变化。
+5. 历史合并偏向保留“最后有意义的诊断”，没有同时检查 task_version；纯环境更新后，旧主机诊断可能仍被保留为当前结论。报告也只按 target 归类工具调用，没有排除已被任务版本归档的 evidence ID。
+
+未调整 `PRECEDENCE`，未新增来源或环境模型。用户旧值 → 用户新值仍通过原 `merge_environment(source="user")`，用户确认后浏览器不能覆盖。
+
+修改文件：
+
+```text
+src/netpilot/environment.py
+src/netpilot/conversation_context/acquisition.py
+src/netpilot/conversation_context/questions.py
+src/netpilot/agent/intent.py
+src/netpilot/agent/orchestrator.py
+src/netpilot/agent/schemas.py
+src/netpilot/agent/session.py
+src/netpilot/history.py
+src/netpilot/reports.py
+tests/test_environment_transitions.py                 新增
+tests/test_environment_transition_extraction.py       新增
+tests/test_environment_profile_merge.py
+docs/MILESTONE13A_VALIDATION.md
+screenshots/milestone13a-environment-transition-fix.png 新增验收截图
+```
+
+### 提取与冲突规则
+
+`environment.py` 采用 normalize → current clauses → current/transition destination → per-field candidates → schema 的确定性流程。保留假设、第三方、引用、问题、计划、不确定和否定语句的保守过滤；历史分句不作当前事实。字段候选包含多个未区分的系统或接入方式时，不随机选值。
+
+- OS：支持 Windows / Windows 11 / Win11、Mac / Mac 系统 / Mac系统 / macOS / MacBook / 苹果电脑、Linux / Ubuntu 等明确的自身设备或当前状态表达。Windows 11 / Win11 同时写 `os_version="11"`；换到 Mac 清除旧 Windows 版本。
+- 接入：校园 WiFi、WiFi、无线、无线网，以及有线网、有线网络、插网线、用网线等当前接入表达，映射至原枚举。校园产品语境中，无校外冲突的普通有线/WiFi 规范化为 campus_wired/campus_wifi。
+- 地点：同段明确家里/校外时，普通有线/WiFi 优先为 off_campus；手机热点为 mobile_hotspot，不伪造物理链路观察。
+- 转移：改用、改成、改为、换成、换到、切换到、切到、现在/目前等限定其右侧当前值。`从 WiFi 换成有线` 取有线，反向取 WiFi；`原来 Windows，现在 Mac` 取 Mac。
+- MAC 安全：Mac 只有明确设备/当前状态上下文才可成为 OS；`MAC 地址`、`MAC address`、`网卡 MAC` 排除。单独提及 Mac 或 WiFi 不会自动形成事实，除非正在回答对应的 pending question。
+
+`free_text_answer` 的 allowlist 补齐 Mac、Mac系统、Windows 11、WiFi、无线、有线网、网线、校园网线、手机热点、校外等。pending OS 短答 Windows 11/Win11 也保存用户明确提供的版本；结构化 Chips 仍只接受原字段/值枚举。
+
+### 差异、分类、任务版本与证据
+
+`AcquiredContext.changed_fields` 从 **合并前的 Profile 与实际 post-merge Profile** 计算，不从原句猜测；包括 family 改变时被清除的 os_version。示例：
+
+```python
+{"network_access": ("campus_wifi", "campus_wired")}
+```
+
+`environment_transition` 只在 os_family、network_access、vpn_enabled、proxy_enabled 的已知值 A → 不同已知值 B 时成立。
+
+| 变化 | 语义 |
+| --- | --- |
+| unknown / None → known | enrichment；不因首次补充推进任务版本 |
+| 同值重述 / 仅来源变化 | 不制造环境转移，不重复推进版本 |
+| known A → known B（关键字段） | STATE_CHANGED；使用原任务版本机制，推进一次 |
+| affected_scope 或版本补充 | 记录真实 changed field；不单凭范围/版本补全制造关键环境转移 |
+
+Intent 层识别明确转移语言；acquisition 再比较真实前后值，防止“第一次说改用有线”被当作已发生的已知环境变化。显式重测保留 force_recheck；同时发生环境转移和重测也只推进一次。
+
+Orchestrator 在临时诊断视图中使用原 `advance_version()`，在 Session finish 中正式提交一次。旧 evidence / Snapshot / plan / verification 全部保留，旧网络证据标记 superseded，不再出现在 reusable evidence / 当前 coverage / 当前 hypotheses 中。旧快照的 applicable=false，活动验证和计划失效，不能用旧 WiFi 或 Windows 的快照解释新环境。对象本身未显式切换时沿用原 target_version，task_version 已足以隔离新环境；不伪造客户端直接检测能力。
+
+环境变化后的本轮不向模型注入旧的现场回答历史；新的 Context Builder 仍分离环境和证据。History 合并在 task_version 改变时采用当前诊断，不沿用旧主机故障结论；Report 按已 superseded 的 evidence ID 把旧工具调用移到 archived_tool_calls，保留全部记录且不列为当前检测。知识/报告/用户确认等原路径保留其职责；未修改 12A–12I 的正式数据来源和隐私策略。
+
+### 回答与真实状态一致
+
+纯环境更新走确定性确认，不调用 LLM、网络工具或可选 reasoning summary。确认由 `changed_fields` 和合并后的 Profile 生成，例如：
+
+```text
+已更新当前环境：接入方式已从“校园 WiFi”改为“校园有线”。环境信息不是网络检测证据。
+```
+
+同值重述或未识别的“神秘网络 / 银河系统”等表达，不产生“已更新 / 已记录 / 已切换”确认，保留原值并说明尚未确认变化。对抗测试预置一个试图返回虚假确认的模型，验证纯环境请求根本不会调用它。提到 VPN 的知识咨询不属于状态更新；只有实际开关陈述、设备/接入声明或转移描述才进入这个分支。
+
+同时包含故障现象的消息继续正式诊断，附带由真实变化生成的环境确认；旧证据在分析前已失效。纯环境更新不会把“改用有线网”覆盖到原始故障症状。普通 Chat 与 SSE 的确认、Session 环境、History 实际问答和 Report 均有一致性断言。
+
+### 自动验证与旧测试兼容
+
+新增两个独立测试文件，覆盖 Prompt 的 TC-FIX-01～23：两个真实会话、OS/网络别名、转移目标、版本清除、校外优先、防误识别、pending 短答、实际变化、来源优先级、无变化/未识别输入、快照与工具证据归档、计划/验证失效、SSE/History/Report 一致性、首次补充不推进版本及同时重测只推进一次。
+
+两条原 Windows 11 提取测试原先要求不包含 os_version，本次按明确新要求加强为同时断言 `os_version="11"`，其余字段和安全断言保留。知识检索与来源追踪测试原断言未修改；回归发现的误分流通过收紧生产分支修复。
+
+新增回归共 **102 项**。首轮定向 **121 passed**，证据与兼容路径修正后 **134 passed in 11.61s**；额外的 History/Report 残留先有失败测试，再修复，相关回归 **30 passed in 17.08s**。两个新增文件单独运行 **102 passed in 15.20s**，含版本长度/ASCII 边界和独立导入测试：异常版本不放宽正式 Schema，不导致提取器抛错；acquisition 可先于 agent 包独立导入，不依赖全量测试的导入顺序。知识整理原回归 **36 passed**。
+
+最终完整执行：**`1231 passed in 369.20s (0:06:09)`，exit 0**，相对 baseline 新增 102 项。实际命令为仓库 venv 下 `python -m pytest -q --basetemp=.cache/pytest-13a-fix-final3`。最终 `python scripts/run_demo_scenarios.py`：**6 PASS，exit 0**；`git diff --check`：通过。临时浏览器页与 localhost 验收服务已关闭；正式用户数据库和历史未删除。
+
+### 人工浏览器复验
+
+独立 localhost 实例、专用测试账号、独立 `.cache/13a-fix-browser.db`；环境识别、覆盖和确认走真实 Chat/SSE/Session，模型与网络 handler 使用离线替身。环境确认本身不调用替身模型。没有更改真实用户库。
+
+| Case | 操作 | 实际结果 |
+| --- | --- | --- |
+| A | 网络有问题 → 某个服务 → Windows 11 + 校园 WiFi → Mac + 有线网 | 浏览器通过：面板从 Windows/校园 WiFi 变为 macOS/校园有线，两个字段来源均为用户；回答同步确认这两项真实变化。 |
+| B | 校园 WiFi → “我现在改用有线网了” | 浏览器通过：变为校园有线，回答明确 WiFi → 有线；纯更新没有网络检测。 |
+| C | 新会话：“我用 Mac系统，连有线网，微信正常，但是网页打不开。” | 浏览器通过：macOS / 校园有线 / 仅网页，无重复追问。 |
+| D | “我的 MAC 地址是多少？” | 浏览器通过：Windows 与 browser provenance 保持不变，没有误记 macOS；此类知识答案质量不属于离线替身验收范围。 |
+
+本修复不引入 13B readiness、13C Client Check/Collector/向导、13D 页面重构，也不新增模型抽取、Tool、远程执行、MCP 或多 Agent。
+
+### 修复交付报告索引（14 项）
+
+| 项目 | 结果 |
+| --- | --- |
+| 1. 根因 | 别名/当前状态语法不足、无真实差异和任务转移、模型自由确认、历史结论跨任务残留。 |
+| 2. 修改文件 | 本节文件清单列出后端、两个新增测试文件、兼容期望和文档/截图。 |
+| 3. extractor | NFKC 归一、保守分句过滤、目的状态优先、候选冲突处理、严格原 Schema。 |
+| 4. OS 表达 | Windows/Win11、Mac/Mac系统/macOS/MacBook、Linux/Ubuntu 等自身当前状态。 |
+| 5. 接入表达 | WiFi/无线、有线网/插网线、热点、校外；显式家里/校外优先。 |
+| 6. 同句冲突 | 从 A 换到 B / 原来 A 现在 B 取 B；不能用固定正则顺序选值。 |
+| 7. MAC 防误判 | 硬件地址上下文排除、当前设备语境约束，独立自动测试和浏览器 Case D。 |
+| 8. user → user | 真实连续 Chat 会话覆盖旧用户值；user → browser 不回退的断言保留。 |
+| 9. changes / transition | 只比较 post-merge 真值；首次补全、同值重述、关键已知变化区分。 |
+| 10. Evidence | 正式 task version 归档；旧快照/工具/计划/验证失效；History 不删除、Report 归历史区。 |
+| 11. 回答一致 | 纯更新零 LLM；确认来自实际差异；未识别/无变化不虚假确认；Chat/SSE/History/Report 一致。 |
+| 12. 原人工会话回归 | 两个完整会话自动测试通过；浏览器 A–D 实际通过，见上表。 |
+| 13. 新增数量 | 102 项，两个新增文件单独运行全部通过。 |
+| 14. 最终全量 | 1231 passed，0 failed；新增 102 项，Runner 6 PASS，差异检查通过。 |
