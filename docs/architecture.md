@@ -312,6 +312,12 @@ Campus knowledge intent
 
 ## Session and Persistence
 
+13C 的 `client_snapshot/check_models.py` 定义 `ClientCheckAction`、阶段拒绝状态与一次性继续凭据；`check_flow.py` 消费 13B 决策和原 12E 等待状态，不新增采集必要性算法。`ChatUIAction` 为按 `type` 区分的 `ContextQuestion | ClientCheckAction`，后者绑定 session/task/target，完全由服务端生成。正式上传 API 保持不变：原解析/隐私/大小/去重/normalize 之后重算 13B readiness；只有当前可用的新结果才签发一次性 receipt。Chat/SSE 在 Session 锁内验证账号、会话、版本、当前 snapshot 与时效，完成后消费 receipt，重放或旧版本在设置 busy 前拒绝。
+
+前端 `client-check.js` 管理三步原生 Dialog、固定下载、主动拖放/选择上传、拒绝及动作退役；前端只展示服务端动作，不通过自然语言决定检查。上传成功后携带严格枚举 `continuation=client_evidence_uploaded` 走原 Chat/SSE，重新分析当前结果并同步环境、对象、计划、验证及处理状态。`PersistedConversationTurn.turn_origin=system_continuation` 区分系统自动继续；缺字段的旧会话默认 user，无需升级 v12 JSON 或 SQLite schema。向导步骤、文件对象、悬停和下载行为不持久化，receipt 和拒绝仅在当前 Session 内存中有界保存。
+
+重新检查来自原 12E `awaiting_after_evidence`，继续使用原比较器与 12F evaluator，13C 不写 Resolution。重复 Before 不会生成 After 或继续凭据；其他过早 After 保留原“生成时间不晚于基线”限制。固定资源路由提供原 ps1、只调用它的 cmd、确定性 ZIP 和 SHA-256 metadata；没有 EXE、提权、策略绕过或系统远程执行。详见 [13C 验收](MILESTONE13C_VALIDATION.md)。
+
 13A 在原 Orchestrator 入口复用 deterministic extractor 和 `merge_environment(source="user")`，通过独立 `conversation_context` 的 needs/questions/acquisition 规则评估最少上下文；缺信息时返回一个 `ContextQuestion`，不调用网络 Tool 或额外 LLM。Chips 作为严格 allowlisted `context_answer` 进入普通 Chat/SSE，在原 Session owner/busy 锁内检查待回答字段与版本；回答仍写真实聊天历史。只有既有 EnvironmentProfile 保存环境，轻量 acquisition state 只保存字段名、主题与阶段版本，旧数据缺字段默认空。后续明确请求沿用原 Tool/RAG/Target/Evidence 流程；服务主机结果不能充当客户端证据。
 
 `ChatResponse.ui_action` 当前为可选 `context_question`，SSE complete 携带同一响应合同；Web 使用安全文本 DOM 构造原生按钮，高级环境表单默认折叠并显示 provenance/置信度。History/JSON Report 保留轻量 acquisition 状态，不保存可点击 DOM，也不从历史答案反推已问字段。详见 [13A 验收](MILESTONE13A_VALIDATION.md)。

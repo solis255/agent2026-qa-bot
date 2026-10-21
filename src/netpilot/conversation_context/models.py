@@ -1,5 +1,6 @@
 """Bounded context contracts shared by the Agent and chat transport."""
-from typing import Literal
+from typing import Literal, Annotated
+from netpilot.client_snapshot.check_models import ClientCheckAction
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from netpilot.diagnostic_target import TargetSubject
@@ -37,6 +38,9 @@ class ContextQuestion(ContextModel):
     question: str = Field(max_length=200)
     choices: list[ContextChoice] = Field(default_factory=list, max_length=7)
     allow_free_text: bool = True
+
+
+ChatUIAction = Annotated[ContextQuestion | ClientCheckAction, Field(discriminator="type")]
 
 
 class ContextAnswer(ContextModel):

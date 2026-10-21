@@ -10,6 +10,8 @@
 
 ## 运行方式
 
+Milestone 13C 新增 `test_client_check_flow.py`、`test_client_check_collector.py` 和 `test_client_check_ui.py`：覆盖结构化动作、拒绝与重新开启、正式上传链、一次性继续、task/target/owner 隔离、过期/偏差/重复、原 12E 对比、只读工具包、三步向导、拖放、键盘、异步退役和 Chat/SSE。结果与人工验收范围见 [MILESTONE13C_VALIDATION.md](MILESTONE13C_VALIDATION.md)。
+
 在已激活的项目虚拟环境中：
 
 ```bash

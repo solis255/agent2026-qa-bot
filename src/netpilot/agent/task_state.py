@@ -12,6 +12,7 @@ from netpilot.environment import EnvironmentProfile
 from netpilot.conversation_context.models import ContextAcquisitionState, DiagnosticReadiness
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
+from netpilot.client_snapshot.check_models import ClientCheckState
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
 from netpilot.verification.models import VerificationCycle
 from netpilot.resolution.models import ResolutionRecord, ResolutionTransition
@@ -84,6 +85,7 @@ class SessionTaskState(BaseModel):
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     context_acquisition: ContextAcquisitionState = Field(default_factory=ContextAcquisitionState)
     last_diagnostic_readiness: DiagnosticReadiness | None = None
+    client_check: ClientCheckState = Field(default_factory=ClientCheckState)
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
     last_target_trace_version: int = 0
     last_target_limit_version: int = 0
@@ -140,6 +142,7 @@ class SessionTaskState(BaseModel):
                 record.superseded = True
         self.task_version += 1
         self.last_diagnostic_readiness = None
+        self.client_check = ClientCheckState()
         from netpilot.remediation.service import supersede
         supersede(self.remediation_plan)
         if self.client_snapshot_summary:
@@ -159,6 +162,7 @@ class SessionTaskState(BaseModel):
     def set_target(self, target: DiagnosticTarget) -> None:
         if (self.diagnostic_target.subject, self.diagnostic_target.target_version) != (target.subject, target.target_version):
             self.last_diagnostic_readiness = None
+            self.client_check = ClientCheckState()
         self.diagnostic_target = target.model_copy(deep=True)
         active = self.reusable_evidence()
         from netpilot.client_snapshot.service import refresh_snapshot_availability

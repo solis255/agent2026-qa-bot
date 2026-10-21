@@ -137,6 +137,7 @@ class SQLiteDiagnosisRepository:
             tool_calls=response.tool_calls,
             sources=response.sources,
             conversation_turns=[PersistedConversationTurn(
+                turn_origin=response.turn_origin,
                 turn_index=1, user_message=user_message,
                 target_subject=response.diagnostic_target.subject, target_version=response.diagnostic_target.target_version,
                 assistant_answer=response.answer, created_at=now,

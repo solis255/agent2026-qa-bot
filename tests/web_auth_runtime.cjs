@@ -131,6 +131,7 @@ const context = vm.createContext({
   console,
 });
 const source = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
+vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","client-check.js"),"utf8"),context,{filename:"web/client-check.js"});
 vm.runInContext(source, context, { filename: "web/app.js" });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const submit = (id) => get(id).handlers.submit({ preventDefault() {} });

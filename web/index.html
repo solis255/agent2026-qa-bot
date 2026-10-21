@@ -180,13 +180,15 @@
         </section>
 
         <section class="status-card snapshot-card" id="snapshot-card">
-          <h2>客户端诊断快照</h2>
+          <h2>网络检查</h2>
+          <p id="collector-support-note" class="environment-note"></p>
+          <button id="client-check-launch" type="button" hidden>开始网络检查</button>
+          <details id="advanced-client-check"><summary>高级详情 / 手动上传</summary>
           <div id="windows-snapshot-guide" hidden>
           <p class="environment-note">Windows 10/11：下载并检查脚本，在本机 Windows PowerShell 以普通用户手动运行，生成 netpilot-client-diagnostic.json，再主动上传。无需管理员权限；不修改网络，不自动执行或上传。</p>
           <a href="/static/scripts/client_diagnostic_windows.ps1" download="client_diagnostic_windows.ps1">下载只读 Windows 脚本</a>
           <p class="environment-note">运行：<code>.\client_diagnostic_windows.ps1</code>。如本机策略不允许运行，请按本单位规定处理；不要为演示降低执行策略。</p>
           </div>
-          <p id="collector-support-note" class="environment-note"></p>
           <form id="snapshot-form">
             <label for="snapshot-file">选择 JSON（默认上限 256 KiB）</label>
             <input id="snapshot-file" name="file" type="file" accept=".json,application/json" disabled>
@@ -196,6 +198,7 @@
           <p class="privacy-notice">NetPilot 会对密码、Token、Cookie、MAC、SSID 等敏感信息进行拦截或脱敏。</p>
           <p id="snapshot-status" class="environment-note" role="status"></p>
           <ul id="snapshot-evidence" class="environment-note"></ul>
+          </details>
         </section>
 
         <section class="status-card diagnosis-card" id="diagnosis-card">
@@ -379,6 +382,41 @@
     <script src="/vendor/marked.umd.js" defer></script>
     <script src="/vendor/purify.min.js" defer></script>
     <script src="/markdown.js?v=inline-citations" defer></script>
-    <script src="/app.js?v=diagnostic-readiness-13b" defer></script>
+    <dialog id="client-check-dialog" aria-labelledby="client-check-title" class="client-check-dialog">
+      <div class="section-heading"><h2 id="client-check-title">网络检查</h2><button id="client-check-close" type="button" aria-label="关闭网络检查向导">关闭</button></div>
+      <p id="client-check-progress" aria-live="polite">第 1 步，共 3 步</p>
+      <section data-client-check-step="1">
+        <h3>1. 下载诊断工具</h3>
+        <p>这个工具只读取与你当前网络故障有关的基础网络状态，不修改设置，也不会自动上传。</p>
+        <p>会检查活动网络接口基本状态、默认网关、DNS 配置和少量固定 DNS/TCP 测试。不采集 Wi-Fi 密码、浏览历史、Cookie/Token、MAC 地址、SSID 或设备序列号。</p>
+        <a class="client-check-download" href="/static/client-tools/netpilot-windows-check.zip" download="netpilot-windows-check.zip">下载 Windows 网络检查工具</a>
+        <details><summary>查看脚本源码与版本</summary>
+          <a href="/api/client-tools/windows/source" target="_blank" rel="noopener noreferrer">查看脚本源码</a>
+          <pre id="client-check-metadata"></pre>
+        </details>
+        <button type="button" data-client-check-next="2">已下载，下一步</button>
+      </section>
+      <section data-client-check-step="2" hidden>
+        <h3>2. 在 Windows 本机运行</h3>
+        <p>先解压下载的文件包，将里面两个文件放在同一文件夹，查看脚本后双击 run_client_diagnostic_windows.cmd。请使用发生问题的这台 Windows 电脑，普通用户运行即可。</p>
+        <p>完成后，同一文件夹会生成 netpilot-client-diagnostic.json。工具只生成本地文件，由你决定是否提交。</p>
+        <p>如果组织策略阻止脚本运行，可以跳过检查并继续受限排查。请勿关闭或降低安全策略。</p>
+        <button type="button" data-client-check-next="1">上一步</button><button type="button" data-client-check-next="3">已运行，上传结果</button>
+      </section>
+      <section data-client-check-step="3" hidden>
+        <h3>3. 将结果拖回页面</h3>
+        <p>运行完成后会生成 netpilot-client-diagnostic.json。</p>
+        <div id="client-check-drop" class="client-check-drop" tabindex="0" role="button" aria-label="拖放网络检查结果，或按回车选择文件">把结果文件拖到这里，将上传并继续分析；也可以选择文件后点击上传。</div>
+        <label for="client-check-file">选择网络检查结果文件</label><input id="client-check-file" type="file" accept=".json,application/json">
+        <p id="client-check-file-label">尚未选择文件</p>
+        <button id="client-check-upload" type="button">上传并继续分析</button>
+        <button type="button" data-client-check-next="2">上一步</button>
+      </section>
+      <p id="client-check-status" role="status" aria-live="polite">等待上传</p>
+      <div id="client-check-historical" hidden><button id="client-check-rerun" type="button">重新运行网络检查</button><button id="client-check-use-old" type="button">仍然使用这份结果</button></div>
+      <button id="client-check-skip" type="button">暂时不用</button>
+    </dialog>
+    <script src="/client-check.js?v=13c" defer></script>
+    <script src="/app.js?v=client-check-13c" defer></script>
   </body>
 </html>

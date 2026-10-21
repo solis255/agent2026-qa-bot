@@ -61,7 +61,7 @@ def test_tc07_chip_merge_normal_transcript_and_persistence(context_app):
     result = send(client, sid, "ignored untrusted text", context_answer={"field":"network_access","value":"campus_wifi"})
     assert result["environment_profile"]["network_access"] == "campus_wifi"
     assert result["environment_profile"]["field_sources"]["network_access"] == {"source":"user","confidence":"high"}
-    assert result["redacted_user_message"] == "校园 WiFi" and result["ui_action"] is None
+    assert result["redacted_user_message"] == "校园 WiFi" and result["ui_action"]["type"] == "client_check"
     task = app.state.sessions.task_state(UUID(sid), owner)
     assert task.turn_index == 3 and not task.evidence and tools.handler_calls == 0
     assert task.original_symptom == task.remediation_symptom == "校园网连不上"
@@ -99,7 +99,7 @@ def test_tc03_full_user_facts_and_tc13_advanced_form(context_app):
     result = send(client, sid, "我用 Win11，连接校园 WiFi，微信能用，但是所有网页打不开。")
     env = result["environment_profile"]
     assert (env["os_family"],env["network_access"],env["affected_scope"]) == ("windows","campus_wifi","web_only")
-    assert result["ui_action"] is None
+    assert result["ui_action"]["type"] == "client_check"
     changed = client.patch("/api/session/environment/user", json={"session_id":sid,"network_access":"campus_wired"})
     assert changed.status_code == 200 and changed.json()["field_sources"]["network_access"]["source"] == "user"
     assert client.get(f"/api/session/{sid}").json()["environment_profile"]["network_access"] == "campus_wired"

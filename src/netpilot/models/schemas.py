@@ -18,7 +18,8 @@ from netpilot.escalation.models import EscalationPackage
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
-from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer, ContextQuestion, DiagnosticReadiness
+from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer, ChatUIAction, DiagnosticReadiness
+from netpilot.client_snapshot.check_models import CONTINUATION_MESSAGE, ClientCheckReceipt
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, TargetSubject, legacy_target
 from netpilot.rag import SourceType
 from netpilot.rag.schemas import StableSourceRef
@@ -60,6 +61,10 @@ class RemediationStateView(BaseModel):
 
 
 class SessionResponse(RemediationStateView):
+    ui_action: ChatUIAction | None = None
+    task_version: int = Field(default=1, ge=1)
+    client_check_continuation: ClientCheckReceipt | None = None
+    client_check_declined: bool = False
     session_id: UUID
     created_at: datetime
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
@@ -88,9 +93,20 @@ class ChatRequest(BaseModel):
     session_id: UUID
     message: str = Field(min_length=1, max_length=4000)
     context_answer: ContextAnswer | None = None
+    continuation: Literal["client_evidence_uploaded"] | None = None
+    continuation_id: UUID | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonical_continuation(cls, value):
+        if isinstance(value, dict) and value.get("continuation") == "client_evidence_uploaded":
+            value = {**value, "message":CONTINUATION_MESSAGE}
+        return value
 
     @model_validator(mode="after")
     def canonical_context_message(self):
+        if bool(self.continuation) != bool(self.continuation_id) or (self.continuation and self.context_answer):
+            raise ValueError("invalid continuation fields")
         if self.context_answer is not None:
             from netpilot.conversation_context.questions import LABELS
             self.message = LABELS[self.context_answer.field][self.context_answer.value]
@@ -185,7 +201,9 @@ class ExecutionMetricsView(BaseModel):
 
 
 class ChatResponse(RemediationStateView):
-    ui_action: ContextQuestion | None = None
+    task_version: int = Field(default=1, ge=1)
+    ui_action: ChatUIAction | None = None
+    turn_origin: Literal["user", "system_continuation"] = "user"
     redacted_user_message: str | None = None
     session_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
@@ -205,6 +223,7 @@ class PersistedConversationTurn(BaseModel):
     """One actual completed user/assistant pair in a persisted Session."""
 
     turn_index: int = Field(ge=1)
+    turn_origin: Literal["user", "system_continuation"] = "user"
     target_subject: TargetSubject = "unknown"
     target_version: int = Field(default=1, ge=1)
     user_message: str = Field(min_length=1, max_length=4000)

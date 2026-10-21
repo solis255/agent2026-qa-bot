@@ -15,7 +15,7 @@ from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.llm import TokenUsage
 from netpilot.environment import EnvironmentProfile
-from netpilot.conversation_context.models import ContextAcquisitionState, ContextQuestion, DiagnosticReadiness
+from netpilot.conversation_context.models import ContextAcquisitionState, ChatUIAction, DiagnosticReadiness
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding
 from netpilot.rag import KnowledgeSource
 from netpilot.tools.schemas import ToolResult
@@ -74,7 +74,9 @@ class AgentResult(BaseModel):
     escalation_requested: bool = False
     verification_cycles: list[VerificationCycle] = Field(default_factory=list)
     environment_profile: EnvironmentProfile | None = None
-    ui_action: ContextQuestion | None = None
+    ui_action: ChatUIAction | None = None
+    turn_origin: Literal["user", "system_continuation"] = "user"
+    client_check_reopened: bool = False
     context_acquisition: ContextAcquisitionState | None = None
     context_answered: bool = False
     environment_update_only: bool = False

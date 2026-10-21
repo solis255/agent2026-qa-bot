@@ -20,7 +20,9 @@ def operate(request,user,sid,**kwargs):
         with request.app.state.runtime_lock:
             task,events = store_for(request, sid).verification(sid,user.id,registry=(runtime_for(request, sid).registry if runtime_for(request, sid) else request.app.state.tool_registry),persist=persist,**kwargs)
         from netpilot.api.presenters import _present_tool_call
-        return {"session_id":str(sid),"verification_cycles":[c.model_dump(mode="json") for c in task.verification_cycles],
+        from netpilot.api.presenters import present_session
+        body = present_session(task, store_for(request, sid).get(sid,user.id).created_at).model_dump(mode="json")
+        return {**body, "session_id":str(sid),"verification_cycles":[c.model_dump(mode="json") for c in task.verification_cycles],
                 "resolution":task.resolution.model_dump(mode="json"),"resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],
                 "verification_tool_calls":[_present_tool_call(s).model_dump(mode="json") for s in task.verification_tool_steps],
                 "reasoning_trace":[e.model_dump(mode="json") for e in events],"task_version":task.task_version}

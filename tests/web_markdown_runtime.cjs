@@ -19,7 +19,7 @@ async function setup() {
   const w = dom.window;
   w.TextDecoder = TextDecoder;
   w.fetch = async () => ({ ok: false, status: 401, json: async () => ({ detail: "请登录" }) });
-  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "app.js"]) {
+  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "client-check.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(web, file), "utf8"), dom.getInternalVMContext(), { filename: file });
   }
   await tick();

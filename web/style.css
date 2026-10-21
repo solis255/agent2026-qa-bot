@@ -384,3 +384,13 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .context-choice:hover:not(:disabled), .context-choice[aria-pressed="true"] { background: #dcecff; border-color: #2372bd; }
 .context-choice:focus-visible { outline: 3px solid #2372bd; outline-offset: 3px; }
 .context-choice:disabled { opacity: .6; cursor: default; }
+.client-check-actions { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.client-check-button, #client-check-launch { border:1px solid #2372bd; border-radius:16px; padding:10px 16px; background:#eef6ff; color:#174f94; cursor:pointer; }
+.client-check-button:disabled { opacity:.55; cursor:default; }
+.client-check-dialog { width:min(640px,94vw); max-height:90vh; overflow:auto; border:0; border-radius:20px; padding:24px; color:#18354e; }
+.client-check-dialog::backdrop { background:rgba(12,30,54,.45); }
+.client-check-dialog button, .client-check-download { display:inline-block; margin:8px 8px 8px 0; padding:10px 14px; border:1px solid #b6cce4; border-radius:12px; background:#edf5ff; color:#174f94; cursor:pointer; }
+.client-check-drop { padding:24px; border:2px dashed #759bc5; border-radius:14px; margin:16px 0; background:#f4f8fd; }
+.client-check-drop.drag-hover { background:#dcecff; border-color:#2372bd; }
+.client-check-dialog :focus-visible { outline:3px solid #2372bd; outline-offset:3px; }
+.client-check-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:.8rem; }

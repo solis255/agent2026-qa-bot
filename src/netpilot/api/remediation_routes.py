@@ -23,7 +23,9 @@ def operate(request,user,session_id,**kwargs):
     try:
         task,events=store_for(request, session_id).remediation(session_id,user.id,
             max_steps=request.app.state.settings.remediation_max_steps,persist=persist,**kwargs)
-        return {"session_id":str(session_id),"remediation_plan":task.remediation_plan.model_dump(mode="json") if task.remediation_plan else None,
+        from netpilot.api.presenters import present_session
+        body = present_session(task, store_for(request, session_id).get(session_id,user.id).created_at).model_dump(mode="json")
+        return {**body, "session_id":str(session_id),"remediation_plan":task.remediation_plan.model_dump(mode="json") if task.remediation_plan else None,
                 "resolution":task.resolution.model_dump(mode="json"),"resolution_transitions":[t.model_dump(mode="json") for t in task.resolution_transitions],
                 "verification_cycles":[c.model_dump(mode="json") for c in task.verification_cycles],
                 "remediation_plan_history":[item.model_dump(mode="json") for item in task.remediation_plan_history],

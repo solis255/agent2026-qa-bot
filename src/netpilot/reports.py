@@ -370,7 +370,7 @@ def render_report_markdown(report: DiagnosisReportView) -> str:
         lines.extend([
             f"### Turn {turn.turn_index}", "",
             f"诊断对象：{SUBJECT_LABELS[turn.target_subject]} v{turn.target_version}", "",
-            "用户：", "", *_blockquote(turn.user_message), "",
+            "系统自动继续：" if turn.turn_origin == "system_continuation" else "用户：", "", *_blockquote(turn.user_message), "",
             "诊断助手：", "", _markdown_text(turn.assistant_answer), "",
         ])
 

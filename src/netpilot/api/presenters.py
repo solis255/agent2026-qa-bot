@@ -21,6 +21,18 @@ from netpilot.models import (
 )
 
 
+def present_session(task, created_at, *, include_continuation=False):
+    from netpilot.models.schemas import SessionResponse
+    from netpilot.client_snapshot.check_flow import client_check_action, declined
+    values = {name:getattr(task, name) for name in SessionResponse.model_fields if hasattr(task, name)}
+    values.update(created_at=created_at, diagnostic_readiness=task.last_diagnostic_readiness,
+        ui_action=client_check_action(task), client_check_declined=declined(task),
+        client_check_continuation=task.client_check.pending_continuation if include_continuation else None,
+        client_evidence=[r for r in task.evidence if r.evidence_origin == "client_snapshot"],
+        verification_evidence=[r for r in task.evidence if r.evidence_origin == "tool"])
+    return safe_value(SessionResponse(**values))
+
+
 def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
     tool_calls = [_present_tool_call(step, result.diagnostic_target) for step in result.steps]
     current_steps = [_scope_step(step, result.diagnostic_target) for step in result.steps]
@@ -37,6 +49,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
         and (result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(tool_call, result.diagnostic_target))
     ]
     return safe_value(ChatResponse(
+        turn_origin=result.turn_origin,
         diagnostic_readiness=result.diagnostic_readiness,
         ui_action=result.ui_action,
         context_acquisition=result.context_acquisition or {},

@@ -8,6 +8,8 @@ const state = {
   sessionId: null,
   environmentProfile: null,
   activeContextGroup: null,
+  taskVersion: null,
+  clientCheck: {action:null, open:false, mode:null, step:1, file:null, uploading:false, declined:false, generation:0, continuation:null},
   diagnosticTarget: null,
   clientSnapshotSummary: null,
   clientEvidence: [],
@@ -193,6 +195,10 @@ const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
 
 function setBusy(busy, message = "") {
   state.busy = busy;
+  for (const button of document.querySelectorAll(".client-check-button")) button.disabled = busy || !clientCheckActionCurrent(state.clientCheck.action) || button.closest(".client-check-actions") !== state.clientCheck.group;
+  document.querySelector("#client-check-upload").disabled = busy;
+  document.querySelector("#client-check-skip").disabled = busy;
+  document.querySelector("#client-check-launch").disabled = busy;
   for (const button of document.querySelectorAll(".context-choice")) {
     button.disabled = busy || !state.user || state.viewingHistory || button.closest(".context-choices") !== state.activeContextGroup;
   }
@@ -697,8 +703,7 @@ function renderEnvironmentProfile(profile, { historical = false } = {}) {
 }
 
 function retireContextQuestions() {
-  for (const button of elements.conversation.querySelectorAll(".context-choice")) button.disabled = true;
-  state.activeContextGroup = null;
+  retireUIActions();
 }
 
 function renderContextQuestion(body, action) {
@@ -1038,10 +1043,11 @@ function renderVerification(cycles = [], {historical = false} = {}) {
     const current = cycle === latest && !historical && !state.viewingHistory && inScope && cycle.status !== "superseded";
     if(current && ["baseline_ready","awaiting_after_evidence"].includes(cycle.status)){
       if(cycle.target_subject === "user_client"){
-        const prompt=document.createElement("p");prompt.textContent="需要修复后验证：完成手动步骤后，请重新运行 Windows 客户端诊断脚本，并上传新的诊断快照。";
-        const download=document.createElement("a");download.href="/static/scripts/client_diagnostic_windows.ps1";download.textContent="下载诊断脚本";download.setAttribute("download","client_diagnostic_windows.ps1");
-        const upload=document.createElement("button");upload.type="button";upload.textContent="上传新的诊断快照";upload.addEventListener("click",()=>{const details=elements.snapshotForm.closest("details");if(details)details.open=true;elements.snapshotFile.focus();elements.snapshotFile.click();});
-        card.append(prompt,download,upload);
+        const prompt=document.createElement("p");prompt.textContent=state.isDemo ? "演示模式：使用场景提供的 After 数据继续验证。" : "需要修复后验证：完成手动步骤后，用发生问题的这台设备重新检查网络。";
+        card.append(prompt);
+        if (clientCheckActionCurrent(state.clientCheck.action) && state.clientCheck.action.mode === "recheck") {
+          const check=document.createElement("button");check.type="button";check.textContent="重新检查";check.addEventListener("click",openClientCheck);card.append(check);
+        }
         if(cycle.status === "baseline_ready" && state.remediationPlan?.steps?.some(s=>s.status === "completed")){
           const begin=document.createElement("button");begin.type="button";begin.textContent="开始等待新快照";
           begin.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(begin);
@@ -1072,6 +1078,8 @@ async function verificationRequest(suffix, body) {
   try{
     const result=await requestJSON(`/api/session/verification${suffix}`,{method:"POST",body:JSON.stringify(body)});
     if(epoch !== state.authEpoch || sid !== state.sessionId)return;
+    applyClientCheckPayload(result);
+    if ("ui_action" in result) renderUIAction(null, result.ui_action);
     state.verificationCycles=result.verification_cycles || [];renderVerification(state.verificationCycles);appendTurnReasoningTrace(result.reasoning_trace || []);
     applyResolution(result);
     if(result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
@@ -1086,6 +1094,8 @@ async function remediationRequest(url, options) {
   try {
     const result=await requestJSON(url, options);
     if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
+    applyClientCheckPayload(result);
+    if ("ui_action" in result) renderUIAction(null, result.ui_action);
     state.remediationPlan=result.remediation_plan || null;
     applyResolution(result);
     state.verificationCycles=result.verification_cycles || [];
@@ -1118,10 +1128,13 @@ async function uploadClientSnapshot(event) {
   const form = new FormData();
   form.append("session_id", sessionId);
   form.append("file", file);
+  let receipt = null;
   setBusy(true);
   try {
     const result = await requestJSON("/api/session/client-snapshot", {method:"POST", body:form});
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
+    applyClientCheckPayload(result);
+    receipt = result.client_check_continuation;
     state.clientSnapshotSummary = result.client_snapshot_summary;
     state.clientEvidence = result.client_evidence || [];
     state.remediationPlan = result.remediation_plan || null;
@@ -1142,8 +1155,9 @@ async function uploadClientSnapshot(event) {
   } catch (error) {
     if (state.authEpoch === epoch && state.sessionId === sessionId) elements.snapshotStatus.textContent = error.message;
   } finally {
-    if (state.authEpoch === epoch) setBusy(false);
+    if (state.authEpoch === epoch && state.sessionId === sessionId) setBusy(false);
   }
+  if (receipt && state.authEpoch === epoch && state.sessionId === sessionId && !state.viewingHistory) await continueClientCheck(receipt);
 }
 
 async function saveDiagnosticTarget(event) {
@@ -1156,6 +1170,7 @@ async function saveDiagnosticTarget(event) {
     const target = await requestJSON("/api/session/diagnostic-target", {method:"PATCH",body:JSON.stringify({session_id:sessionId,subject:elements.targetSubject.value})});
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
     const changed = state.diagnosticTarget?.target_version !== target.target_version;
+    if (changed) retireUIActions();
     state.diagnosticTarget = target;
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
@@ -1190,6 +1205,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     if (!session) session = await requestJSON("/api/session", { method: "POST" });
     if (state.authEpoch !== authEpoch) return;
     state.sessionId = session.session_id;
+    state.taskVersion = session.task_version ?? 1;
     state.isDemo = Boolean(session.is_demo);
     state.demoScenarioId = session.demo_scenario_id || null;
     state.environmentProfile = session.environment_profile || null;
@@ -1205,6 +1221,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
+    if ("ui_action" in session) renderUIAction(null, session.ui_action);
     if (!state.isDemo) await uploadBrowserEnvironment(authEpoch, session.session_id);
     if (state.isDemo) await refreshDemoStatus();
     else clearDemoSessionUI();
@@ -1492,7 +1509,7 @@ async function loadDiagnosisRecord(recordId) {
     elements.snapshotFile.value = "";
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
-      appendMessage("user", turn.user_message);
+      appendMessage(turn.turn_origin === "system_continuation" ? "assistant" : "user", turn.turn_origin === "system_continuation" ? "系统：网络检查完成，自动继续分析。" : turn.user_message);
       appendMessage("assistant", turn.assistant_answer, record.sources);
     }
     renderDiagnosis(record.diagnosis);
@@ -1517,10 +1534,12 @@ async function submitChat(event, options = {}) {
   event.preventDefault();
   const message = (options.message ?? elements.messageInput.value).trim();
   if (!message || !state.user || !state.sessionId || state.busy) return;
+  if (options.continuation && state.viewingHistory) return;
   const authEpoch = state.authEpoch;
+  const chatSessionId = state.sessionId;
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
-  const userMessage = appendMessage("user", "消息已发送，正在进行隐私处理…");
+  const userMessage = appendMessage(options.continuation ? "assistant" : "user", options.continuation ? "系统：网络检查完成，自动继续分析。" : "消息已发送，正在进行隐私处理…");
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
   renderRemediationPlan(state.remediationPlan);
@@ -1534,10 +1553,11 @@ async function submitChat(event, options = {}) {
       "/api/chat/stream",
       {
         method: "POST",
-        body: JSON.stringify({ session_id: state.sessionId, message, ...(options.contextAnswer ? {context_answer:options.contextAnswer} : {}) }),
+        body: JSON.stringify({ session_id: chatSessionId, message, ...(options.contextAnswer ? {context_answer:options.contextAnswer} : {}),
+          ...(options.continuation ? {continuation:"client_evidence_uploaded", continuation_id:options.continuation.receipt_id} : {}) }),
       },
       async (eventName, data) => {
-        if (state.authEpoch !== authEpoch) return;
+        if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
         if (eventName === "start") {
           elements.interactionNote.textContent = "流式连接已建立，正在执行诊断。";
         } else if (eventName === "delta") {
@@ -1548,9 +1568,10 @@ async function submitChat(event, options = {}) {
         }
       },
     );
-    if (state.authEpoch !== authEpoch) return;
+    if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
-    userMessage.textContent = response.redacted_user_message || "消息已处理（原文不在此展示）";
+    userMessage.textContent = response.turn_origin === "system_continuation" ? "系统：网络检查完成，自动继续分析。" : response.redacted_user_message || "消息已处理（原文不在此展示）";
+    if (response.task_version != null) state.taskVersion = response.task_version;
     if (response.environment_profile) state.environmentProfile = response.environment_profile;
     renderDiagnosticReadiness(response.diagnostic_readiness);
     if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
@@ -1566,7 +1587,7 @@ async function submitChat(event, options = {}) {
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
-    renderContextQuestion(streamedAnswer, response.ui_action);
+    renderUIAction(streamedAnswer, response.ui_action);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     if (state.isDemo) await refreshDemoStatus();
@@ -1577,13 +1598,13 @@ async function submitChat(event, options = {}) {
     if (state.authEpoch !== authEpoch) return;
     elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
   } catch (error) {
-    if (state.authEpoch !== authEpoch) return;
+    if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
     if (!streamedAnswer.textContent) streamedAnswer.textContent = "本次回答未能完成。";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;
     if (error.message.includes("会话不存在")) state.sessionId = null;
   } finally {
-    if (state.authEpoch === authEpoch) {
+    if (state.authEpoch === authEpoch && state.sessionId === chatSessionId) {
       setBusy(false);
       elements.messageInput.focus();
     }
@@ -1656,7 +1677,7 @@ function formatReportPreview(report) {
     lines.push("该记录创建于完整会话持久化功能启用之前，仅保留部分对话内容。");
   }
   for (const turn of report.conversation_turns || []) {
-    lines.push("", `Turn ${turn.turn_index}`, "用户：", turn.user_message,
+    lines.push("", `Turn ${turn.turn_index}`, turn.turn_origin === "system_continuation" ? "系统自动继续：" : "用户：", turn.user_message,
       "诊断助手：", turn.assistant_answer);
   }
   return lines.join("\n");
@@ -2026,6 +2047,7 @@ async function loadDemoScenarios() {
 
 function applyDemoSession(session,{reset=false}={}) {
   state.sessionId=session.session_id;state.isDemo=Boolean(session.is_demo);state.demoScenarioId=session.demo_scenario_id;
+  state.taskVersion=session.task_version ?? 1;
   state.environmentProfile=session.environment_profile;state.diagnosticTarget=session.diagnostic_target;
   renderDiagnosticReadiness(session.diagnostic_readiness);
   state.clientSnapshotSummary=session.client_snapshot_summary || null;state.clientEvidence=session.client_evidence || [];
@@ -2082,6 +2104,7 @@ document.querySelector("#demo-fill-prompt")?.addEventListener("click",()=>{
   if(scenario){elements.messageInput.value=scenario.recommended_input;elements.messageInput.focus();}
 });
 
+initClientCheck();
 initialize();
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) {

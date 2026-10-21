@@ -18,6 +18,9 @@ from netpilot.agent.session import SessionBusyError, SessionCapacityError, Sessi
 from netpilot.client_snapshot.validation import parse_snapshot, SnapshotValidationError
 from netpilot.history import DiagnosisStorageError
 from netpilot.models.schemas import SessionResponse
+from netpilot.api.presenters import present_session
+from netpilot.client_snapshot.check_models import ClientCheckDecline
+from pydantic import ValidationError
 
 router = APIRouter()
 CurrentUser = Annotated[UserRecord, Depends(require_current_user)]
@@ -70,6 +73,13 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
             raise HTTPException(422, "session_id 格式不正确。") from exc
         sessions = store_for(request, sid)
         session = sessions.get(sid, user.id)
+        check_headers = [request.headers.get(name) for name in ("x-netpilot-check-id", "x-netpilot-task-version", "x-netpilot-target-version")]
+        check_scope = None
+        if any(value is not None for value in check_headers):
+            try:
+                check_scope = ClientCheckDecline(session_id=sid, action_id=check_headers[0], task_version=int(check_headers[1]), target_version=int(check_headers[2]))
+            except (ValidationError, ValueError, TypeError) as exc:
+                raise HTTPException(422, "网络检查上下文不完整，请重新打开当前检查。") from exc
         if not (file.filename or "").lower().endswith(".json"):
             raise HTTPException(415, "仅接受 .json 快照。")
         raw = await file.read(limit + 1)
@@ -86,24 +96,17 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
 
         task, duplicate, events = sessions.import_client_snapshot(
             sid, user.id, snapshot, digest,
-            freshness_minutes=settings.client_snapshot_freshness_minutes, persist=persist,
+            freshness_minutes=settings.client_snapshot_freshness_minutes, persist=persist, client_check_request=check_scope,
         )
         runtime = runtime_for(request, sid)
         if runtime: runtime.data_source = "uploaded"
         del snapshot
-        body = SessionResponse(
-            resolution=task.resolution,resolution_transitions=task.resolution_transitions,
-            session_id=sid, created_at=session.created_at,
-            environment_profile=task.environment_profile, diagnostic_target=task.diagnostic_target,
-            client_snapshot_summary=task.client_snapshot_summary,
-            remediation_plan=task.remediation_plan,
-            verification_cycles=task.verification_cycles,
-            remediation_plan_history=task.remediation_plan_history,
-            remediation_readiness=task.remediation_readiness,
-            client_evidence=[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
-        ).model_dump(mode="json")
+        body = present_session(task, session.created_at, include_continuation=not duplicate).model_dump(mode="json")
         body.update(snapshot_id=task.client_snapshot_id, snapshot_sequence=task.snapshot_sequence,
                     duplicate=duplicate, reasoning_trace=[item.model_dump(mode="json") for item in events])
+        cycle = task.verification_cycles[-1] if task.verification_cycles else None
+        body["client_check_upload_status"] = ("before_result" if not duplicate and cycle and cycle.status == "awaiting_after_evidence"
+            and task.client_snapshot_summary and task.client_snapshot_summary.generated_at <= cycle.baseline.captured_at else "accepted")
         return body
     except MultiPartException as exc:
         raise HTTPException(413 if total > limit + 16384 else 422, "上传超过大小限制或 multipart 结构不符合要求。") from exc
@@ -125,6 +128,8 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
     except DiagnosisStorageError as exc:
         raise HTTPException(503, "快照保存失败，请稍后重试。") from exc
     except ValueError as exc:
+        if str(exc) == "client_check_action_not_current":
+            raise HTTPException(409, "这次网络检查已失效，请重新打开当前会话中的检查入口。") from exc
         raise HTTPException(409, "请先选择远程的当前浏览器设备；Mock/服务主机不接受客户端快照。") from exc
     finally:
         if form is not None:

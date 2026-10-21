@@ -134,13 +134,16 @@ class SessionStore:
         with self._lock:
             return _snapshot(self._require(session_id, owner_user_id))
 
-    def begin_turn(self, session_id: UUID, owner_user_id: UUID, *, context_answer=None) -> list[ChatMessage]:
+    def begin_turn(self, session_id: UUID, owner_user_id: UUID, *, context_answer=None, continuation_id=None) -> list[ChatMessage]:
         """Mark one session busy and return a defensive history copy."""
 
         with self._lock:
             state = self._require(session_id, owner_user_id)
             if state.busy:
                 raise SessionBusyError(str(session_id))
+            if continuation_id is not None:
+                from netpilot.client_snapshot.check_flow import validate_continuation
+                validate_continuation(self.task_state(session_id, owner_user_id), continuation_id)
             if context_answer is not None:
                 task = _task_state(state)
                 acquisition = task.context_acquisition
@@ -186,9 +189,14 @@ class SessionStore:
                 task_state.advance_version()
             task_state.turn_index += 1
             if result is not None:
+                if result.client_check_reopened:
+                    task_state.client_check.declined = None
+                if result.turn_origin == "system_continuation":
+                    task_state.client_check.pending_continuation = None
                 if result.environment_profile is not None:
                     if result.environment_profile != task_state.environment_profile:
                         task_state.last_diagnostic_readiness = None
+                        task_state.client_check.pending_continuation = None
                     task_state.environment_profile = result.environment_profile.model_copy(deep=True)
                 if result.context_acquisition is not None:
                     task_state.context_acquisition = result.context_acquisition.model_copy(deep=True)
@@ -247,6 +255,7 @@ class SessionStore:
                 if (result.turn_intent in {TurnIntent.DIAGNOSE,TurnIntent.STATE_CHANGED,TurnIntent.CLARIFY}
                         and not result.context_answered
                         and not result.environment_update_only
+                        and result.turn_origin == "user"
                         and not (result.context_acquisition and result.context_acquisition.topic == "platform_setup")):
                     task_state.remediation_symptom = user_message
                     if not task_state.original_symptom or task_state.issue_target_version != target.target_version:
@@ -388,7 +397,7 @@ class SessionStore:
                 state.task_state = safe_value(draft); state.updated_at = datetime.now(timezone.utc)
             return safe_value(draft).model_copy(deep=True),safe_value(events)
 
-    def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None):
+    def import_client_snapshot(self, session_id, owner_user_id, snapshot, digest, *, freshness_minutes=15, persist=None, client_check_request=None):
         """Atomic owner-scoped import. A snapshot is not an Agent Turn/Tool Call."""
         from netpilot.client_snapshot.service import normalize_snapshot
         with self._lock:
@@ -396,14 +405,25 @@ class SessionStore:
             if state.busy:
                 raise SessionBusyError(str(session_id))
             current = _task_state(state)
+            if client_check_request is not None:
+                from netpilot.client_snapshot.check_flow import client_check_action
+                action = client_check_action(self.task_state(session_id, owner_user_id))
+                if action is None or (client_check_request.action_id, client_check_request.task_version, client_check_request.target_version) != (action.action_id, action.task_version, action.target_version):
+                    raise ValueError("client_check_action_not_current")
             target = current.diagnostic_target
             if target.subject != "user_client" or target.relationship_to_netpilot != "remote" or self.provider_kind == "mock":
                 raise ValueError("snapshot_requires_remote_user_client")
             summary = current.client_snapshot_summary
+            cycle = current.verification_cycles[-1] if current.verification_cycles else None
+            if cycle and cycle.status == "awaiting_after_evidence" and snapshot.generated_at <= cycle.baseline.captured_at and summary and summary.snapshot_digest == digest:
+                return self.task_state(session_id, owner_user_id), True, []
             if summary and summary.snapshot_digest == digest and summary.target_version == target.target_version and summary.task_version == current.task_version:
                 return self.task_state(session_id, owner_user_id), True, []
             draft = current.model_copy(deep=True)
             records, events = normalize_snapshot(snapshot, digest, draft, freshness_minutes=freshness_minutes, trace_enabled=self.reasoning_trace_enabled)
+            from netpilot.client_snapshot.check_flow import issue_continuation, refresh_readiness_after_upload
+            refresh_readiness_after_upload(draft, provider_kind=self.provider_kind)
+            issue_continuation(draft)
             old_cycle=current.verification_cycles[-1] if current.verification_cycles else None
             new_cycle=draft.verification_cycles[-1] if draft.verification_cycles else None
             if old_cycle and new_cycle and (old_cycle.status,old_cycle.completed_at) != (new_cycle.status,new_cycle.completed_at):
@@ -421,6 +441,20 @@ class SessionStore:
             state.updated_at = datetime.now(timezone.utc)
             return self.task_state(session_id, owner_user_id), False, events
 
+    def decline_client_check(self, payload, owner_user_id):
+        from netpilot.client_snapshot.check_flow import client_check_action
+        from netpilot.client_snapshot.check_models import ClientCheckScope
+        with self._lock:
+            state = self._require(payload.session_id, owner_user_id)
+            if state.busy:
+                raise SessionBusyError(str(payload.session_id))
+            task = self.task_state(payload.session_id, owner_user_id)
+            action = client_check_action(task)
+            if action is None or (payload.action_id, payload.task_version, payload.target_version) != (action.action_id, action.task_version, action.target_version):
+                raise ValueError("client_check_action_not_current")
+            _task_state(state).client_check.declined = ClientCheckScope(task_version=task.task_version, target_version=task.diagnostic_target.target_version)
+            return self.task_state(payload.session_id, owner_user_id)
+
     def update_environment(
         self, session_id: UUID, owner_user_id: UUID, values: dict, *,
         source: EnvironmentSource,
@@ -437,6 +471,7 @@ class SessionStore:
                 persist(profile)
             if profile != task.environment_profile:
                 task.last_diagnostic_readiness = None
+                task.client_check.pending_continuation = None
             task.environment_profile = profile
             from netpilot.remediation.service import invalidate
             invalidate(task)

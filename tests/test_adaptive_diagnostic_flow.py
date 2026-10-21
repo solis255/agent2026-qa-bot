@@ -143,7 +143,7 @@ def test_upload_and_expiration_invalidate_cached_availability(context_app):
     app,client,owner,sid,_,_=context_app
     send(client,sid,WINDOWS_WEB)
     upload(client,sid,payload())
-    assert client.get(f"/api/session/{sid}").json()["diagnostic_readiness"] is None
+    assert client.get(f"/api/session/{sid}").json()["diagnostic_readiness"]["recommended_action"] == "analyze_existing"
     send(client,sid,"检查我的 DNS")
     live=app.state.sessions._sessions[UUID(sid)].task_state
     for item in live.evidence:
@@ -179,7 +179,7 @@ def test_all_applications_fault_is_recognized_through_real_extractor(context_app
     result=send(client,sid,"我用 Windows，所有应用都"+failure+"。")
     assert result["environment_profile"]["affected_scope"] == "all_network"
     assert result["diagnostic_readiness"]["state"] == "need_client_evidence"
-    assert result["ui_action"] is None and tools.handler_calls == 0
+    assert result["ui_action"]["type"] == "client_check" and tools.handler_calls == 0
 
 
 def test_uncollectable_gap_does_not_request_same_snapshot_again(context_app):

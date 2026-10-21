@@ -127,7 +127,18 @@ class AgentOrchestrator:
         task_state: SessionTaskState | None = None,
         history_context: HistoryContext | None = None,
         context_answer: ContextAnswer | None = None,
+        continuation: str | None = None,
     ) -> AgentResult:
+        from netpilot.client_snapshot.check_flow import client_check_action, declined, reopen_requested, check_answer
+        if continuation:
+            if continuation != "client_evidence_uploaded" or task_state is None:
+                raise ValueError("unsupported continuation")
+            user_message = (task_state.remediation_symptom or task_state.original_symptom or "请分析当前网络检查结果") + "\n请依据刚上传的检查结果继续分析。"
+        reopening = bool(task_state and reopen_requested(user_message))
+        if reopening:
+            task_state = task_state.model_copy(deep=True)
+            task_state.client_check.declined = None
+            user_message = task_state.remediation_symptom or task_state.original_symptom or "检测一下我的网络"
         acquired = acquire_context(
             user_message,
             task_state.environment_profile if task_state is not None else EnvironmentProfile(),
@@ -139,6 +150,15 @@ class AgentOrchestrator:
             host_target=bool(task_state and task_state.diagnostic_target.subject == "netpilot_host"),
             resume_message=next((m.content for m in reversed(history) if m.role == ChatRole.USER), None),
         )
+        if continuation or reopening:
+            acquired.environment = task_state.environment_profile.model_copy(deep=True)
+            acquired.state = task_state.context_acquisition.model_copy(deep=True)
+            acquired.classification = IntentClassification(intent=TurnIntent.DIAGNOSE, confidence=1,
+                needs_tools=False, needs_rag=False, force_recheck=False, reason="client_evidence_uploaded")
+            acquired.question = None
+            acquired.changed_fields = {}
+            acquired.environment_transition = acquired.update_only = False
+            acquired.answered = True
         environment = acquired.environment
         if acquired.answered and acquired.state.topic != "platform_setup" and task_state and task_state.remediation_symptom:
             acquired.message = task_state.remediation_symptom + "\n请根据已知上下文继续诊断。"
@@ -250,7 +270,11 @@ class AgentOrchestrator:
             trace_readiness(trace, readiness)
             self._trace_target(trace, task_state, target)
             trace.append("decision", "限制不适用的检测", "远程设备缺少满足本轮目标的当前客户端证据；不执行服务主机网络工具。")
-            result = AgentResult(answer=readiness_answer(readiness, previous=task_state.last_diagnostic_readiness if task_state else None, message=user_message),
+            refused = bool(task_state and declined(task_state) and (not draft or draft.task_version == task_state.task_version))
+            friendly = check_answer(refused=refused) if readiness.client_evidence_supported else readiness_answer(readiness)
+            if not refused and task_state and re.fullmatch(r"(?:那怎么办|下一步呢|那下一步呢|怎么办)[？?。!！]?", user_message.strip()):
+                friendly = readiness_answer(readiness, previous=task_state.last_diagnostic_readiness, message=user_message)
+            result = AgentResult(answer=friendly,
                 status=AgentStatus.COMPLETED, tool_rounds=0, turn_intent=classification.intent,
                 response_mode=ResponseMode.ANALYSIS,
                 task_version_advanced=acquired.environment_transition or classification.intent is TurnIntent.STATE_CHANGED,
@@ -269,7 +293,7 @@ class AgentOrchestrator:
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
-        if self.reasoning_summary_llm_enabled and result.ui_action is None and not result.environment_update_only and not (readiness and readiness.state == "need_client_evidence"):
+        if self.reasoning_summary_llm_enabled and result.ui_action is None and not result.environment_update_only and not continuation and not (readiness and readiness.state == "need_client_evidence"):
             result = trace.optional_summary(self.llm, result)
         if result.status is not AgentStatus.LLM_ERROR and result.response_mode not in {ResponseMode.KNOWLEDGE, ResponseMode.META, ResponseMode.HISTORY} and (
             result.turn_intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}
@@ -289,6 +313,17 @@ class AgentOrchestrator:
                 logger.warning("remediation_integration_failed error_type=%s",type(exc).__name__)
         if acquired.changed_fields and not result.environment_update_only:
             result.answer = environment_confirmation(acquired) + "\n\n" + result.answer
+        if task_state and result.ui_action is None and not result.environment_update_only and (verification_query or (readiness and readiness.state != "knowledge_only")):
+            action_task = task_state.model_copy(deep=True)
+            if result.task_version_advanced:
+                action_task.advance_version()
+            action_task.environment_profile = environment
+            action_task.diagnostic_target = target
+            result.ui_action = client_check_action(action_task, readiness)
+        if continuation:
+            result.turn_origin = "system_continuation"
+            result.answer = result.answer.replace("客户端快照", "网络检查结果").replace("快照", "检查结果").replace("证据限制", "检查范围")
+        result.client_check_reopened = reopening
         return result
 
     def _trace_target(self, trace, task_state, target):

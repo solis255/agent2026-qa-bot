@@ -7,6 +7,7 @@ import re
 from contextvars import copy_context
 from typing import Annotated, Literal
 from uuid import UUID
+from netpilot.client_snapshot.check_flow import client_check_action, declined
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -127,6 +128,8 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
         snapshot = _sessions(request, session_id).get(session_id, user.id)
         task = _sessions(request, session_id).task_state(session_id, user.id)
         return SessionResponse(
+            ui_action=client_check_action(task), client_check_declined=declined(task),
+            task_version=task.task_version,
             diagnostic_readiness=task.last_diagnostic_readiness,
             context_acquisition=task.context_acquisition,
             is_demo=task.is_demo, demo_scenario_id=task.demo_scenario_id, data_notice=task.data_notice,
@@ -212,6 +215,7 @@ def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest,
     response.diagnostic_target = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).diagnostic_target
     task = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id)
     response.context_acquisition=task.context_acquisition
+    response.task_version=task.task_version
     response.is_demo=task.is_demo
     response.demo_scenario_id=task.demo_scenario_id
     response.data_notice=task.data_notice
@@ -244,7 +248,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
     session_token = set_session_id(payload.session_id)
     sessions = _sessions(request, payload.session_id)
     try:
-        history = sessions.begin_turn(payload.session_id, user.id, context_answer=payload.context_answer)
+        history = sessions.begin_turn(payload.session_id, user.id, context_answer=payload.context_answer, continuation_id=payload.continuation_id)
         task_state = sessions.task_state(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         reset_session_id(session_token)
@@ -260,11 +264,11 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
         ) from exc
     except ValueError as exc:
         reset_session_id(session_token)
-        raise HTTPException(409, "这个快捷回答已失效，请根据当前问题继续对话。") from exc
+        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个快捷回答已失效，请根据当前问题继续对话。") from exc
 
     try:
         with request.app.state.runtime_lock:
-            result = _run_agent_turn(request, user.id, payload.message, history, task_state, payload.context_answer)
+            result = _run_agent_turn(request, user.id, payload.message, history, task_state, payload.context_answer, payload.continuation)
         response = sessions.finish_turn(
             payload.session_id,
             payload.message,
@@ -325,7 +329,7 @@ def chat_stream(
         )
     sessions = _sessions(request, payload.session_id)
     try:
-        history = sessions.begin_turn(payload.session_id, user.id, context_answer=payload.context_answer)
+        history = sessions.begin_turn(payload.session_id, user.id, context_answer=payload.context_answer, continuation_id=payload.continuation_id)
         task_state = sessions.task_state(payload.session_id, user.id)
     except SessionNotFoundError as exc:
         raise HTTPException(
@@ -338,7 +342,7 @@ def chat_stream(
             detail="当前会话正在诊断，请等待本次请求完成。",
         ) from exc
     except ValueError as exc:
-        raise HTTPException(409, "这个快捷回答已失效，请根据当前问题继续对话。") from exc
+        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个快捷回答已失效，请根据当前问题继续对话。") from exc
 
     session_token = set_session_id(payload.session_id)
     stream_context = copy_context()
@@ -347,7 +351,7 @@ def chat_stream(
     def run_turn() -> ChatResponse:
         try:
             with request.app.state.runtime_lock:
-                result = _run_agent_turn(request, user.id, payload.message, history, task_state, payload.context_answer)
+                result = _run_agent_turn(request, user.id, payload.message, history, task_state, payload.context_answer, payload.continuation)
             response = sessions.finish_turn(
                 payload.session_id,
                 payload.message,
@@ -691,11 +695,12 @@ def _diagnoses(request: Request) -> DiagnosisRepository | None:
     return request.app.state.diagnosis_repository
 
 
-def _run_agent_turn(request: Request, user_id: UUID, message: str, history, task_state, context_answer=None):
+def _run_agent_turn(request: Request, user_id: UUID, message: str, history, task_state, context_answer=None, continuation=None):
     """Bind persisted history to the authenticated owner before model execution."""
 
     kwargs = {"history": history, "task_state": task_state}
     if context_answer is not None: kwargs["context_answer"] = context_answer
+    if continuation is not None: kwargs["continuation"] = continuation
     if classify_turn_intent(message).intent is TurnIntent.HISTORY_ANALYSIS:
         repository = _diagnoses(request)
         query = parse_history_query(message)
