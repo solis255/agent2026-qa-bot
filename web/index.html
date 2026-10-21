@@ -181,9 +181,12 @@
 
         <section class="status-card snapshot-card" id="snapshot-card">
           <h2>客户端诊断快照</h2>
+          <div id="windows-snapshot-guide" hidden>
           <p class="environment-note">Windows 10/11：下载并检查脚本，在本机 Windows PowerShell 以普通用户手动运行，生成 netpilot-client-diagnostic.json，再主动上传。无需管理员权限；不修改网络，不自动执行或上传。</p>
           <a href="/static/scripts/client_diagnostic_windows.ps1" download="client_diagnostic_windows.ps1">下载只读 Windows 脚本</a>
           <p class="environment-note">运行：<code>.\client_diagnostic_windows.ps1</code>。如本机策略不允许运行，请按本单位规定处理；不要为演示降低执行策略。</p>
+          </div>
+          <p id="collector-support-note" class="environment-note"></p>
           <form id="snapshot-form">
             <label for="snapshot-file">选择 JSON（默认上限 256 KiB）</label>
             <input id="snapshot-file" name="file" type="file" accept=".json,application/json" disabled>
@@ -376,6 +379,6 @@
     <script src="/vendor/marked.umd.js" defer></script>
     <script src="/vendor/purify.min.js" defer></script>
     <script src="/markdown.js?v=inline-citations" defer></script>
-    <script src="/app.js?v=reasoning-trace" defer></script>
+    <script src="/app.js?v=diagnostic-readiness-13b" defer></script>
   </body>
 </html>

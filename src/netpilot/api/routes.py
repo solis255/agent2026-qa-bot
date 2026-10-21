@@ -127,6 +127,7 @@ def get_session(session_id: UUID, request: Request, user: CurrentUser, response:
         snapshot = _sessions(request, session_id).get(session_id, user.id)
         task = _sessions(request, session_id).task_state(session_id, user.id)
         return SessionResponse(
+            diagnostic_readiness=task.last_diagnostic_readiness,
             context_acquisition=task.context_acquisition,
             is_demo=task.is_demo, demo_scenario_id=task.demo_scenario_id, data_notice=task.data_notice,
             session_id=session_id, created_at=snapshot.created_at,

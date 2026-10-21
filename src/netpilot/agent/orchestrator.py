@@ -64,7 +64,10 @@ from netpilot.llm import (
 from netpilot.rag import KnowledgeSearchData, KnowledgeSource
 from netpilot.history_context import HistoryContext
 from netpilot.conversation_context.acquisition import acquire_context, environment_confirmation
-from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer
+from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer, EnvironmentNeedAssessment
+from netpilot.conversation_context.readiness import assess_diagnostic_readiness, readiness_answer, trace_readiness
+from netpilot.conversation_context.questions import plan_context_question
+from netpilot.client_snapshot.service import usable_client_snapshot_evidence, usable_client_snapshot_records
 from netpilot.observability import log_event
 
 
@@ -130,7 +133,7 @@ class AgentOrchestrator:
             task_state.environment_profile if task_state is not None else EnvironmentProfile(),
             task_state.context_acquisition if task_state is not None else ContextAcquisitionState(),
             context_answer=context_answer,
-            has_evidence=bool(task_state and task_state.reusable_evidence()),
+            has_evidence=bool(task_state and any(r.tool_name != "knowledge_search" and (r.evidence_origin != "client_snapshot" or r in usable_client_snapshot_evidence(task_state)) for r in task_state.reusable_evidence())),
             task_version=task_state.task_version if task_state else 1,
             target_version=task_state.diagnostic_target.target_version if task_state else 1,
             host_target=bool(task_state and task_state.diagnostic_target.subject == "netpilot_host"),
@@ -147,14 +150,17 @@ class AgentOrchestrator:
         requested_subject = extract_target_subject(user_message)
         if requested_subject is not None and provider != "mock":
             target = merge_diagnostic_target(target, user_target(requested_subject, environment, provider), provider)
+        if acquired.state.target_version != target.target_version:
+            acquired.state = ContextAcquisitionState(task_version=acquired.state.task_version,
+                target_version=target.target_version, topic=acquired.state.topic)
+            if acquired.question:
+                acquired.state.asked_fields.append(acquired.question.field)
+                acquired.state.last_question_field = acquired.question.field
         if task_state is not None:
             task_state = task_state.model_copy(deep=True)
             task_state.context_acquisition = acquired.state
             task_state.set_target(target)
-            from netpilot.client_snapshot.service import snapshot_evidence
-            if snapshot_evidence(task_state) and target.subject == "user_client" and target.relationship_to_netpilot == "remote":
-                target.limitation_code = "client_snapshot_available"
-                task_state.set_target(target)
+            target = task_state.diagnostic_target.model_copy(deep=True)
         if (initial_target.subject, initial_target.target_version) != (target.subject, target.target_version):
             history = ()
         if acquired.environment_transition:
@@ -170,6 +176,32 @@ class AgentOrchestrator:
         resolution_action=user_action(user_message,was_resolved=bool(task_state and task_state.resolution.state == "resolved")) if task_state else None
         classification = acquired.classification
         from netpilot.escalation.builder import material_request
+        readiness = None
+        verification_query = bool(task_state and task_state.verification_cycles and re.fullmatch(r"(?:请问)?(?:现在怎么样|验证结果(?:怎么样)?|修复后怎么样|修复前后对比)[？?。！!]?",user_message.strip()))
+        bypass_readiness = (acquired.update_only or resolution_action or material_request(user_message) or verification_query
+            or classification.intent in {TurnIntent.REPORT_REQUEST, TurnIntent.HISTORY_ANALYSIS, TurnIntent.META_FEEDBACK}
+            or (task_state is not None and explicit_remediation(user_message) and classification.intent not in {TurnIntent.STATE_CHANGED, TurnIntent.KNOWLEDGE_REQUEST}))
+        if not bypass_readiness:
+            draft = task_state.model_copy(deep=True) if task_state else None
+            if draft and (acquired.environment_transition or classification.intent is TurnIntent.STATE_CHANGED):
+                draft.advance_version()
+                target = draft.diagnostic_target.model_copy(deep=True)
+                if acquired.state.task_version != draft.task_version:
+                    acquired.state = ContextAcquisitionState(task_version=draft.task_version,
+                        target_version=target.target_version, topic=acquired.state.topic)
+            readiness = assess_diagnostic_readiness(classification=classification, message=acquired.message,
+                environment=environment, context_question=acquired.question, target=target, provider_kind=provider,
+                reusable_evidence=draft.reusable_evidence() if draft else (),
+                task_version=draft.task_version if draft else 1 + int(acquired.environment_transition),
+                acquisition_state=acquired.state, previous_readiness=task_state.last_diagnostic_readiness if task_state else None)
+            if readiness.state == "need_context" and acquired.question is None:
+                acquired.question = plan_context_question(EnvironmentNeedAssessment(required=True,
+                    required_fields=readiness.missing_context_fields, missing_fields=readiness.missing_context_fields,
+                    reason=readiness.reason), environment, acquired.state)
+                if acquired.question:
+                    acquired.state.asked_fields.append(acquired.question.field)
+                    acquired.state.last_question_field = acquired.question.field
+                    acquired.state.topic = acquired.state.topic or "connectivity"
         if acquired.update_only:
             trace.intent = classification.intent
             confirmation = environment_confirmation(acquired)
@@ -177,8 +209,9 @@ class AgentOrchestrator:
             result = AgentResult(answer=confirmation, status=AgentStatus.COMPLETED, tool_rounds=0,
                 turn_intent=classification.intent, response_mode=ResponseMode.META,
                 task_version_advanced=acquired.environment_transition, environment_update_only=True)
-        elif acquired.question is not None and not resolution_action and not material_request(user_message):
+        elif acquired.question is not None and not bypass_readiness:
             trace.intent = TurnIntent.CLARIFY
+            trace_readiness(trace, readiness)
             self._trace_target(trace, task_state, target)
             capabilities = evaluate_target_capabilities(target, provider, has_client_snapshot_evidence=False)
             if not (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools) and (task_state.last_target_limit_version if task_state else 0) != target.target_version:
@@ -186,7 +219,8 @@ class AgentOrchestrator:
             trace.append("decision", "补充必要环境", "当前缺少一项会影响判断的上下文，只询问这一项；未执行网络检测。")
             result = AgentResult(answer=acquired.question.question, ui_action=acquired.question,
                 status=AgentStatus.COMPLETED, tool_rounds=0, turn_intent=TurnIntent.CLARIFY,
-                response_mode=ResponseMode.CLARIFICATION)
+                response_mode=ResponseMode.CLARIFICATION,
+                task_version_advanced=classification.intent is TurnIntent.STATE_CHANGED)
         elif task_state is not None and material_request(user_message):
             trace.intent=TurnIntent.REPORT_REQUEST
             result=AgentResult(answer="正在整理结构化报修材料，不会提交外部工单。",status=AgentStatus.COMPLETED,
@@ -211,19 +245,31 @@ class AgentOrchestrator:
             trace.append("decision","复用诊断生成手动计划","复用当前证据与用户步骤反馈，不运行新的网络工具或自动重测。")
             result = AgentResult(answer="正在整理批准目录中的低风险手动步骤。",status=AgentStatus.COMPLETED,
                                  tool_rounds=0,turn_intent=TurnIntent.FOLLOWUP_ACTION,response_mode=ResponseMode.ANALYSIS)
+        elif readiness is not None and readiness.state == "need_client_evidence":
+            trace.intent = classification.intent
+            trace_readiness(trace, readiness)
+            self._trace_target(trace, task_state, target)
+            trace.append("decision", "限制不适用的检测", "远程设备缺少满足本轮目标的当前客户端证据；不执行服务主机网络工具。")
+            result = AgentResult(answer=readiness_answer(readiness, previous=task_state.last_diagnostic_readiness if task_state else None, message=user_message),
+                status=AgentStatus.COMPLETED, tool_rounds=0, turn_intent=classification.intent,
+                response_mode=ResponseMode.ANALYSIS,
+                task_version_advanced=acquired.environment_transition or classification.intent is TurnIntent.STATE_CHANGED,
+                coverage=coverage_from_observations(evidence=usable_client_snapshot_evidence(draft) if draft else ()))
         else:
             result = self._run_turn(
                 acquired.message, history=history, task_state=task_state,
                 history_context=history_context, trace=trace, environment=environment, target=target,
-                classification_override=acquired.classification if acquired.environment_transition else None,
+                classification_override=acquired.classification,
                 environment_transition=acquired.environment_transition,
+                readiness=readiness,
             )
+        result.diagnostic_readiness = readiness
         if acquired.environment_transition:
             result.task_version_advanced = True
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
-        if self.reasoning_summary_llm_enabled and result.ui_action is None and not result.environment_update_only:
+        if self.reasoning_summary_llm_enabled and result.ui_action is None and not result.environment_update_only and not (readiness and readiness.state == "need_client_evidence"):
             result = trace.optional_summary(self.llm, result)
         if result.status is not AgentStatus.LLM_ERROR and result.response_mode not in {ResponseMode.KNOWLEDGE, ResponseMode.META, ResponseMode.HISTORY} and (
             result.turn_intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}
@@ -260,6 +306,7 @@ class AgentOrchestrator:
         target: DiagnosticTarget,
         classification_override: IntentClassification | None = None,
         environment_transition: bool = False,
+        readiness=None,
     ) -> AgentResult:
         """Run one bounded diagnosis with text history and structured evidence."""
 
@@ -296,10 +343,14 @@ class AgentOrchestrator:
             classification,
             blocked_signatures=set(existing_evidence),
         )
-        client_records = [item for item in existing_records if item.evidence_origin == "client_snapshot"]
+        client_records = usable_client_snapshot_records(existing_records, task_version=effective_task_state.task_version if effective_task_state else 1, target=target)
         capabilities = evaluate_target_capabilities(target, self.registry.provider_kind, has_client_snapshot_evidence=bool(client_records))
         policy.target_capability = capabilities
         policy.allow_network_tools = policy.allow_network_tools and (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools)
+        if readiness is not None and readiness.recommended_action not in {"run_allowed_diagnostics", "analyze_existing"}:
+            policy.allow_network_tools = False
+        if readiness is not None and readiness.recommended_action == "analyze_existing":
+            policy.max_new_calls = 0
         steps: list[AgentToolStep] = []
         diagnostic_turn = classification.intent in {
             TurnIntent.DIAGNOSE,
@@ -331,6 +382,8 @@ class AgentOrchestrator:
             history_count=len(history_context.records) if history_context else 0,
             history_available=bool(history_context and history_context.available),
         )
+        if readiness is not None:
+            trace_readiness(trace, readiness)
         trace.assess(sufficiency, hypotheses)
         self._trace_target(trace, task_state, target)
         network_question = classification.intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.CLARIFY, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE, TurnIntent.FOLLOWUP_ACTION} or bool(re.search(r"网络|dns|网关|路由|上网|网页|ping|诊断", user_message, flags=re.I))
@@ -339,10 +392,17 @@ class AgentOrchestrator:
                 trace.append("decision", "限制不适用的检测", "当前是 Mock Provider，不能检测真实 NetPilot 服务主机；不会用模拟结果冒充主机检测。")
                 return AgentResult(answer="当前为 Mock 模拟终端，不能检测真实 NetPilot 服务主机。请在服务端启用 Local Provider 后选择服务主机。", status=AgentStatus.COMPLETED, tool_rounds=0, **result_metadata)
             if not (capabilities.can_use_host_network_tools or capabilities.can_use_mock_tools):
+                historical_client = [item for item in existing_records if item.evidence_origin == "client_snapshot"]
+                if not client_records and historical_client and classification.intent in {TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}:
+                    from netpilot.client_snapshot.service import snapshot_answer
+                    trace.append("decision", "查看历史采集状态", "过期或时钟偏差快照仅用于回看，不满足当前诊断准备度。")
+                    return AgentResult(answer=snapshot_answer(historical_client, classification.intent.value),
+                        status=AgentStatus.COMPLETED, tool_rounds=0, **result_metadata)
                 if capabilities.can_use_client_snapshot_evidence:
                     from netpilot.client_snapshot.service import snapshot_answer
                     trace.append("decision", "分析客户端快照", "复用当前对象与任务版本的用户上传快照；按采集时间解释，不执行服务主机网络工具。", evidence_ids=[item.evidence_id for item in client_records])
-                    return AgentResult(answer=snapshot_answer(client_records, classification.intent.value),
+                    return AgentResult(answer=snapshot_answer(client_records, classification.intent.value,
+                        allow_refresh=not (readiness and readiness.reason == "collector_cannot_fill_remaining_gap")),
                                        reused_evidence_ids=[item.evidence_id for item in client_records],
                                        status=AgentStatus.COMPLETED, tool_rounds=0, **result_metadata)
                 if (task_state.last_target_limit_version if task_state else 0) != target.target_version:
@@ -353,6 +413,9 @@ class AgentOrchestrator:
                     answer = "## 当前对象诊断报告\n\n" + environment_summary(environment) + "\n\n当前没有此诊断对象的直接系统级网络证据。旧对象检测只保留于历史，不用于当前结论；尚不能确认 DNS、网关或路由状态。"
                 elif classification.intent in {TurnIntent.ANALYZE_EXISTING, TurnIntent.COMPARE}:
                     answer = "当前没有此诊断对象的直接网络 Evidence，不能据旧对象的检测证明此设备 DNS 或网络正常。以下只能根据你提供的现象和环境分析。"
+                elif readiness and readiness.recommended_action == "continue_with_limitations":
+                    answer = ("当前缺少直接网络证据，暂不能确认根因。可先比较其他网站与应用、核对 VPN/代理和浏览器设置；单个服务故障也可能与访问策略或服务侧状态有关。"
+                              "如果 WiFi 列表里看不到网络，先确认无线开关、覆盖范围与其他设备是否能发现网络。上述是低风险排查建议，未检测 DNS、网关或路由。")
                 else:
                     repeated_limit = task_state is not None and task_state.last_target_limit_version == target.target_version
                     answer = ("当前仍无此设备的直接网络证据，请补充新增现象。" if repeated_limit else
@@ -442,7 +505,8 @@ class AgentOrchestrator:
             requested_tools.add("knowledge_search")
         completed_requested_tools: set[str] = set()
         executed_calls: set[str] = set(policy.blocked_signatures)
-        reused_evidence_ids: list[str] = []
+        reused_evidence_ids: list[str] = ([r.evidence_id for r in existing_records]
+            if readiness is not None and readiness.recommended_action == "analyze_existing" else [])
         next_tools = tools or None
         next_tool_choice = "auto" if tools else "none"
         missing_tool_attempts = 0
@@ -732,6 +796,11 @@ class AgentOrchestrator:
                             content=_reused_evidence_feedback(previous),
                         )
                     )
+                    continue
+                if policy.max_new_calls is not None and len(steps) >= policy.max_new_calls:
+                    duplicate_count += 1
+                    messages.append(ChatMessage(role=ChatRole.TOOL, tool_call_id=tool_call.id,
+                        content='{"execution_status":"blocked","summary":"Evidence is sufficient; no new Tool execution allowed"}'))
                     continue
                 if signature is not None:
                     executed_calls.add(signature)

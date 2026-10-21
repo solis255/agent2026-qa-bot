@@ -187,9 +187,13 @@ class SessionStore:
             task_state.turn_index += 1
             if result is not None:
                 if result.environment_profile is not None:
+                    if result.environment_profile != task_state.environment_profile:
+                        task_state.last_diagnostic_readiness = None
                     task_state.environment_profile = result.environment_profile.model_copy(deep=True)
                 if result.context_acquisition is not None:
                     task_state.context_acquisition = result.context_acquisition.model_copy(deep=True)
+                if result.diagnostic_readiness is not None:
+                    task_state.last_diagnostic_readiness = result.diagnostic_readiness.model_copy(deep=True)
                 for item in result.reasoning_trace:
                     if item.title == "确认用户环境":
                         task_state.last_environment_trace_summary = item.summary
@@ -311,7 +315,9 @@ class SessionStore:
             now = datetime.now(timezone.utc)
             for item in task.evidence:
                 if item.expires_at:
-                    item.stale = now > item.expires_at
+                    item.stale = item.stale or now > item.expires_at
+            from netpilot.client_snapshot.service import refresh_snapshot_availability
+            refresh_snapshot_availability(task)
             from netpilot.remediation.service import invalidate
             invalidate(task)
             from netpilot.verification.service import invalidate_cycles
@@ -429,6 +435,8 @@ class SessionStore:
             profile = merge_environment(task.environment_profile, values, source=source)
             if persist is not None:
                 persist(profile)
+            if profile != task.environment_profile:
+                task.last_diagnostic_readiness = None
             task.environment_profile = profile
             from netpilot.remediation.service import invalidate
             invalidate(task)

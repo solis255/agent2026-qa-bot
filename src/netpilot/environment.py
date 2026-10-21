@@ -224,7 +224,7 @@ def has_environment_transition_signal(message: str) -> bool:
 def is_environment_update_only(message: str) -> bool:
     statements = _current_statements(message)
     # A real symptom, question, or request still needs its original response path.
-    if not statements or re.search(r"[?？吗]|怎么|如何|打不开|连不上|没网|不通|不行|问题|失败|故障|异常|正常|微信|qq|诊断|检查|分析|报告|报修|验证|恢复", message.casefold()):
+    if not statements or re.search(r"[?？吗]|怎么|如何|打不开|连不上|没网|上不了网|不能上网|不能联网|无法联网|无法连接|断网|不通|不行|问题|失败|故障|异常|正常|微信|qq|诊断|检测|检查|分析|报告|报修|验证|恢复", message.casefold()):
         return False
     return any(re.search(ENVIRONMENT_TRANSITION_WORDS, text) or _extract_os_family(text)
                or _extract_network_access(text, off_campus=False)
@@ -259,7 +259,7 @@ def extract_environment_updates(message: str) -> EnvironmentUpdate:
                 values[field] = False
             elif re.search(rf"(?:已开启|开启了|启用了|打开了|开着|开了)\s*(?:{word})|我(?:现在|目前)?(?:开启|打开|启用)\s*(?:{word})|(?:{word})\s*(?:已开启|开启中|开着|已启用)", text):
                 values[field] = True
-        if re.search(r"(?:全部网络|所有网络|所有应用).{0,5}(?:不通|断开|不能上网|无法联网)", text):
+        if re.search(r"(?:全部网络|所有网络|所有应用).{0,5}(?:不通|断开|不能上网|不能联网|无法联网)", text):
             values["affected_scope"] = "all_network"
         if re.search(r"(?:只有|仅|只是)(?:网页|浏览器).{0,5}(?:打不开|无法访问|异常)", text):
             values["affected_scope"] = "web_only"

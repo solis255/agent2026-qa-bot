@@ -16,8 +16,8 @@ def user_action(message, *, was_resolved=False):
     if message.strip().endswith(("?","？")): return None
     text=message.strip().rstrip("。！!？?")
     if was_resolved and re.search(r"(?:刚才|之前|原来).{0,8}(?:好了|恢复|正常).{0,8}(?:现在|又|再次).{0,8}(?:打不开|不通|断网|坏了|不行)",text): return "recurrence"
-    if re.fullmatch(r"(?:请|我要|我需要|帮我|请帮我)?(?:转人工|人工支持|人工帮助|人工处理|联系人工支持)",text): return "support"
-    if re.fullmatch(r"(?:已经|现在)?好了|(?:问题|网络|网页)(?:现在|已经)?(?:已解决|恢复正常了|恢复了|可以正常打开了)|网页现在可以正常打开了",text): return "resolved"
+    if re.fullmatch(r"(?:请|请求|我要|我需要|帮我|请帮我)?(?:转人工|人工支持|人工帮助|人工处理|联系人工支持)",text): return "support"
+    if re.fullmatch(r"(?:已经|现在)?(?:好了|恢复了)|(?:问题|网络|网页)(?:现在|已经)?(?:已解决|恢复正常了|恢复了|可以正常打开了)|网页现在可以正常打开了",text): return "resolved"
     if re.fullmatch(r"好多了|有改善|有些改善|部分恢复了",text): return "improved"
     if re.fullmatch(r"网页还是打不开|网页仍然打不开|还没解决|问题仍未解决",text): return "recurrence" if was_resolved else "not_resolved"
     return None

@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from netpilot.privacy import RedactionMetadata, PRIVACY_POLICY_VERSION, safe_value
 from netpilot.environment import EnvironmentProfile
-from netpilot.conversation_context.models import ContextAcquisitionState
+from netpilot.conversation_context.models import ContextAcquisitionState, DiagnosticReadiness
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, matches_target
 from netpilot.client_snapshot.schemas import ClientSnapshotSummary
 from netpilot.remediation.models import RemediationPlan, RemediationReadiness
@@ -83,6 +83,7 @@ class SessionTaskState(BaseModel):
     owner_user_id: UUID
     environment_profile: EnvironmentProfile = Field(default_factory=EnvironmentProfile)
     context_acquisition: ContextAcquisitionState = Field(default_factory=ContextAcquisitionState)
+    last_diagnostic_readiness: DiagnosticReadiness | None = None
     diagnostic_target: DiagnosticTarget = Field(default_factory=DiagnosticTarget)
     last_target_trace_version: int = 0
     last_target_limit_version: int = 0
@@ -123,7 +124,7 @@ class SessionTaskState(BaseModel):
     def reusable_evidence(self) -> list[EvidenceRecord]:
         now = datetime.now(timezone.utc)
         return [
-            record.model_copy(update={"stale": now > record.expires_at}) if record.expires_at else record
+            record.model_copy(update={"stale": record.stale or now > record.expires_at}) if record.expires_at else record
             for record in self.evidence
             if record.reusable
             and not record.superseded
@@ -138,6 +139,7 @@ class SessionTaskState(BaseModel):
             if record.task_version == self.task_version:
                 record.superseded = True
         self.task_version += 1
+        self.last_diagnostic_readiness = None
         from netpilot.remediation.service import supersede
         supersede(self.remediation_plan)
         if self.client_snapshot_summary:
@@ -155,13 +157,12 @@ class SessionTaskState(BaseModel):
         invalidate_cycles(self)
 
     def set_target(self, target: DiagnosticTarget) -> None:
+        if (self.diagnostic_target.subject, self.diagnostic_target.target_version) != (target.subject, target.target_version):
+            self.last_diagnostic_readiness = None
         self.diagnostic_target = target.model_copy(deep=True)
         active = self.reusable_evidence()
-        has_snapshot = any(item.evidence_origin == "client_snapshot" for item in active)
-        if self.client_snapshot_summary:
-            self.client_snapshot_summary.applicable = has_snapshot
-        if not has_snapshot and self.diagnostic_target.limitation_code == "client_snapshot_available":
-            self.diagnostic_target.limitation_code = "remote_client_not_directly_observable"
+        from netpilot.client_snapshot.service import refresh_snapshot_availability
+        refresh_snapshot_availability(self)
         self.executed_tool_signatures = {item.tool_signature for item in active if item.evidence_origin in {"tool", "knowledge"}}
         from netpilot.agent.coverage import coverage_from_observations
         from netpilot.agent.hypotheses import track_hypotheses

@@ -2,6 +2,12 @@
 
 本文档统一整理 TJU NetPilot（天津大学校园网络智能诊断与服务 Agent）的自动与手工验收。正式产品代码位于 [`src/netpilot/`](../src/netpilot/)。自动测试默认使用 Fake LLM、Mock Provider、临时 SQLite 或受控替身，不调用真实 `tju-llm`，也不依赖现场网络。
 
+## Milestone 13B — Adaptive Diagnostic Flow
+
+新增 `test_diagnostic_readiness.py`、`test_adaptive_diagnostic_flow.py`、`test_readiness_ui.py`，覆盖 Prompt TC-13B-01～25：四状态、平台、必要追问、当前证据充分度、旧 task/target、时效/时钟偏差、单站点、显式 DNS、Host/Mock、特殊动作优先级、权限隔离、Chat/SSE、历史与旧 schema。额外覆盖重复提示、重测后 OS 问答版本、证据缓存失效及 Windows 指引展示；DOM 测试只消费服务端平台标志。
+
+实现细节、真实验证结果、场景 A–H 和完整交付索引见 [MILESTONE13B_VALIDATION.md](MILESTONE13B_VALIDATION.md)。
+
 ## 运行方式
 
 在已激活的项目虚拟环境中：

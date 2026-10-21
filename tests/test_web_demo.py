@@ -86,7 +86,7 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "armInactivityTimeout" in javascript
     assert "流式连接长时间未收到数据" in javascript
     assert "timeoutMs = 180000" not in javascript
-    assert 'src="/app.js?v=reasoning-trace"' in html
+    assert 'src="/app.js?v=diagnostic-readiness-13b"' in html
     assert html.index('/vendor/marked.umd.js') < html.index('/markdown.js?') < html.index('/app.js?')
     assert html.index('/vendor/purify.min.js') < html.index('/markdown.js?')
     assert 'renderAssistantMarkdown(streamedAnswer, response.answer, response.sources)' in javascript

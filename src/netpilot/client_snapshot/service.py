@@ -74,6 +74,7 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
     )
     records = [redact_evidence(record) for record in records]
     task.evidence.extend(records)
+    task.last_diagnostic_readiness = None
     task.client_snapshot_summary = summary
     task.client_snapshot_id = snapshot_id
     values = {"os_family": "windows"}
@@ -81,7 +82,6 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
     if snapshot.os.version and not (family_source and family_source.source == "user" and task.environment_profile.os_family != "windows"):
         values["os_version"] = snapshot.os.version
     task.environment_profile = merge_environment(task.environment_profile, values, source="snapshot")
-    task.diagnostic_target.limitation_code = "client_snapshot_available"
     from netpilot.verification.service import bind_snapshot
     verification_events = bind_snapshot(task,records)
     task.set_target(task.diagnostic_target)
@@ -108,6 +108,45 @@ def snapshot_evidence(task):
     return [item for item in task.reusable_evidence() if item.evidence_origin == "client_snapshot"]
 
 
+def usable_client_snapshot_records(records, *, task_version, target, now=None):
+    """Current evidence eligibility, separate from the retained historical view."""
+    now = now or datetime.now(timezone.utc)
+    return [item for item in records
+            if item.evidence_origin == "client_snapshot" and item.reusable and not item.superseded
+            and item.task_version == task_version
+            and item.target_subject == target.subject and item.target_version == target.target_version
+            and not item.stale and not item.clock_skew_suspected
+            and item.expires_at is not None and now <= item.expires_at]
+
+
+def usable_client_snapshot_evidence(task):
+    return usable_client_snapshot_records(task.reusable_evidence(), task_version=task.task_version,
+                                          target=task.diagnostic_target)
+
+
+def refresh_snapshot_availability(task):
+    """Refresh the public capability hint without discarding historical snapshots."""
+    remote = task.diagnostic_target.subject == "user_client" and task.diagnostic_target.relationship_to_netpilot == "remote"
+    usable = bool(usable_client_snapshot_evidence(task))
+    if task.last_diagnostic_readiness and task.last_diagnostic_readiness.has_usable_client_evidence != usable:
+        task.last_diagnostic_readiness = None
+    if remote:
+        task.diagnostic_target.limitation_code = "client_snapshot_available" if usable else "remote_client_not_directly_observable"
+    if task.client_snapshot_summary:
+        task.client_snapshot_summary.applicable = remote and usable
+
+
+def refresh_persisted_snapshot_availability(record):
+    """Historical records retain observations, but never advertise expired data as current."""
+    usable = bool(usable_client_snapshot_records(record.client_evidence,
+        task_version=record.resolution.task_version, target=record.diagnostic_target))
+    target = record.diagnostic_target
+    if target.subject == "user_client" and target.relationship_to_netpilot == "remote":
+        target.limitation_code = "client_snapshot_available" if usable else "remote_client_not_directly_observable"
+    if record.diagnostic_readiness and record.diagnostic_readiness.has_usable_client_evidence != usable:
+        record.diagnostic_readiness = None
+
+
 def snapshot_context(records):
     if not records:
         return "CLIENT DIAGNOSTIC SNAPSHOT\n- none"
@@ -122,7 +161,7 @@ def snapshot_context(records):
     return "\n".join(lines)
 
 
-def snapshot_answer(records, intent):
+def snapshot_answer(records, intent, *, allow_refresh=True):
     """A bounded, deterministic evidence-first remote-client analysis/fallback."""
     first = records[0]
     historical = first.stale or first.clock_skew_suspected
@@ -143,7 +182,9 @@ def snapshot_answer(records, intent):
         lines.append("\n采集时存在 DNS 解析失败，支持解析链路异常的可能；不能仅凭此认定 DNS 配置错误、整体断网或已定位唯一根因。")
     if any(item.status in {"unsupported", "error", "unknown"} for item in records):
         lines.append("不支持、采集错误和缺失字段均是未知状态，不等于网络异常或功能关闭。")
-    lines.append("\n证据限制：固定 DNS、网关与单一 TCP 探测不能覆盖全部网页/应用、认证、VPN 或浏览器代理。网关可达不代表互联网可达；单个 TCP 失败不证明整体断网。请结合受影响应用和采集时现象，必要时重新采集上传。未修改任何网络设置，未执行服务主机网络工具。")
+    lines.append("\n证据限制：固定 DNS、网关与单一 TCP 探测不能覆盖全部网页/应用、认证、VPN 或浏览器代理。网关可达不代表互联网可达；单个 TCP 失败不证明整体断网。请结合受影响应用和采集时现象。"
+                 + ("必要时重新采集上传。" if allow_refresh else "当前采集器无法补足剩余覆盖，重复上传同类快照不能解决该缺口；接下来仅能进行受限分析。")
+                 + "未修改任何网络设置，未执行服务主机网络工具。")
     return "\n".join(lines)
 
 

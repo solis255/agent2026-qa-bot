@@ -64,6 +64,8 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
     """Build a stable report from one Session-level diagnosis snapshot."""
 
     record = export_safe(record)
+    from netpilot.client_snapshot.service import refresh_persisted_snapshot_availability
+    refresh_persisted_snapshot_availability(record)
     target = record.diagnostic_target
     superseded_ids = {e.evidence_id for e in record.verification_evidence if e.superseded}
     current_calls = [call for call in record.tool_calls if call.evidence_id not in superseded_ids
@@ -86,6 +88,7 @@ def build_diagnosis_report(record: DiagnosisRecordView) -> DiagnosisReportView:
         conclusion = "快照已过期或疑似时钟偏差；以下仅为历史采集状态，不代表现在。\n\n" + conclusion
     return DiagnosisReportView(
         context_acquisition=record.context_acquisition,
+        diagnostic_readiness=record.diagnostic_readiness,
         is_demo=record.is_demo, demo_scenario_id=record.demo_scenario_id, data_notice=record.data_notice,
         privacy_metadata=record.privacy_metadata,
         privacy_policy_version=record.privacy_policy_version,

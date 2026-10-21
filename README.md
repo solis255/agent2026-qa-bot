@@ -243,6 +243,14 @@ Session 仍是有界进程内存，重启/清理后需新建 Session，已完成
 12A 快照新增 `environment_profile` 并升级到 v5（12G 当前为 v11），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
 接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
 
+### 自适应诊断流程（Milestone 13B）
+
+正式诊断前，NetPilot 会计算确定性的 Diagnostic Readiness，根据请求类型、必要环境、诊断对象、当前证据和对象能力，决定直接回答、继续询问、复用证据、运行允许的检测，或说明需要客户端侧证据。
+
+远程 Windows 的广泛网页/全网故障和明确的自身 DNS/网关检测请求，在缺少当前证据时会提示使用已有快照功能；OS 未知时复用 13A 只问系统。macOS/Linux/手机继续受限排查，不推荐不适用的采集命令；单站点故障优先低风险建议。过期、时钟偏差、旧任务或旧对象快照保留历史，但不能满足当前准备度。服务主机检测结果不会代替远程客户端证据。
+
+Chat、SSE、Session 和历史/JSON Report 提供 `diagnostic_readiness`；历史持久化快照 schema v12 兼容旧数据，SQLite 表结构仍为 v3，客户端上传格式仍为 v1。13B 沿用手动上传，不增加一键检查、自动下载、自动上传或页面重构。规则、测试和验收记录见 [Milestone 13B](docs/MILESTONE13B_VALIDATION.md)。
+
 ### 诊断对象（Milestone 12B）
 
 侧栏“诊断对象”显示当前对象、直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，

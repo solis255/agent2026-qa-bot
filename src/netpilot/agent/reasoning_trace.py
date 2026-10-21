@@ -128,7 +128,7 @@ class ReasoningTraceBuilder:
         if state_changed:
             self.append("state_change", "检测到环境变化",
                         f"旧观察仅保留用于前后对比；新诊断进入 task_version={self.task_version}。", decision="recheck")
-        if policy.allow_network_tools:
+        if policy.allow_network_tools and policy.max_new_calls != 0:
             required = " / ".join(_COVERAGE.get(name, name) for name in sufficiency.required_coverage)
             self.append("planning", "制定检测计划", f"按需验证 {required}；只调用白名单只读工具，不因单一异常提前确认根因。", decision="continue")
         elif policy.allow_rag:

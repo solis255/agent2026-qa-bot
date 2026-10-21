@@ -52,6 +52,9 @@ def test_tc02_no_tools_llm_or_fabricated_diagnosis(context_app):
 
 def test_tc07_chip_merge_normal_transcript_and_persistence(context_app):
     app, client, owner, sid, tools, llm = context_app
+    # 13B may additionally ask OS before collection; this test isolates the
+    # original scope/access journey with the browser's known platform.
+    assert client.patch("/api/session/environment/browser",json={"session_id":sid,"os_family":"windows"}).status_code == 200
     send(client, sid, "校园网连不上")
     scope = send(client, sid, "其他应用也不能联网", context_answer={"field":"affected_scope","value":"all_network"})
     assert scope["ui_action"]["field"] == "network_access"

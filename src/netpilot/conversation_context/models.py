@@ -2,6 +2,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from netpilot.diagnostic_target import TargetSubject
 
 ContextField = Literal["os_family", "network_access", "affected_scope", "vpn_enabled", "proxy_enabled"]
 ContextTopic = Literal["connectivity", "web", "campus", "vpn", "proxy", "platform_setup"]
@@ -57,3 +58,21 @@ class ContextAcquisitionState(ContextModel):
     topic: ContextTopic | None = None
     task_version: int = Field(default=1, ge=1)
     target_version: int = Field(default=1, ge=1)
+
+
+class DiagnosticReadiness(ContextModel):
+    """A bounded routing decision, never an observation or execution permission."""
+
+    state: Literal["knowledge_only", "need_context", "need_client_evidence", "ready"]
+    reason: str = Field(min_length=1, max_length=100, pattern=r"^[a-z_]+$")
+    missing_context_fields: list[ContextField] = Field(default_factory=list, max_length=5)
+    evidence_gap: list[str] = Field(default_factory=list, max_length=8)
+    target_subject: TargetSubject
+    target_version: int = Field(ge=1)
+    task_version: int = Field(default=1, ge=1)
+    can_use_host_network_tools: bool = False
+    can_use_mock_tools: bool = False
+    has_usable_client_evidence: bool = False
+    client_evidence_supported: bool | None = None
+    recommended_action: Literal["answer_knowledge", "ask_context", "analyze_existing",
+                                "run_allowed_diagnostics", "request_client_evidence", "continue_with_limitations"]

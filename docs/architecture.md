@@ -314,7 +314,15 @@ Campus knowledge intent
 
 13A 在原 Orchestrator 入口复用 deterministic extractor 和 `merge_environment(source="user")`，通过独立 `conversation_context` 的 needs/questions/acquisition 规则评估最少上下文；缺信息时返回一个 `ContextQuestion`，不调用网络 Tool 或额外 LLM。Chips 作为严格 allowlisted `context_answer` 进入普通 Chat/SSE，在原 Session owner/busy 锁内检查待回答字段与版本；回答仍写真实聊天历史。只有既有 EnvironmentProfile 保存环境，轻量 acquisition state 只保存字段名、主题与阶段版本，旧数据缺字段默认空。后续明确请求沿用原 Tool/RAG/Target/Evidence 流程；服务主机结果不能充当客户端证据。
 
-`ChatResponse.ui_action` 当前为可选 `context_question`，SSE complete 携带同一响应合同；Web 使用安全文本 DOM 构造原生按钮，高级环境表单默认折叠并显示 provenance/置信度。History/JSON Report 保留轻量 acquisition 状态，不保存可点击 DOM，也不从历史答案反推已问字段。详见 [13A 验收](MILESTONE13A_VALIDATION.md)；DiagnosticReadiness、网络检查向导和整体布局仍属 13B–13D。
+`ChatResponse.ui_action` 当前为可选 `context_question`，SSE complete 携带同一响应合同；Web 使用安全文本 DOM 构造原生按钮，高级环境表单默认折叠并显示 provenance/置信度。History/JSON Report 保留轻量 acquisition 状态，不保存可点击 DOM，也不从历史答案反推已问字段。详见 [13A 验收](MILESTONE13A_VALIDATION.md)。
+
+13B 在 `acquire_context()` 与现有 `_run_turn()` 之间加入 `conversation_context.readiness.assess_diagnostic_readiness()`。先保留报告/历史/恢复确认/复发/验证结果/显式修复/报修/反馈路径，再按必要问题、知识、TargetCapability、既有 EvidenceSufficiency、采集需求的顺序评估。平台安装的 OS 问题优先于知识回答；新增的采集平台问题复用原 `plan_context_question()`、Chips、owner/busy 校验与任务/对象版本，不增加第二套问答状态。
+
+Readiness 是严格 Pydantic 决策，不是 Evidence 或权限。四状态为 `knowledge_only / need_context / need_client_evidence / ready`。覆盖只调用原 `coverage_from_observations()`；充分度只调用原 `assess_evidence_sufficiency()`。Host/Mock 仍由原 `evaluate_target_capabilities()`、ToolPolicy 与 Registry 决定执行权限。充分证据时保留原等价 Tool feedback 复用协议，并以 `ToolPolicy.max_new_calls=0` 拦截新取证。
+
+`usable_client_snapshot_evidence()` 复用任务已有 reusable evidence，再检查 origin、reusable、superseded、task/target 版本、stale、clock skew 和 expires_at；历史视图继续保留所有旧记录。Session、历史读取和 Report 使用同一可用性规则刷新 `client_snapshot_available`，不把旧快照宣传为当前可用。Windows Collector v1 的覆盖能力集中在 readiness 模块；无法提供的缺口不会导致无限上传。
+
+`AgentResult.diagnostic_readiness` 经普通 Chat/SSE 共用 presenter 暴露，Session 保存 `last_diagnostic_readiness`。特殊动作响应为 null，保留 Session 的上次决策。任务/对象切换、上传替换和当前证据过期使缓存失效，下一次对话重新计算。历史 JSON 快照升级 v12，缺字段默认 null，SQLite 表结构不变。Web 只根据服务器的平台支持标志显示既有 Windows 脚本说明；没有 ClientCheckAction、EXE 或上传向导。详见 [13B 验收](MILESTONE13B_VALIDATION.md)。
 
 | 维度 | `SessionStore` | `SQLiteDiagnosisRepository` |
 |---|---|---|

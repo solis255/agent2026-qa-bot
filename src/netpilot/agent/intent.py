@@ -300,7 +300,8 @@ def classify_turn_intent(
             TurnIntent.FOLLOWUP_ACTION, 0.9,
             reason="request for the next safe action",
         )
-    if any(term in text for term in _DIAGNOSE_TERMS):
+    from netpilot.conversation_context.readiness import explicit_client_check
+    if any(term in text for term in (*_DIAGNOSE_TERMS, "不能联网", "无法联网")) or explicit_client_check(message):
         return _classification(
             TurnIntent.DIAGNOSE, 0.9, tools=True,
             reason="concrete diagnosis or read-only check request",

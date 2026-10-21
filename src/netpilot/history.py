@@ -33,7 +33,7 @@ from netpilot.models import (
 
 
 SCHEMA_VERSION = 3
-SNAPSHOT_SCHEMA_VERSION = 11
+SNAPSHOT_SCHEMA_VERSION = 12
 
 
 class DiagnosisStorageError(RuntimeError):
@@ -105,6 +105,7 @@ class SQLiteDiagnosisRepository:
 
         now = datetime.now(timezone.utc)
         current = DiagnosisRecordView(
+            diagnostic_readiness=response.diagnostic_readiness,
             context_acquisition=response.context_acquisition,
             is_demo=response.is_demo, demo_scenario_id=response.demo_scenario_id, data_notice=response.data_notice,
             schema_version=SNAPSHOT_SCHEMA_VERSION,
@@ -198,8 +199,10 @@ class SQLiteDiagnosisRepository:
                     (str(user_id), str(session_id)),
                 ).fetchone()
                 if row is not None:
-                    record = _record_from_row(row).model_copy(update={
+                    existing = _record_from_row(row)
+                    record = existing.model_copy(update={
                         "environment_profile": profile, "schema_version": SNAPSHOT_SCHEMA_VERSION,
+                        "diagnostic_readiness": None if profile != existing.environment_profile else existing.diagnostic_readiness,
                     })
                     from netpilot.remediation.planner import environment_key
                     from netpilot.remediation.service import supersede
@@ -260,6 +263,7 @@ class SQLiteDiagnosisRepository:
                     "client_evidence":[item for item in task.evidence if item.evidence_origin == "client_snapshot"],
                     "environment_profile":task.environment_profile,
                     "context_acquisition":task.context_acquisition,
+                    "diagnostic_readiness":task.last_diagnostic_readiness,
                     "diagnostic_target":task.diagnostic_target,
                     "reasoning_trace":trace,
                     "metrics":record.metrics.model_copy(update={"reasoning_trace_steps":len(trace)}),
@@ -622,6 +626,7 @@ def _merge_session_records(
     ], reasoning_trace_max_steps)
     return DiagnosisRecordView(
         context_acquisition=current.context_acquisition,
+        diagnostic_readiness=current.diagnostic_readiness,
         is_demo=current.is_demo, demo_scenario_id=current.demo_scenario_id, data_notice=current.data_notice,
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         record_id=(current.record_id if keep_latest_record_id else existing.record_id),
@@ -833,7 +838,9 @@ def _record_from_row(row: sqlite3.Row) -> DiagnosisRecordView:
             cycle.status = "superseded"
     for item in record.client_evidence:
         if item.expires_at:
-            item.stale = now > item.expires_at
+            item.stale = item.stale or now > item.expires_at
+    from netpilot.client_snapshot.service import refresh_persisted_snapshot_availability
+    refresh_persisted_snapshot_availability(record)
     return record
 
 

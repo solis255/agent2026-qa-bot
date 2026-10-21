@@ -406,6 +406,7 @@ function setAuthMode(mode) {
 }
 
 function showAuthGate(message = "请先登录或注册。") {
+  renderDiagnosticReadiness(null);
   retireContextQuestions();
   state.authEpoch += 1;
   state.user = null;
@@ -779,6 +780,7 @@ async function saveEnvironment(event) {
     state.environmentProfile = profile;
     renderEnvironmentProfile(profile);
     elements.environmentStatus.textContent = "环境已保存到服务端；已有诊断证据保持不变。";
+    renderDiagnosticReadiness(null);
     invalidateDisplayedPlan(baseline, profile);
   } catch (error) {
     if (state.authEpoch === authEpoch) elements.environmentStatus.textContent = error.message;
@@ -797,6 +799,14 @@ function renderDiagnosticTarget(target, {historical = false} = {}) {
   elements.targetCapability.textContent = `直接检测能力：${capability}；网络工具执行位置：${EXECUTION_LABELS[t.execution_context] || EXECUTION_LABELS.unavailable}`;
   elements.targetSubject.value = t.subject || "unknown";
   elements.targetStatus.textContent = historical ? "历史快照只读，不会改变当前 Session 对象。" : t.subject === "mock_client" ? "Mock 模拟终端由系统管理。" : t.subject === "netpilot_host" ? "检测结果只描述 NetPilot 服务主机，不代表浏览器设备。" : "本机网络工具运行在服务主机，不会将服务主机结果当作此设备结果；当前尚不能直接读取远程客户端 DNS、网关和路由。";
+}
+
+function renderDiagnosticReadiness(readiness) {
+  // Display only the server decision; this does not grant upload/tool permissions.
+  document.querySelector("#windows-snapshot-guide").hidden = readiness?.client_evidence_supported !== true;
+  document.querySelector("#collector-support-note").textContent = readiness?.client_evidence_supported === false
+    ? "当前系统尚无对应采集器，可以继续进行受限排查。"
+    : readiness?.client_evidence_supported === true ? "" : "采集器目前仅支持 Windows；请先确认设备系统。";
 }
 
 function renderClientSnapshot(summary, evidence = [], {historical = false, target = state.diagnosticTarget} = {}) {
@@ -1183,6 +1193,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     state.isDemo = Boolean(session.is_demo);
     state.demoScenarioId = session.demo_scenario_id || null;
     state.environmentProfile = session.environment_profile || null;
+    renderDiagnosticReadiness(session.diagnostic_readiness);
     state.diagnosticTarget = session.diagnostic_target || null;
     state.clientSnapshotSummary = session.client_snapshot_summary || null;
     state.clientEvidence = session.client_evidence || [];
@@ -1471,6 +1482,7 @@ async function loadDiagnosisRecord(recordId) {
     if (state.authEpoch !== authEpoch) return;
     state.viewingHistory = true;
     renderEnvironmentProfile(record.environment_profile, { historical: true });
+    renderDiagnosticReadiness(record.diagnostic_readiness);
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
     renderRemediationPlan(record.remediation_plan,{historical:true});
     renderVerification(record.verification_cycles || [],{historical:true});
@@ -1540,6 +1552,7 @@ async function submitChat(event, options = {}) {
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
     userMessage.textContent = response.redacted_user_message || "消息已处理（原文不在此展示）";
     if (response.environment_profile) state.environmentProfile = response.environment_profile;
+    renderDiagnosticReadiness(response.diagnostic_readiness);
     if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
     state.clientSnapshotSummary = response.client_snapshot_summary || null;
     state.clientEvidence = response.client_evidence || [];
@@ -2014,6 +2027,7 @@ async function loadDemoScenarios() {
 function applyDemoSession(session,{reset=false}={}) {
   state.sessionId=session.session_id;state.isDemo=Boolean(session.is_demo);state.demoScenarioId=session.demo_scenario_id;
   state.environmentProfile=session.environment_profile;state.diagnosticTarget=session.diagnostic_target;
+  renderDiagnosticReadiness(session.diagnostic_readiness);
   state.clientSnapshotSummary=session.client_snapshot_summary || null;state.clientEvidence=session.client_evidence || [];
   state.remediationPlan=session.remediation_plan || null;state.remediationReadiness=session.remediation_readiness || null;
   state.verificationCycles=session.verification_cycles || [];state.escalationPackages=session.escalation_packages || [];

@@ -37,6 +37,7 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
         and (result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(tool_call, result.diagnostic_target))
     ]
     return safe_value(ChatResponse(
+        diagnostic_readiness=result.diagnostic_readiness,
         ui_action=result.ui_action,
         context_acquisition=result.context_acquisition or {},
         remediation_plan=result.remediation_plan,
