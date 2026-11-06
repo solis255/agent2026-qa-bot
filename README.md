@@ -8,7 +8,9 @@
 
 TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只给出通用建议的 Chatbot：面对实时网络问题时，Agent 会按需调用受控、只读的网络 Tool 获取证据，再给出带结论、置信度、建议和限制的诊断；面对 VPN、eduroam 等知识问题时，可从带来源标记的本地知识库检索参考资料。
 
-用户无需预先填写环境信息。NetPilot 会先从用户描述中提取已明确的设备与网络上下文，只在诊断确有需要且信息缺失时，通过对话询问最少必要信息。每次最多一个问题，可选快捷回答或直接输入，“不清楚”也是合法回答；原环境表单保留在默认折叠的“环境信息 / 查看详情”。实现范围与验收见 [Milestone 13A](docs/MILESTONE13A_VALIDATION.md)。
+用户无需预先填写环境信息。NetPilot 会先从用户描述中提取已明确的设备与网络上下文，只在诊断确有需要且信息缺失时，通过对话询问最少必要信息。每次最多一个问题，可选快捷回答或直接输入，“不清楚”也是合法回答；原环境表单保留在默认折叠的“诊断详情 → 环境信息 → 修改环境”。实现范围与验收见 [Milestone 13A](docs/MILESTONE13A_VALIDATION.md)。
+
+Web 界面采用 Chat-first 设计。普通用户默认只需描述网络问题，环境追问、客户端网络检查和下一步操作会按需出现在对话中；Environment、Diagnostic Target、Evidence、Reasoning Trace、Tool Timeline、Verification、Report 等高级信息集中在“诊断详情”中按需查看。历史从账号菜单打开，查看时只读，可返回当前诊断继续。详见 [Milestone 13D 验收](docs/MILESTONE13D_VALIDATION.md)。
 
 正式产品代码位于 [`src/netpilot/`](src/netpilot/)。仓库中的 `labs/`、`lab/`、`examples/`、`bonus/` 等目录是保留的上游教学资源，不参与 TJU NetPilot 的正式运行时，详见[上游来源与教学资源](docs/upstream.md)。
 
@@ -184,7 +186,7 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 
 ### Milestone 12I 场景演示与验收
 
-设置 `DEMO_MODE=true` 后，登录并展开右侧“演示模式 · Demo / Mock”，可创建独立的 DNS 恢复、两轮失败升级、VPN（含未知状态对照）、单服务和复发演示。默认关闭；所有场景经过正式快照、修复反馈、复核、处理状态与隐私导出流程，重置保留已有历史。
+设置 `DEMO_MODE=true` 后，登录并打开“诊断详情 → 演示 / 开发 → 演示模式 · Demo / Mock”，可创建独立的 DNS 恢复、两轮失败升级、VPN（含未知状态对照）、单服务和复发演示。默认关闭；所有场景经过正式快照、修复反馈、复核、处理状态与隐私导出流程，重置保留已有历史。
 
 完整启动命令、A/B 比赛操作脚本、真实客户端展示及验收结果见 [Demo 操作手册](docs/DEMO_SCENARIOS.md)。离线自动验收：
 
@@ -230,7 +232,7 @@ GET  /api/scenarios
 
 ### 当前环境（Milestone 12A）
 
-侧栏“当前环境”可展开查看/编辑操作系统、接入方式、VPN、Proxy、影响范围及受影响服务。
+“诊断详情 → 当前诊断 → 环境信息 → 修改环境”可编辑操作系统、接入方式、VPN、Proxy、影响范围及受影响服务；来源信息继续保留在更深层详情中。
 浏览器只自动提供归一化 OS、在线状态、语言及可选 Network Information API 估计；
 不会自动判断校园 WiFi、VPN 或代理。未知保留为 `unknown` / `null`，不等于关闭。
 用户确认的值优先于浏览器推断。明确陈述（如“我现在用 Windows 11，连校园 WiFi，没开 VPN”）
@@ -261,7 +263,7 @@ Chat、SSE、Session 和历史/JSON Report 提供 `diagnostic_readiness`；历�
 
 ### 诊断对象（Milestone 12B）
 
-侧栏“诊断对象”显示当前对象、直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，
+“诊断详情 → 当前诊断 → 诊断对象”显示当前对象，展开后可切换并查看直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，
 **不会调用服务主机的 DNS、Ping、网卡、TCP、HTTP 或路由工具来冒充用户设备检测**。
 未上传客户端快照时，这类请求会依据现象/环境给出安全建议或追问；明确知识请求仍可检索 RAG。
 选择“NetPilot 服务主机”，或明确说“检查这台 NetPilot 服务器的 DNS”，才允许 Local 主机工具。
@@ -275,7 +277,7 @@ Target API 只接受 `session_id` 与 `subject`，执行位置/限制由服务�
 
 ### 客户端诊断快照（Milestone 12C）
 
-Local 部署的远程“当前浏览器设备”可在侧栏下载 [Windows 只读脚本](scripts/client_diagnostic_windows.ps1)，
+Local 部署的远程“当前浏览器设备”可在“诊断详情 → 网络检查 → 高级详情 / 手动上传”下载 [Windows 只读脚本](scripts/client_diagnostic_windows.ps1)，
 审阅后在允许运行脚本的 Windows 10/11 普通用户 PowerShell 执行 `./client_diagnostic_windows.ps1`，
 得到 `netpilot-client-diagnostic.json`，再主动上传。不提供一键执行、自动上传、提权或降低执行策略。
 
@@ -292,7 +294,7 @@ unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器�
 ### 引导式修复计划（Milestone 12D）
 
 诊断或明确询问“怎么解决 / 下一步怎么办”时，服务端可从本地批准目录生成最多 5 步手动计划。
-侧栏“修复计划”展示低风险标签、适用对象、理由、操作、验证和回滚；可标记完成、跳过、失败及是否改善。
+主区在有可用计划时显示“查看修复步骤”，打开“诊断详情 → 处理过程 → 修复计划”，展示低风险标签、适用对象、理由、操作、验证和回滚；可标记完成、跳过、失败及是否改善。
 “还是不行”复用既有状态，不重复已完成无效或跳过的等价操作，也不会自动升级为高风险操作。
 
 **Plan 不是执行。** 不运行 Shell、不提权、不改 DNS/Proxy/Route、防火墙或执行策略，不自动重测。

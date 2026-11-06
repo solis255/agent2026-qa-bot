@@ -38,7 +38,7 @@ def test_web_exposes_auth_forms_account_menu_and_password_dialog() -> None:
         "my-history-card",
     ):
         assert f'id="{element_id}"' in html
-    assert '<main class="workspace" id="workspace" hidden>' in html
+    assert '<main class="workspace student-workspace" id="workspace" hidden="">' in html
     assert "我的诊断历史" in html
     assert "学校统一身份认证密码" in html
     assert 'type="password"' in html

@@ -12,6 +12,8 @@
 
 Milestone 13C 新增 `test_client_check_flow.py`、`test_client_check_collector.py` 和 `test_client_check_ui.py`：覆盖结构化动作、拒绝与重新开启、正式上传链、一次性继续、task/target/owner 隔离、过期/偏差/重复、原 12E 对比、只读工具包、三步向导、拖放、键盘、异步退役和 Chat/SSE。结果与人工验收范围见 [MILESTONE13C_VALIDATION.md](MILESTONE13C_VALIDATION.md)。
 
+Milestone 13D 新增 `test_student_ui.py` / `web_student_ui_runtime.cjs` 的 24 项真实 DOM 契约与交互检查：无重复 ID、required elements、默认折叠、抽屉与 Escape/焦点、环境编辑、对象/检查摘要、13A/13C 动作位置、修复/复核/报修入口、历史分页/只读/完整返回/跨账号异步隔离、Demo 降级与 reduced-motion。原 113 项前端回归继续运行，后端全量与 12I Runner 保持原验证。五种宽度、键盘、历史及实际业务页面验收见 [MILESTONE13D_VALIDATION.md](MILESTONE13D_VALIDATION.md)。
+
 在已激活的项目虚拟环境中：
 
 ```bash

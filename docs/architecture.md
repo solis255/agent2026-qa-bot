@@ -349,6 +349,12 @@ Readiness 是严格 Pydantic 决策，不是 Evidence 或权限。四状态为 `
 
 ## Web and API
 
+Milestone 13D 仅调整原生静态前端的信息层级：居中的 `student-workspace` 保留聊天、中文处理状态、简洁环境摘要与按当前结构化状态显示的下一步入口。原 diagnostics panel 卡片各保留一份 DOM，移入原生 modal `diagnostic-details-dialog`：当前诊断与处理过程展开，技术详情、报告、演示/开发折叠。`student-ui.js` 集中管理抽屉、摘要和历史返回，没有 bundler 或前端框架。
+
+13A ContextQuestion 和 13C ClientCheckAction 仍附着在聊天消息旁；主区快捷入口调用原检查向导、修复卡片、验证及报修函数，不另建决策或业务 state。`EnvironmentProfile`、Target、Snapshot、Remediation、Verification、Resolution 仍由原 API 维护。抽屉展开、当前详情区域、历史查看工件与暂存的当前展示 DOM 只存在前端内存，不进入数据库或报告。
+
+账号菜单的历史列表使用独立 `history-dialog`，沿用原游标分页与缓存。读取历史仅设置 `viewingHistory` 和显示用工件，不覆盖当前诊断状态；发送/编辑/上传/验证/演示写操作均有只读 guard。返回当前诊断时恢复原对话 DOM（包括动作监听器）、指标/轨迹/报告入口，再从唯一的当前 state 渲染工作流。退出、账号切换或新会话清理临时视图。原 Chat/SSE、历史/报告合同和后端 schema 均未修改。详见 [13D 验收](MILESTONE13D_VALIDATION.md)。
+
 Session snapshot v3 在 DB schema v3 内保存 `PersistedConversationTurn[]` 和 `conversation_complete`，无需重建 SQLite 表。每次 Chat/SSE 共用 upsert 追加实际问答；旧 v1/v2 多轮累计快照只能兼容读取最后一对并标为不完整。历史查看不恢复内存 Session。Knowledge Finalization 使用独立知识 Prompt、受限 chunk 与最近最多 4 条短历史，支持来源筛选追问的 Evidence 复用。日志与 Web 调试指标提供具体失败类型。详见 [知识整理与完整会话验收](knowledge-transcript-validation.md)。
 
 知识最终整理、当前账号持久化历史上下文与 cursor 前端上一页缓存的最新流程和验收，见 [回答与历史修复](answer-history-fixes.md)。这三条路径继续遵守 Session History v3 唯一性和认证边界。

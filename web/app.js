@@ -22,6 +22,11 @@ const state = {
   escalationSessionId: null,
   environmentTouched: new Set(),
   viewingHistory: false,
+  historyRecord: null,
+  historyPresentation: null,
+  detailsOpen: false,
+  detailsSection: null,
+  diagnosticReadiness: null,
   health: null,
   busy: false,
   scenarios: [],
@@ -221,12 +226,12 @@ function setBusy(busy, message = "") {
   }
   elements.conversation.setAttribute("aria-busy", String(busy));
   const ready = Boolean(state.user && state.sessionId && (state.health?.llm_configured || state.isDemo));
-  elements.messageInput.disabled = busy || !ready;
-  elements.sendButton.disabled = busy || !ready;
+  elements.messageInput.disabled = busy || !ready || state.viewingHistory;
+  elements.sendButton.disabled = busy || !ready || state.viewingHistory;
   elements.newSession.disabled = busy || !state.user || !state.health;
-  elements.scenarioSelect.disabled = busy || !state.user || elements.scenarioSelect.dataset.enabled !== "true";
-  elements.customScenarioNew.disabled = busy || !state.user || elements.customScenarioNew.dataset.available !== "true";
-  elements.customScenarioDelete.disabled = busy || !state.user;
+  elements.scenarioSelect.disabled = busy || !state.user || state.viewingHistory || elements.scenarioSelect.dataset.enabled !== "true";
+  elements.customScenarioNew.disabled = busy || !state.user || state.viewingHistory || elements.customScenarioNew.dataset.available !== "true";
+  elements.customScenarioDelete.disabled = busy || !state.user || state.viewingHistory;
   elements.scenarioFormSubmit.disabled = busy || !state.user;
   elements.historyRefresh.disabled = busy || !state.user;
   updateHistoryControls();
@@ -236,10 +241,13 @@ function setBusy(busy, message = "") {
   elements.logoutButton.disabled = busy || !state.user;
   elements.changePasswordOpen.disabled = busy || !state.user;
   for (const button of elements.historyList.querySelectorAll("button")) button.disabled = busy || !state.user;
-  for(const id of ["demo-create","demo-scenario-select","demo-fill-prompt","demo-refresh"]){const control=document.querySelector(`#${id}`);if(control)control.disabled=busy || !state.user;}
-  const demoReset=document.querySelector("#demo-reset");if(demoReset)demoReset.disabled=busy || !state.user || !state.isDemo;
-  for(const button of document.querySelectorAll("#demo-fixtures button"))button.disabled=busy || !state.user || button.dataset.available!=="true";
-  elements.sendButton.textContent = busy ? "诊断中…" : "开始诊断";
+  for(const id of ["demo-create","demo-scenario-select","demo-fill-prompt","demo-refresh"]){const control=document.querySelector(`#${id}`);if(control)control.disabled=busy || !state.user || state.viewingHistory;}
+  const demoReset=document.querySelector("#demo-reset");if(demoReset)demoReset.disabled=busy || !state.user || state.viewingHistory || !state.isDemo;
+  for(const button of document.querySelectorAll("#demo-fixtures button"))button.disabled=busy || !state.user || state.viewingHistory || button.dataset.available!=="true";
+  for (const button of document.querySelectorAll("[data-prompt]")) button.disabled = busy || !state.user || state.viewingHistory;
+  document.querySelector("#history-return").disabled = busy;
+  elements.sendButton.textContent = busy ? "处理中…" : "发送";
+  renderCaseStatus();
   if (message) elements.interactionNote.textContent = message;
 }
 
@@ -412,11 +420,17 @@ function setAuthMode(mode) {
 }
 
 function showAuthGate(message = "请先登录或注册。") {
+  resetStudentUI();
   renderDiagnosticReadiness(null);
   retireContextQuestions();
   state.authEpoch += 1;
   state.user = null;
   state.health = null;
+  state.taskVersion = null;
+  state.demoScenarios = [];
+  elements.scenarioSelect.dataset.enabled = "false";
+  elements.scenarioControl.hidden = true;
+  document.querySelector("#demo-details").hidden = true;
   state.sessionId = null;
   state.isDemo = false;
   document.querySelector("#demo-controls")?.setAttribute("hidden", "");
@@ -587,7 +601,8 @@ function renderHealth(health) {
   elements.serviceState.classList.remove("offline");
   elements.serviceState.classList.add("online");
   elements.stateDot.className = "state-dot online";
-  elements.stateText.textContent = "后端服务正常";
+  elements.stateText.textContent = health.llm_configured && health.status === "ok" ? "服务正常" : "服务异常";
+  elements.stateDot.className = `state-dot ${health.llm_configured && health.status === "ok" ? "online" : "offline"}`;
   elements.apiStatus.textContent = health.status === "ok" ? "正常" : "异常";
   elements.llmStatus.textContent = health.llm_configured ? "已配置" : "未配置";
   elements.ragStatus.textContent = health.rag_ready ? "已就绪" : "尚未构建";
@@ -601,7 +616,7 @@ function renderHealth(health) {
 function renderHealthError(error) {
   elements.serviceState.classList.add("offline");
   elements.stateDot.className = "state-dot offline";
-  elements.stateText.textContent = "无法连接后端";
+  elements.stateText.textContent = "服务异常";
   elements.apiStatus.textContent = "不可用";
   elements.llmStatus.textContent = "未知";
   elements.ragStatus.textContent = "未知";
@@ -633,6 +648,8 @@ function appendMessage(role, text, sources = []) {
 function resetConversation() {
   retireContextQuestions();
   state.viewingHistory = false;
+  state.historyRecord = null;
+  state.historyPresentation = null;
   renderEnvironmentProfile(state.environmentProfile);
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
@@ -645,7 +662,7 @@ function resetConversation() {
   elements.conversation.replaceChildren();
   appendMessage(
     "assistant",
-    "请描述网络现象。我会按需调用只读检测工具或校园网络知识库，并展示完整证据。",
+    "你好，我是 NetPilot。\n\n你可以直接告诉我遇到的校园网络问题，例如“连上 WiFi 但是网页打不开”。\n\n不需要先填写网络配置，我会在必要时再询问。",
   );
   renderDiagnosis(null);
   renderMetrics(null);
@@ -672,8 +689,7 @@ const ENVIRONMENT_SCOPE = {unknown: "未知", all_network: "全部网络", web_o
 const environmentBoolLabel = (value) => value === true ? "开启" : value === false ? "关闭" : "未知";
 
 function formatEnvironmentSummary(profile) {
-  const p = profile || {};
-  return `${ENVIRONMENT_OS[p.os_family] || "未知"} · ${ENVIRONMENT_ACCESS[p.network_access] || "未知"} · VPN ${environmentBoolLabel(p.vpn_enabled)} · Proxy ${environmentBoolLabel(p.proxy_enabled)} · ${ENVIRONMENT_SCOPE[p.affected_scope] || "未知"}`;
+  return studentEnvironmentSummary(profile);
 }
 
 function renderEnvironmentProfile(profile, { historical = false } = {}) {
@@ -681,7 +697,7 @@ function renderEnvironmentProfile(profile, { historical = false } = {}) {
   const p = profile || {};
   elements.environmentSummary.textContent = (historical ? "历史环境：" : "") + formatEnvironmentSummary(p);
   elements.environmentBrowser.textContent = `浏览器状态：${p.browser_online === true ? "在线（不等于互联网可达）" : p.browser_online === false ? "离线" : "未知"}；语言：${p.browser_language || "未知"}；模式：${p.client_mode || "unknown"}`;
-  elements.environmentStatus.textContent = historical ? "当前为历史快照，不可在此修改。继续提问时使用当前 Session 环境。" : "用户确认优先于浏览器推断。";
+  elements.environmentStatus.textContent = historical ? "历史记录只读；返回当前诊断后可继续。" : "用户确认优先于浏览器推断。";
   for (const name of ["os_family", "network_access", "vpn_enabled", "proxy_enabled", "affected_scope", "affected_service"]) {
     const control = elements.environmentForm.querySelector(`[name="${name}"]`);
     const value = p[name] ?? (["os_family", "network_access", "affected_scope"].includes(name) ? "unknown" : "");
@@ -799,14 +815,17 @@ const EXECUTION_LABELS = {netpilot_host:"NetPilot 服务主机",mock_provider:"M
 
 function renderDiagnosticTarget(target, {historical = false} = {}) {
   const t = target || {};
-  elements.targetSummary.textContent = `${historical ? "历史对象：" : ""}${TARGET_LABELS[t.subject] || TARGET_LABELS.unknown}${t.relationship_to_netpilot === "remote" ? "（远程）" : ""}`;
+  const name = {user_client:"这台电脑",netpilot_host:"NetPilot 服务主机",mock_client:"演示设备"}[t.subject] || "对象待确认";
+  elements.targetSummary.textContent = `${historical ? "历史诊断：" : "正在诊断："}${name}`;
   const capability = t.limitation_code === "client_snapshot_available" ? "采集时点证据可用，实时直接检测仍受限" : t.limitation_code === "none" ? t.subject === "mock_client" ? "模拟可用" : "可用" : "受限 / 未记录";
   elements.targetCapability.textContent = `直接检测能力：${capability}；网络工具执行位置：${EXECUTION_LABELS[t.execution_context] || EXECUTION_LABELS.unavailable}`;
   elements.targetSubject.value = t.subject || "unknown";
   elements.targetStatus.textContent = historical ? "历史快照只读，不会改变当前 Session 对象。" : t.subject === "mock_client" ? "Mock 模拟终端由系统管理。" : t.subject === "netpilot_host" ? "检测结果只描述 NetPilot 服务主机，不代表浏览器设备。" : "本机网络工具运行在服务主机，不会将服务主机结果当作此设备结果；当前尚不能直接读取远程客户端 DNS、网关和路由。";
+  document.querySelector("#target-technical").textContent = JSON.stringify(t, null, 2);
 }
 
 function renderDiagnosticReadiness(readiness) {
+  if (!state.viewingHistory) state.diagnosticReadiness = readiness || null;
   // Display only the server decision; this does not grant upload/tool permissions.
   document.querySelector("#windows-snapshot-guide").hidden = readiness?.client_evidence_supported !== true;
   document.querySelector("#collector-support-note").textContent = readiness?.client_evidence_supported === false
@@ -894,7 +913,7 @@ function renderRemediationPlan(plan, {historical = false} = {}) {
   elements.remediationPlan.append(list);
 }
 
-const RESOLUTION_LABELS={diagnosing:"诊断中",action_required:"等待操作",verifying:"正在验证",resolved:"已解决",improved:"有改善",unresolved:"未解决",escalated:"建议人工处理"};
+const RESOLUTION_LABELS={diagnosing:"诊断中",action_required:"等待操作",verifying:"正在验证",resolved:"已解决",improved:"有改善",unresolved:"仍未解决",escalated:"建议报修"};
 
 function applyResolution(data) {
   state.resolution=data.resolution || null;state.resolutionTransitions=data.resolution_transitions || [];
@@ -916,7 +935,7 @@ function renderResolution(record,transitions=[],{historical=false,target=state.d
   if(historical || state.viewingHistory || !state.user || !state.sessionId)return;
   const controls=document.createElement("div");controls.className="resolution-controls";
   const button=(label,callback)=>{const b=document.createElement("button");b.type="button";b.textContent=label;b.addEventListener("click",callback);b.disabled=state.busy;controls.append(b);return b;};
-  if(status === "resolved")button("查看修复过程",()=>{elements.remediationSection.open=true;document.querySelector("#verification-section").open=true;});
+  if(status === "resolved")button("查看修复过程",()=>openDiagnosticDetails("workflow-details"));
   if(["resolved","escalated"].includes(status)){
     const b=button("导出诊断报告",()=>elements.exportMarkdown.click());b.dataset.export="true";b.disabled=state.busy || !state.activeRecordId;
   }else{
@@ -925,7 +944,7 @@ function renderResolution(record,transitions=[],{historical=false,target=state.d
     select.value=record?.user_confirmation || "unknown";controls.append(select);
     button("确认症状",()=>resolutionRequest("confirm",{session_id:state.sessionId,status:select.value}));
     button("请求人工支持",()=>resolutionRequest("request-support",{session_id:state.sessionId}));
-    if(["improved","unresolved","action_required"].includes(status) && state.remediationPlan?.steps?.some(s=>s.status === "pending" && s.risk === "low" && !s.requires_admin))button("继续下一步",()=>{elements.remediationSection.open=true;elements.remediationSection.scrollIntoView?.({block:"nearest"});});
+    if(["improved","unresolved","action_required"].includes(status) && state.remediationPlan?.steps?.some(s=>s.status === "pending" && s.risk === "low" && !s.requires_admin))button("继续下一步",()=>openDiagnosticDetails("remediation-section"));
   }
   elements.resolutionContent.append(controls);
 }
@@ -1204,6 +1223,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     }
     if (!session) session = await requestJSON("/api/session", { method: "POST" });
     if (state.authEpoch !== authEpoch) return;
+    resetStudentUI();
     state.sessionId = session.session_id;
     state.taskVersion = session.task_version ?? 1;
     state.isDemo = Boolean(session.is_demo);
@@ -1490,14 +1510,21 @@ async function loadHistory({ pageIndex = 0, refresh = true } = {}) {
 }
 
 async function loadDiagnosisRecord(recordId) {
-  retireContextQuestions();
   if (!recordId || !state.user || state.busy) return;
   const authEpoch = state.authEpoch;
+  const currentNote = elements.interactionNote.textContent;
   setBusy(true, "正在读取历史诊断…");
   try {
     const record = await requestJSON(`/api/diagnoses/${encodeURIComponent(recordId)}`);
     if (state.authEpoch !== authEpoch) return;
+    preserveCurrentPresentation(currentNote);
+    closeClientCheck();
     state.viewingHistory = true;
+    state.historyRecord = record;
+    closeHistoryDialog();
+    closeDiagnosticDetails();
+    document.querySelector("#client-check-launch").hidden = true;
+    elements.sessionLabel.textContent = `历史会话 ${record.session_id || "未记录"}`;
     renderEnvironmentProfile(record.environment_profile, { historical: true });
     renderDiagnosticReadiness(record.diagnostic_readiness);
     renderDiagnosticTarget(record.diagnostic_target, {historical:true});
@@ -1533,7 +1560,7 @@ async function loadDiagnosisRecord(recordId) {
 async function submitChat(event, options = {}) {
   event.preventDefault();
   const message = (options.message ?? elements.messageInput.value).trim();
-  if (!message || !state.user || !state.sessionId || state.busy) return;
+  if (!message || !state.user || !state.sessionId || state.busy || state.viewingHistory) return;
   if (options.continuation && state.viewingHistory) return;
   const authEpoch = state.authEpoch;
   const chatSessionId = state.sessionId;
@@ -1816,7 +1843,7 @@ async function activateScenario(scenario) {
 
 async function switchScenario() {
   const scenario = elements.scenarioSelect.value;
-  if (!scenario || !state.user || state.busy || elements.scenarioSelect.dataset.enabled !== "true") return;
+  if (!scenario || !state.user || state.busy || state.viewingHistory || elements.scenarioSelect.dataset.enabled !== "true") return;
   const authEpoch = state.authEpoch;
   setBusy(true, "正在切换 Mock 场景并重置会话…");
   try {
@@ -1850,7 +1877,7 @@ function syncCustomBehaviorFields() {
 }
 
 function openCustomScenarioDialog() {
-  if (!state.user || state.busy || elements.customScenarioNew.dataset.available !== "true") return;
+  if (!state.user || state.busy || state.viewingHistory || elements.customScenarioNew.dataset.available !== "true") return;
   elements.scenarioForm.reset();
   elements.scenarioFormStatus.textContent = "";
   syncCustomBehaviorFields();
@@ -1860,7 +1887,7 @@ function openCustomScenarioDialog() {
 
 async function createCustomScenario(event) {
   event.preventDefault();
-  if (!state.user || state.busy || !elements.scenarioForm.reportValidity()) return;
+  if (!state.user || state.busy || state.viewingHistory || !elements.scenarioForm.reportValidity()) return;
   const authEpoch = state.authEpoch;
   const pingReachable = elements.scenarioPingReachable.checked;
   const httpReachable = elements.scenarioHttpReachable.checked;
@@ -1904,7 +1931,7 @@ async function createCustomScenario(event) {
 
 async function deleteCurrentCustomScenario() {
   const scenario = state.scenarios.find((item) => item.name === elements.scenarioSelect.value);
-  if (!scenario || scenario.kind !== "custom" || !state.user || state.busy) return;
+  if (!scenario || scenario.kind !== "custom" || !state.user || state.busy || state.viewingHistory) return;
   const authEpoch = state.authEpoch;
   setBusy(true, "正在删除自定义 Mock 场景…");
   try {
@@ -1958,14 +1985,7 @@ elements.changePasswordOpen.addEventListener("click", openPasswordDialog);
 elements.passwordForm.addEventListener("submit", submitPasswordChange);
 elements.passwordCancel.addEventListener("click", () => elements.passwordDialog.close());
 elements.passwordDialogClose.addEventListener("click", () => elements.passwordDialog.close());
-elements.myHistory.addEventListener("click", async () => {
-  elements.accountMenu.open = false;
-  const authEpoch = state.authEpoch;
-  await loadHistory();
-  if (state.authEpoch === authEpoch) {
-    elements.myHistoryCard.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-});
+elements.myHistory.addEventListener("click", openHistoryView);
 elements.chatForm.addEventListener("submit", submitChat);
 elements.targetForm.addEventListener("submit", saveDiagnosticTarget);
 elements.environmentForm.addEventListener("submit", saveEnvironment);
@@ -1979,6 +1999,7 @@ window.setInterval?.(() => {
       state.remediationPlan = {...state.remediationPlan,status:"superseded"};
       renderRemediationPlan(state.remediationPlan);
     }
+    renderCaseStatus();
   }
 }, 30000);
 elements.environmentForm.addEventListener("change", (event) => {
@@ -2019,6 +2040,8 @@ elements.messageInput.addEventListener("keydown", (event) => {
 });
 for (const button of document.querySelectorAll("[data-prompt]")) {
   button.addEventListener("click", () => {
+    if (!state.user || state.busy || state.viewingHistory) return;
+    closeDiagnosticDetails();
     elements.messageInput.value = button.dataset.prompt || "";
     elements.messageInput.focus();
   });
@@ -2046,6 +2069,7 @@ async function loadDemoScenarios() {
 }
 
 function applyDemoSession(session,{reset=false}={}) {
+  if(reset)resetStudentUI();
   state.sessionId=session.session_id;state.isDemo=Boolean(session.is_demo);state.demoScenarioId=session.demo_scenario_id;
   state.taskVersion=session.task_version ?? 1;
   state.environmentProfile=session.environment_profile;state.diagnosticTarget=session.diagnostic_target;
@@ -2081,7 +2105,7 @@ async function refreshDemoStatus() {
 }
 
 async function demoOperation(url,body={},reset=true) {
-  if(!state.user || state.busy)return;
+  if(!state.user || state.busy || state.viewingHistory)return;
   const epoch=state.authEpoch;setBusy(true);
   try {
     const session=await requestJSON(url,{method:"POST",body:JSON.stringify(body)});
@@ -2099,11 +2123,13 @@ document.querySelector("#demo-create")?.addEventListener("click",()=>{
 document.querySelector("#demo-reset")?.addEventListener("click",()=>{if(state.isDemo)demoOperation(`/api/demo/session/${encodeURIComponent(state.sessionId)}/reset`);});
 document.querySelector("#demo-refresh")?.addEventListener("click",()=>refreshDemoStatus().catch(error=>{document.querySelector("#demo-status").textContent=error.message;}));
 document.querySelector("#demo-fill-prompt")?.addEventListener("click",()=>{
+  if(!state.user || state.busy || state.viewingHistory)return;
   const id=document.querySelector("#demo-scenario-select").value;
   const scenario=state.demoScenarios?.find(item=>item.scenario_id===id);
   if(scenario){elements.messageInput.value=scenario.recommended_input;elements.messageInput.focus();}
 });
 
+initStudentUI();
 initClientCheck();
 initialize();
 window.addEventListener("pageshow", (event) => {

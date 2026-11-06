@@ -30,9 +30,9 @@ function retireUIActions() {
 }
 
 function renderUIAction(body, action) {
-  if (action?.type === "context_question") { renderContextQuestion(body, action); return; }
+  if (action?.type === "context_question") { renderContextQuestion(body, action); renderCaseStatus(); return; }
   retireUIActions();
-  if (!clientCheckActionCurrent(action)) return;
+  if (!clientCheckActionCurrent(action)) {renderCaseStatus();return;}
   state.clientCheck.action = action;
   state.clientCheck.mode = action.mode;
   state.clientCheck.declined = false;
@@ -50,6 +50,7 @@ function renderUIAction(body, action) {
   (body || appendMessage("assistant", "可以继续当前网络检查。")).after(group);
   const launch = document.querySelector("#client-check-launch");launch.hidden = false;
   launch.textContent = action.mode === "recheck" ? "重新检查" : "开始网络检查";
+  renderCaseStatus();
 }
 
 function clientCheckStep(step) {

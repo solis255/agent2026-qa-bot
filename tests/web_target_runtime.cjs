@@ -11,7 +11,8 @@ const cases = {
     w.eval(`state.diagnosticTarget = ${JSON.stringify(remote)}`);
     w.renderDiagnosticTarget(remote);
     w.setBusy(false);
-    assert.match(w.document.querySelector("#target-summary").textContent,/当前浏览器设备（远程）/);
+    assert.match(w.document.querySelector("#target-summary").textContent,/正在诊断：这台电脑/);
+    assert.match(w.document.querySelector("#target-technical").textContent,/remote/);
     assert.match(w.document.querySelector("#target-capability").textContent,/受限.*NetPilot 服务主机/);
     assert.match(w.document.querySelector("#target-status").textContent,/不会将服务主机结果当作此设备结果/);
     assert.equal(w.document.querySelector("#target-save").disabled,false);
@@ -62,14 +63,14 @@ const cases = {
     w.eval(`state.diagnosticTarget = ${JSON.stringify(remote)}`);
     w.fetch = async()=>reply({record_id:"old",diagnostic_target:host,conversation_turns:[],tool_calls:[]});
     await w.loadDiagnosisRecord("old");
-    assert.match(w.document.querySelector("#target-summary").textContent,/历史对象：NetPilot 服务主机/);
+    assert.match(w.document.querySelector("#target-summary").textContent,/历史诊断：NetPilot 服务主机/);
     assert.equal(w.document.querySelector("#target-save").disabled,true);
     assert.equal(w.eval("state.diagnosticTarget.subject"),"user_client");
     w.resetConversation();
-    assert.match(w.document.querySelector("#target-summary").textContent,/当前浏览器设备/);
+    assert.match(w.document.querySelector("#target-summary").textContent,/这台电脑/);
     assert.match(w.formatReportPreview({diagnostic_target:host}),/诊断对象：NetPilot 服务主机/);
     w.renderDiagnosticTarget(undefined,{historical:true});
-    assert.match(w.document.querySelector("#target-summary").textContent,/未记录/);
+    assert.match(w.document.querySelector("#target-summary").textContent,/对象待确认/);
   },
   "DT-RESET": async(w) => {
     w.eval(`state.diagnosticTarget = ${JSON.stringify(host)}`);

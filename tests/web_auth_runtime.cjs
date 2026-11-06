@@ -45,6 +45,8 @@ class Element {
   close() { this.open = false; }
   scrollIntoView() {}
   get selectedOptions() { return [{ textContent: "健康" }]; }
+  get childNodes() { return this.children; }
+  get childElementCount() { return this.children.length; }
 }
 
 const elements = new Map();
@@ -53,6 +55,7 @@ const get = (id) => {
   return elements.get(id);
 };
 const document = {
+  getElementById(id) { return get(id); },
   querySelector(selector) { return get(selector.slice(1)); },
   querySelectorAll(selector) {
     return selector === ".register-only"
@@ -132,6 +135,7 @@ const context = vm.createContext({
 });
 const source = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
 vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","client-check.js"),"utf8"),context,{filename:"web/client-check.js"});
+vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","student-ui.js"),"utf8"),context,{filename:"web/student-ui.js"});
 vm.runInContext(source, context, { filename: "web/app.js" });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const submit = (id) => get(id).handlers.submit({ preventDefault() {} });

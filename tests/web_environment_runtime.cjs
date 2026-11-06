@@ -50,7 +50,8 @@ const cases = {
     await w.saveEnvironment({preventDefault(){}});
     assert.deepEqual(sent, {session_id:"current-session",os_family:"macos",affected_scope:"single_service",affected_service:"github.com"});
     assert.equal(d.querySelector("#environment-proxy").value, "");
-    assert.match(d.querySelector("#environment-summary").textContent, /macOS.*VPN 关闭.*Proxy 未知/);
+    assert.match(d.querySelector("#environment-summary").textContent, /macOS.*校园 WiFi.*单一服务/);
+    assert.match(d.querySelector("#environment-provenance").textContent, /VPN：关闭.*代理：未知/);
     assert.match(d.querySelector("#environment-status").textContent, /已保存到服务端/);
     // Confirming the same displayed value must still acquire user provenance.
     const os = d.querySelector("#environment-os");
@@ -109,7 +110,7 @@ const cases = {
     w.showAuthGate();
     assert.equal(w.eval("state.environmentProfile"),null);
     assert.equal(w.document.querySelector("#environment-save").disabled,true);
-    assert.match(w.document.querySelector("#environment-summary").textContent, /VPN 未知/);
+    assert.match(w.document.querySelector("#environment-provenance").textContent, /VPN：未知/);
   },
   "EP-PRIVACY": async (w) => {
     Object.defineProperty(w.navigator,"geolocation",{get(){throw new Error("Must not access location");}});

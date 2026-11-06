@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=reasoning-trace">
+    <link rel="stylesheet" href="/style.css?v=student-ui-13d">
   </head>
   <body>
     <header class="topbar">
@@ -21,7 +21,7 @@
         <span class="state-dot"></span>
         <span class="state-text">正在连接后端…</span>
       </div>
-      <details class="account-menu" id="account-menu" hidden>
+      <details class="account-menu" id="account-menu" hidden="">
         <summary id="account-name" aria-label="当前用户菜单">当前用户</summary>
         <div class="account-actions">
           <button type="button" id="my-history">我的诊断历史</button>
@@ -30,7 +30,6 @@
         </div>
       </details>
     </header>
-
     <main class="auth-gate" id="auth-gate" aria-labelledby="auth-title">
       <section class="auth-card">
         <p class="eyebrow">账号访问</p>
@@ -42,261 +41,381 @@
         </div>
         <form id="auth-form" class="auth-form">
           <label for="auth-username">用户名</label>
-          <input id="auth-username" name="username" autocomplete="username" required maxlength="32" placeholder="3–32 位字母、数字、_ 或 -">
-          <label class="register-only" for="auth-nickname" hidden>昵称（可选）</label>
-          <input class="register-only" id="auth-nickname" name="nickname" autocomplete="nickname" maxlength="40" hidden placeholder="用于页面展示">
+          <input id="auth-username" name="username" autocomplete="username" required="" maxlength="32" placeholder="3–32 位字母、数字、_ 或 -">
+          <label class="register-only" for="auth-nickname" hidden="">昵称（可选）</label>
+          <input class="register-only" id="auth-nickname" name="nickname" autocomplete="nickname" maxlength="40" hidden="" placeholder="用于页面展示">
           <label for="auth-password">密码</label>
-          <input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
-          <label class="register-only" for="auth-confirm" hidden>确认密码</label>
-          <input class="register-only" id="auth-confirm" name="confirm_password" type="password" autocomplete="new-password" hidden>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" required="" minlength="8" maxlength="128">
+          <label class="register-only" for="auth-confirm" hidden="">确认密码</label>
+          <input class="register-only" id="auth-confirm" name="confirm_password" type="password" autocomplete="new-password" hidden="">
           <button type="submit" id="auth-submit">登录</button>
         </form>
         <p class="form-status" id="auth-status" role="status" aria-live="polite"></p>
         <p class="auth-safety">HTTP 演示仅使用专用测试账号与非敏感、未复用的密码。请勿输入学校统一身份认证密码。</p>
-
       </section>
     </main>
-
-    <main class="workspace" id="workspace" hidden>
+    <main class="workspace student-workspace" id="workspace" hidden="">
       <section class="chat-panel" aria-labelledby="chat-title">
         <div class="section-heading chat-heading">
           <div>
-            <p class="eyebrow">诊断会话</p>
             <h1 id="chat-title">你好，我是 NetPilot</h1>
-            <p class="session-label" id="session-label">正在创建安全会话…</p>
-            <span id="resolution-badge" class="resolution-badge" role="status">诊断中</span>
+            <p class="chat-intro">直接告诉我你遇到的校园网络问题。</p>
           </div>
-          <button type="button" class="secondary-button" id="new-session" disabled>
-            新建会话
-          </button>
+          <div class="chat-heading-actions">
+            <button id="new-session" type="button" class="secondary-button" disabled="">新建会话</button>
+            <button id="diagnostic-details-open" type="button" class="secondary-button" aria-haspopup="dialog" aria-controls="diagnostic-details-dialog">诊断详情</button>
+          </div>
         </div>
-
+        <section id="case-status-bar" class="case-status-bar" aria-label="当前处理状态">
+          <span id="resolution-badge" class="resolution-badge" role="status">诊断中</span>
+          <span id="case-environment">环境待确认</span>
+        </section>
+        <section id="history-view-banner" class="history-view-banner" hidden="" role="status">
+          <strong>历史记录 · 只读</strong>
+          <button id="history-return" type="button" class="text-button">返回当前诊断</button>
+        </section>
+        <section id="case-next-action" class="case-next-action" aria-label="下一步" hidden=""></section>
         <div class="conversation" id="conversation" aria-live="polite" aria-busy="false"></div>
-
-        <div class="quick-prompts" aria-label="测试问题样例">
-          <span>快速测试</span>
-          <button type="button" data-prompt="我可以访问公网 IP，但打不开 github.com，请自动诊断。">DNS 故障</button>
-          <button type="button" data-prompt="天津大学 VPN 怎么使用？请检索知识库并标出来源。">VPN 使用</button>
-          <button type="button" data-prompt="github.com 可以 ping 通，但 SSH 连接不上，请检查 22 端口。">SSH 端口</button>
-          <button type="button" data-prompt="请检查当前网络是否存在明显异常。">健康检查</button>
+        <div class="quick-prompts" aria-label="常见网络问题" id="quick-prompts">
+          <button type="button" data-prompt="微信能用，但是网页都打不开。">网页打不开</button>
+          <button type="button" data-prompt="我连上校园 WiFi 了，但是提示没有网络。">校园网连不上</button>
+          <button type="button" data-prompt="我在校外，想访问校内资源。">VPN / 校外访问</button>
+          <button type="button" data-prompt="只有 GitHub 打不开，其他网站正常。">只有一个网站打不开</button>
         </div>
-
         <form class="composer" id="chat-form">
           <label class="sr-only" for="message-input">描述你的网络问题</label>
-          <textarea
-            id="message-input"
-            rows="3"
-            maxlength="4000"
-            placeholder="例如：我连上 Wi-Fi 了，但是网页打不开"
-            disabled
-          ></textarea>
-          <button type="submit" id="send-button" disabled>开始诊断</button>
+          <textarea id="message-input" rows="3" maxlength="4000" placeholder="描述你的网络问题，例如：微信能用，但是网页打不开" disabled=""></textarea>
+          <button type="submit" id="send-button" disabled="">发送</button>
         </form>
         <p class="interaction-note" id="interaction-note" role="status" aria-live="polite">
           正在初始化服务状态…
         </p>
       </section>
-
-      <aside class="diagnostics-panel" aria-label="诊断状态">
-        <details class="status-card demo-controls" id="demo-controls" hidden>
-          <summary>演示模式 · Demo / Mock</summary>
-          <p id="demo-banner" class="privacy-notice">网络状态来自 Mock / Fixture，不代表现场真实网络。</p>
-          <label for="demo-scenario-select">演示场景</label>
-          <select id="demo-scenario-select"></select>
-          <button type="button" id="demo-create">创建 / 切换当前演示</button>
-          <button type="button" id="demo-reset" disabled>重置当前演示</button>
-          <button type="button" id="demo-fill-prompt">填入推荐测试语句</button>
-          <p class="environment-note">按钮只加载受控快照。手动步骤的模拟完成、症状确认和材料生成请使用下方正式卡片；不会执行网络修复。</p>
-          <div id="demo-fixtures"></div>
-          <button type="button" id="demo-refresh">刷新演示状态</button>
-          <p id="demo-status" role="status" aria-live="polite"></p>
+    </main>
+    <dialog id="diagnostic-details-dialog" class="diagnostic-drawer" aria-labelledby="diagnostic-details-title">
+      <header class="drawer-heading">
+        <h2 id="diagnostic-details-title">诊断详情</h2>
+        <button id="diagnostic-details-close" type="button" class="report-close">关闭</button>
+      </header>
+      <div class="drawer-body">
+        <details id="current-diagnosis-details" class="details-group" open="">
+          <summary>当前诊断</summary>
+          <section id="environment-card" class="status-card environment-card">
+            <h3>环境信息</h3>
+            <p id="environment-summary" class="environment-summary" aria-live="polite">环境待确认</p>
+            <details class="advanced-editor" id="environment-editor">
+              <summary>修改环境</summary>
+              <p class="environment-note">无需预先填写。你可以直接描述问题，我会只在必要时追问。</p>
+              <p class="environment-note">仅为环境上下文，不是检测证据。VPN、代理与接入方式须由你确认；Local 工具只检测运行 NetPilot 的主机。</p>
+              <form id="environment-form" class="environment-form">
+                <label>
+                  操作系统
+                  <select id="environment-os" name="os_family">
+                    <option value="unknown">未知</option>
+                    <option value="windows">Windows</option>
+                    <option value="macos">macOS</option>
+                    <option value="linux">Linux</option>
+                    <option value="android">Android</option>
+                    <option value="ios">iOS</option>
+                  </select>
+                </label>
+                <label>
+                  接入方式
+                  <select id="environment-access" name="network_access">
+                    <option value="unknown">未知</option>
+                    <option value="campus_wifi">校园 WiFi</option>
+                    <option value="campus_wired">校园有线</option>
+                    <option value="off_campus">校外网络</option>
+                    <option value="mobile_hotspot">手机热点</option>
+                  </select>
+                </label>
+                <label>
+                  VPN
+                  <select id="environment-vpn" name="vpn_enabled">
+                    <option value="">不确定</option>
+                    <option value="true">开启</option>
+                    <option value="false">关闭</option>
+                  </select>
+                </label>
+                <label>
+                  Proxy
+                  <select id="environment-proxy" name="proxy_enabled">
+                    <option value="">不确定</option>
+                    <option value="true">开启</option>
+                    <option value="false">关闭</option>
+                  </select>
+                </label>
+                <label>
+                  影响范围
+                  <select id="environment-scope" name="affected_scope">
+                    <option value="unknown">不确定</option>
+                    <option value="all_network">全部网络</option>
+                    <option value="web_only">仅网页</option>
+                    <option value="single_service">单一服务</option>
+                    <option value="internal_resource">仅校内资源</option>
+                  </select>
+                </label>
+                <label id="environment-service-label" hidden="">
+                  受影响服务
+                  <input id="environment-service" name="affected_service" maxlength="80" placeholder="服务名或域名，不填 IP、URL 或凭据">
+                </label>
+                <button type="submit" id="environment-save" disabled="">保存环境</button>
+              </form>
+              <p id="environment-status" class="environment-note" role="status" aria-live="polite"></p>
+              <details id="environment-source-details">
+                <summary>环境来源 / 技术详情</summary>
+                <p id="environment-browser" class="environment-note"></p>
+                <ul id="environment-provenance" class="environment-note"></ul>
+              </details>
+            </details>
+          </section>
+          <section class="status-card target-card" id="target-card">
+            <h2>诊断对象</h2>
+            <p id="target-summary" class="environment-summary" aria-live="polite">未记录 / 未明确</p>
+            <details class="advanced-editor" id="target-editor">
+              <summary>修改诊断对象 / 查看技术详情</summary>
+              <p id="target-capability" class="environment-note">直接检测能力：未知</p>
+              <pre id="target-technical"></pre>
+              <form id="target-form" class="environment-form">
+                <label>
+                  选择对象
+                  <select id="target-subject" name="subject">
+                    <option value="unknown" disabled="">请选择</option>
+                    <option value="user_client">当前浏览器设备</option>
+                    <option value="netpilot_host">NetPilot 服务主机</option>
+                    <option value="mock_client" disabled="">Mock 模拟终端（只读）</option>
+                  </select>
+                </label>
+                <button id="target-save" type="submit" disabled="">切换对象</button>
+              </form>
+              <p class="environment-note">切换后，其他设备的旧检测证据不会用于当前结论。Mock 为模拟结果，不代表真实校园网络。</p>
+              <p id="target-status" class="environment-note" role="status" aria-live="polite"></p>
+            </details>
+          </section>
+          <section class="status-card snapshot-card" id="snapshot-card">
+            <h2>网络检查</h2>
+            <p id="client-check-summary" class="environment-summary" aria-live="polite">尚未进行</p>
+            <p id="collector-support-note" class="environment-note"></p>
+            <button id="client-check-launch" type="button" hidden="">开始网络检查</button>
+            <details id="advanced-client-check">
+              <summary>高级详情 / 手动上传</summary>
+              <div id="windows-snapshot-guide" hidden="">
+                <p class="environment-note">Windows 10/11：下载并检查脚本，在本机 Windows PowerShell 以普通用户手动运行，生成 netpilot-client-diagnostic.json，再主动上传。无需管理员权限；不修改网络，不自动执行或上传。</p>
+                <a href="/static/scripts/client_diagnostic_windows.ps1" download="client_diagnostic_windows.ps1">下载只读 Windows 脚本</a>
+                <p class="environment-note">
+                  运行：
+                  <code>.\client_diagnostic_windows.ps1</code>
+                  。如本机策略不允许运行，请按本单位规定处理；不要为演示降低执行策略。
+                </p>
+              </div>
+              <form id="snapshot-form">
+                <label for="snapshot-file">选择 JSON（默认上限 256 KiB）</label>
+                <input id="snapshot-file" name="file" type="file" accept=".json,application/json" disabled="">
+                <button id="snapshot-upload" type="submit" disabled="">上传 / 替换快照</button>
+              </form>
+              <p id="snapshot-summary" class="environment-summary" aria-live="polite">尚未导入</p>
+              <p class="privacy-notice">NetPilot 会对密码、Token、Cookie、MAC、SSID 等敏感信息进行拦截或脱敏。</p>
+              <p id="snapshot-status" class="environment-note" role="status"></p>
+              <ul id="snapshot-evidence" class="environment-note"></ul>
+            </details>
+          </section>
+          <section class="status-card diagnosis-card" id="diagnosis-card">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">当前诊断</p>
+                <h2>诊断结论</h2>
+              </div>
+              <span class="diagnosis-badge idle" id="diagnosis-status">等待</span>
+            </div>
+            <p class="diagnosis-summary" id="diagnosis-summary">提交问题后显示本次诊断结论与证据数量。</p>
+          </section>
         </details>
-        <section class="status-card">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">运行状态</p>
-              <h2>服务概览</h2>
-            </div>
-            <span class="mode-badge" id="tool-mode">--</span>
-          </div>
-          <dl class="health-grid">
-            <div><dt>后端 API</dt><dd id="api-status">检查中</dd></div>
-            <div><dt>TJU LLM</dt><dd id="llm-status">检查中</dd></div>
-            <div><dt>知识库</dt><dd id="rag-status">检查中</dd></div>
-            <div><dt>诊断历史</dt><dd id="history-status">检查中</dd></div>
-          </dl>
-          <div class="scenario-control" id="scenario-control" hidden>
-            <label for="scenario-select">Mock 故障场景</label>
-            <select id="scenario-select" disabled></select>
-            <p id="scenario-description">加载场景中…</p>
-            <p class="scenario-capacity" id="scenario-capacity"></p>
-            <div class="scenario-actions">
-              <button type="button" id="custom-scenario-new" hidden>新建自定义场景</button>
-              <button type="button" class="danger-button" id="custom-scenario-delete" hidden>删除当前场景</button>
-            </div>
-          </div>
-        </section>
-
-        <details class="status-card environment-card" id="environment-card">
-          <summary>环境信息 / 查看详情</summary>
-          <p id="environment-summary" class="environment-summary" aria-live="polite">环境未知</p>
-          <p id="environment-browser" class="environment-note"></p>
-          <p class="environment-note">无需预先填写。你可以直接描述问题，我会只在必要时追问。</p>
-          <ul id="environment-provenance" class="environment-note"></ul>
-          <p class="environment-note">仅为环境上下文，不是检测证据。VPN、代理与接入方式须由你确认；Local 工具只检测运行 NetPilot 的主机。</p>
-          <form id="environment-form" class="environment-form">
-            <label>操作系统<select id="environment-os" name="os_family">
-              <option value="unknown">未知</option><option value="windows">Windows</option><option value="macos">macOS</option><option value="linux">Linux</option><option value="android">Android</option><option value="ios">iOS</option>
-            </select></label>
-            <label>接入方式<select id="environment-access" name="network_access">
-              <option value="unknown">未知</option><option value="campus_wifi">校园 WiFi</option><option value="campus_wired">校园有线</option><option value="off_campus">校外网络</option><option value="mobile_hotspot">手机热点</option>
-            </select></label>
-            <label>VPN<select id="environment-vpn" name="vpn_enabled"><option value="">不确定</option><option value="true">开启</option><option value="false">关闭</option></select></label>
-            <label>Proxy<select id="environment-proxy" name="proxy_enabled"><option value="">不确定</option><option value="true">开启</option><option value="false">关闭</option></select></label>
-            <label>影响范围<select id="environment-scope" name="affected_scope">
-              <option value="unknown">不确定</option><option value="all_network">全部网络</option><option value="web_only">仅网页</option><option value="single_service">单一服务</option><option value="internal_resource">仅校内资源</option>
-            </select></label>
-            <label id="environment-service-label" hidden>受影响服务<input id="environment-service" name="affected_service" maxlength="80" placeholder="服务名或域名，不填 IP、URL 或凭据"></label>
-            <button type="submit" id="environment-save" disabled>保存环境</button>
-          </form>
-          <p id="environment-status" class="environment-note" role="status" aria-live="polite"></p>
+        <details id="workflow-details" class="details-group" open="">
+          <summary>处理过程</summary>
+          <details class="status-card remediation-section" id="remediation-section">
+            <summary>
+              修复计划
+              <span id="remediation-count" class="timeline-count">0 步</span>
+            </summary>
+            <p class="environment-note">仅为用户手动计划，不会自动修复。完成后可另行验证，计划完成不等于网络故障已解决。</p>
+            <button id="remediation-generate" type="button" disabled="">生成 / 更新低风险计划</button>
+            <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
+            <div id="remediation-plan"></div>
+          </details>
+          <details class="status-card" id="verification-section">
+            <summary>
+              修复后验证
+              <span id="verification-count" class="timeline-count">0 轮</span>
+            </summary>
+            <p class="environment-note">Verification ≠ Resolution。客观指标对比与用户主观反馈分开记录。</p>
+            <div id="verification-content" aria-live="polite"></div>
+            <p id="verification-notice" role="status" aria-live="polite"></p>
+          </details>
+          <section class="status-card" id="resolution-section" aria-label="诊断闭环状态">
+            <h2>处理状态</h2>
+            <div id="resolution-content" aria-live="polite"></div>
+            <p id="resolution-notice" role="status" aria-live="polite"></p>
+          </section>
+          <section class="status-card" id="escalation-section" aria-label="升级报修材料">
+            <h2>报修材料</h2>
+            <p class="privacy-notice">隐私处理：已移除凭据类信息，已隐藏 MAC / SSID 和主机名。材料仅保留排障所需信息。</p>
+            <p class="environment-note">仅生成脱敏交接材料，由你自行交给授权人员；不会提交工单或通知网络中心。</p>
+            <button type="button" id="escalation-generate" disabled="">生成报修材料</button>
+            <div id="escalation-content" aria-live="polite"></div>
+            <p id="escalation-notice" role="status" aria-live="polite"></p>
+          </section>
         </details>
-
-        <section class="status-card target-card" id="target-card">
-          <h2>诊断对象</h2>
-          <p id="target-summary" class="environment-summary" aria-live="polite">未记录 / 未明确</p>
-          <p id="target-capability" class="environment-note">直接检测能力：未知</p>
-          <form id="target-form" class="environment-form">
-            <label>选择对象<select id="target-subject" name="subject">
-              <option value="unknown" disabled>请选择</option>
-              <option value="user_client">当前浏览器设备</option>
-              <option value="netpilot_host">NetPilot 服务主机</option>
-              <option value="mock_client" disabled>Mock 模拟终端（只读）</option>
-            </select></label>
-            <button id="target-save" type="submit" disabled>切换对象</button>
-          </form>
-          <p class="environment-note">切换后，其他设备的旧检测证据不会用于当前结论。Mock 为模拟结果，不代表真实校园网络。</p>
-          <p id="target-status" class="environment-note" role="status" aria-live="polite"></p>
-        </section>
-
-        <section class="status-card snapshot-card" id="snapshot-card">
-          <h2>网络检查</h2>
-          <p id="collector-support-note" class="environment-note"></p>
-          <button id="client-check-launch" type="button" hidden>开始网络检查</button>
-          <details id="advanced-client-check"><summary>高级详情 / 手动上传</summary>
-          <div id="windows-snapshot-guide" hidden>
-          <p class="environment-note">Windows 10/11：下载并检查脚本，在本机 Windows PowerShell 以普通用户手动运行，生成 netpilot-client-diagnostic.json，再主动上传。无需管理员权限；不修改网络，不自动执行或上传。</p>
-          <a href="/static/scripts/client_diagnostic_windows.ps1" download="client_diagnostic_windows.ps1">下载只读 Windows 脚本</a>
-          <p class="environment-note">运行：<code>.\client_diagnostic_windows.ps1</code>。如本机策略不允许运行，请按本单位规定处理；不要为演示降低执行策略。</p>
-          </div>
-          <form id="snapshot-form">
-            <label for="snapshot-file">选择 JSON（默认上限 256 KiB）</label>
-            <input id="snapshot-file" name="file" type="file" accept=".json,application/json" disabled>
-            <button id="snapshot-upload" type="submit" disabled>上传 / 替换快照</button>
-          </form>
-          <p id="snapshot-summary" class="environment-summary" aria-live="polite">尚未导入</p>
-          <p class="privacy-notice">NetPilot 会对密码、Token、Cookie、MAC、SSID 等敏感信息进行拦截或脱敏。</p>
-          <p id="snapshot-status" class="environment-note" role="status"></p>
-          <ul id="snapshot-evidence" class="environment-note"></ul>
-          </details>
-        </section>
-
-        <section class="status-card diagnosis-card" id="diagnosis-card">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">当前诊断</p>
-              <h2>诊断结论</h2>
+        <details id="technical-details" class="details-group">
+          <summary>技术详情</summary>
+          <section class="status-card" id="metrics-section">
+            <h3>Token 与耗时</h3>
+            <dl class="metrics-grid" id="metrics-grid">
+              <div>
+                <dt>Token</dt>
+                <dd id="token-usage">--</dd>
+              </div>
+              <div>
+                <dt>LLM 耗时</dt>
+                <dd id="llm-duration">--</dd>
+              </div>
+              <div>
+                <dt>Tool 耗时</dt>
+                <dd id="tool-duration">--</dd>
+              </div>
+              <div>
+                <dt>Tool 次数</dt>
+                <dd id="tool-count">--</dd>
+              </div>
+            </dl>
+            <details class="metrics-debug">
+              <summary>诊断调试信息</summary>
+              <pre id="metrics-debug">暂无调试指标。</pre>
+            </details>
+          </section>
+          <details class="status-card reasoning-section" id="reasoning-section">
+            <summary class="reasoning-summary">
+              <span>诊断思路</span>
+              <span class="timeline-count" id="reasoning-count" aria-label="诊断思路步骤数量">0</span>
+            </summary>
+            <div id="reasoning-trace" aria-live="polite">
+              <div class="empty-state">
+                <span>RT</span>
+                <p>提交问题后展示证据驱动的诊断决策摘要。</p>
+              </div>
             </div>
-            <span class="diagnosis-badge idle" id="diagnosis-status">等待</span>
-          </div>
-          <p class="diagnosis-summary" id="diagnosis-summary">提交问题后显示本次诊断结论与证据数量。</p>
-          <dl class="metrics-grid" id="metrics-grid">
-            <div><dt>Token</dt><dd id="token-usage">--</dd></div>
-            <div><dt>LLM 耗时</dt><dd id="llm-duration">--</dd></div>
-            <div><dt>Tool 耗时</dt><dd id="tool-duration">--</dd></div>
-            <div><dt>Tool 次数</dt><dd id="tool-count">--</dd></div>
-          </dl>
-          <details class="metrics-debug">
-            <summary>诊断调试信息</summary>
-            <pre id="metrics-debug">暂无调试指标。</pre>
           </details>
-          <div class="report-actions" id="report-actions" hidden>
+          <details class="status-card timeline-section" id="timeline-section">
+            <summary class="timeline-summary">
+              <span>工具执行步骤 / 诊断时间线</span>
+              <span class="timeline-count" id="timeline-count" aria-label="工具步骤数量">0</span>
+            </summary>
+            <div id="tool-timeline">
+              <div class="empty-state">
+                <span>01</span>
+                <p>开始诊断后，此处将展示每一步只读检测及其证据。</p>
+              </div>
+            </div>
+          </details>
+          <section class="status-card" id="system-details">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">运行状态</p>
+                <h2>服务概览</h2>
+              </div>
+              <span class="mode-badge" id="tool-mode">--</span>
+            </div>
+            <dl class="health-grid">
+              <div>
+                <dt>后端 API</dt>
+                <dd id="api-status">检查中</dd>
+              </div>
+              <div>
+                <dt>TJU LLM</dt>
+                <dd id="llm-status">检查中</dd>
+              </div>
+              <div>
+                <dt>知识库</dt>
+                <dd id="rag-status">检查中</dd>
+              </div>
+              <div>
+                <dt>诊断历史</dt>
+                <dd id="history-status">检查中</dd>
+              </div>
+            </dl>
+          </section>
+          <section id="session-details" class="status-card">
+            <h3>会话信息</h3>
+            <p id="session-label" class="session-label">正在创建会话…</p>
+          </section>
+        </details>
+        <details id="report-details" class="details-group">
+          <p class="environment-note">完成一次诊断后，可预览或下载当前记录的报告。</p>
+          <summary>报告</summary>
+          <div class="report-actions" id="report-actions" hidden="">
             <button type="button" id="report-preview">预览故障报告</button>
             <button type="button" id="export-markdown">下载 Markdown</button>
             <button type="button" id="export-json">下载 JSON</button>
           </div>
-        </section>
-
-        <details class="status-card remediation-section" id="remediation-section">
-          <summary>修复计划 <span id="remediation-count" class="timeline-count">0 步</span></summary>
-          <p class="environment-note">仅为用户手动计划，不会自动修复。完成后可另行验证，计划完成不等于网络故障已解决。</p>
-          <button id="remediation-generate" type="button" disabled>生成 / 更新低风险计划</button>
-          <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
-          <div id="remediation-plan"></div>
         </details>
-
-        <section class="status-card" id="resolution-section" aria-label="诊断闭环状态">
-          <h2>处理状态</h2>
-          <div id="resolution-content" aria-live="polite"></div>
-          <p id="resolution-notice" role="status" aria-live="polite"></p>
-        </section>
-
-        <section class="status-card" id="escalation-section" aria-label="升级报修材料">
-          <h2>报修材料</h2>
-          <p class="privacy-notice">隐私处理：已移除凭据类信息，已隐藏 MAC / SSID 和主机名。材料仅保留排障所需信息。</p>
-          <p class="environment-note">仅生成脱敏交接材料，由你自行交给授权人员；不会提交工单或通知网络中心。</p>
-          <button type="button" id="escalation-generate" disabled>生成报修材料</button>
-          <div id="escalation-content" aria-live="polite"></div>
-          <p id="escalation-notice" role="status" aria-live="polite"></p>
-        </section>
-
-        <details class="status-card" id="verification-section">
-          <summary>修复后验证 <span id="verification-count" class="timeline-count">0 轮</span></summary>
-          <p class="environment-note">Verification ≠ Resolution。客观指标对比与用户主观反馈分开记录。</p>
-          <div id="verification-content" aria-live="polite"></div>
-          <p id="verification-notice" role="status" aria-live="polite"></p>
-        </details>
-
-        <details class="status-card reasoning-section" id="reasoning-section">
-          <summary class="reasoning-summary">
-            <span>诊断思路</span>
-            <span class="timeline-count" id="reasoning-count" aria-label="诊断思路步骤数量">0</span>
-          </summary>
-          <div id="reasoning-trace" aria-live="polite">
-            <div class="empty-state"><span>RT</span><p>提交问题后展示证据驱动的诊断决策摘要。</p></div>
-          </div>
-        </details>
-
-        <details class="status-card timeline-section" id="timeline-section">
-          <summary class="timeline-summary">
-            <span>工具执行步骤 / 诊断时间线</span>
-            <span class="timeline-count" id="timeline-count" aria-label="工具步骤数量">0</span>
-          </summary>
-          <div id="tool-timeline">
-            <div class="empty-state"><span>01</span><p>开始诊断后，此处将展示每一步只读检测及其证据。</p></div>
-          </div>
-        </details>
-
-        <section class="status-card history-card" id="my-history-card">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">持久化记录</p>
-              <h2>我的诊断历史</h2>
+        <details id="demo-details" class="details-group" hidden="">
+          <details class="status-card demo-controls" id="demo-controls" hidden="">
+            <summary>演示模式 · Demo / Mock</summary>
+            <p id="demo-banner" class="privacy-notice">网络状态来自 Mock / Fixture，不代表现场真实网络。</p>
+            <label for="demo-scenario-select">演示场景</label>
+            <select id="demo-scenario-select"></select>
+            <button type="button" id="demo-create">创建 / 切换当前演示</button>
+            <button type="button" id="demo-reset" disabled="">重置当前演示</button>
+            <button type="button" id="demo-fill-prompt">填入推荐测试语句</button>
+            <p class="environment-note">按钮只加载受控快照。手动步骤的模拟完成、症状确认和材料生成请使用下方正式卡片；不会执行网络修复。</p>
+            <div id="demo-fixtures"></div>
+            <button type="button" id="demo-refresh">刷新演示状态</button>
+            <p id="demo-status" role="status" aria-live="polite"></p>
+          </details>
+          <summary>演示 / 开发</summary>
+          <div class="scenario-control" id="scenario-control" hidden="">
+            <label for="scenario-select">Mock 故障场景</label>
+            <select id="scenario-select" disabled=""></select>
+            <p id="scenario-description">加载场景中…</p>
+            <p class="scenario-capacity" id="scenario-capacity"></p>
+            <div class="scenario-actions">
+              <button type="button" id="custom-scenario-new" hidden="">新建自定义场景</button>
+              <button type="button" class="danger-button" id="custom-scenario-delete" hidden="">删除当前场景</button>
             </div>
-            <button type="button" class="text-button" id="history-refresh">刷新</button>
           </div>
-          <div id="history-list" aria-live="polite">
-            <div class="empty-state"><span>DB</span><p>正在加载历史诊断记录。</p></div>
+          <div class="quick-prompts" aria-label="演示测试语句">
+            <button type="button" data-prompt="我可以访问公网 IP，但打不开 github.com，请自动诊断。">DNS 故障</button>
+            <button type="button" data-prompt="天津大学 VPN 怎么使用？请检索知识库并标出来源。">VPN 使用</button>
+            <button type="button" data-prompt="github.com 可以 ping 通，但 SSH 连接不上，请检查 22 端口。">SSH 端口</button>
           </div>
-          <nav class="history-pagination" aria-label="诊断历史分页">
-            <button type="button" id="history-previous" disabled>上一页</button>
-            <span id="history-page-label" aria-live="polite">第 1 页</span>
-            <button type="button" id="history-next" disabled>下一页</button>
-          </nav>
-        </section>
-      </aside>
-    </main>
-
+        </details>
+      </div>
+    </dialog>
+    <dialog id="history-dialog" class="history-dialog" aria-labelledby="history-dialog-title">
+      <header class="drawer-heading">
+        <h2 id="history-dialog-title">我的诊断历史</h2>
+        <button id="history-dialog-close" type="button" class="report-close">关闭</button>
+      </header>
+      <section class="status-card history-card" id="my-history-card">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">持久化记录</p>
+            <h2>我的诊断历史</h2>
+          </div>
+          <button type="button" class="text-button" id="history-refresh">刷新</button>
+        </div>
+        <div id="history-list" aria-live="polite">
+          <div class="empty-state">
+            <span>DB</span>
+            <p>正在加载历史诊断记录。</p>
+          </div>
+        </div>
+        <nav class="history-pagination" aria-label="诊断历史分页">
+          <button type="button" id="history-previous" disabled="">上一页</button>
+          <span id="history-page-label" aria-live="polite">第 1 页</span>
+          <button type="button" id="history-next" disabled="">下一页</button>
+        </nav>
+      </section>
+    </dialog>
     <dialog class="scenario-dialog" id="scenario-dialog" aria-labelledby="scenario-dialog-title">
       <form id="custom-scenario-form">
         <div class="report-dialog-heading">
@@ -309,30 +428,57 @@
         <div class="scenario-form-body">
           <p class="form-help">场景仅保存在当前服务进程中。所有结果均为离线模拟，不会执行网络请求或系统命令。</p>
           <div class="scenario-identity-grid">
-            <label>场景名称
-              <input id="custom-scenario-name" name="name" required minlength="3" maxlength="32" pattern="[a-z][a-z0-9_-]+" placeholder="例如 dns_lab">
+            <label>
+              场景名称
+              <input id="custom-scenario-name" name="name" required="" minlength="3" maxlength="32" pattern="[a-z][a-z0-9_-]+" placeholder="例如 dns_lab">
             </label>
-            <label>显示名称
-              <input id="custom-scenario-label" name="label" required maxlength="40" placeholder="例如 宿舍 DNS 故障">
+            <label>
+              显示名称
+              <input id="custom-scenario-label" name="label" required="" maxlength="40" placeholder="例如 宿舍 DNS 故障">
             </label>
           </div>
-          <label>场景说明
-            <textarea id="custom-scenario-description" name="description" required maxlength="200" rows="2" placeholder="说明希望模拟的网络现象"></textarea>
+          <label>
+            场景说明
+            <textarea id="custom-scenario-description" name="description" required="" maxlength="200" rows="2" placeholder="说明希望模拟的网络现象"></textarea>
           </label>
           <fieldset class="behavior-grid" id="scenario-behavior-fields">
             <legend>六类工具的模拟结果</legend>
-            <label class="toggle-row"><input type="checkbox" id="scenario-network-configured" checked> 本机网络配置完整</label>
+            <label class="toggle-row">
+              <input type="checkbox" id="scenario-network-configured" checked="">
+              本机网络配置完整
+            </label>
             <div class="behavior-row">
-              <label class="toggle-row"><input type="checkbox" id="scenario-ping-reachable" checked> Ping 目标可达</label>
-              <label>丢包率（%）<input type="number" id="scenario-ping-loss" min="0" max="99" step="1" value="0"></label>
+              <label class="toggle-row">
+                <input type="checkbox" id="scenario-ping-reachable" checked="">
+                Ping 目标可达
+              </label>
+              <label>
+                丢包率（%）
+                <input type="number" id="scenario-ping-loss" min="0" max="99" step="1" value="0">
+              </label>
             </div>
-            <label class="toggle-row"><input type="checkbox" id="scenario-dns-resolved" checked> DNS 解析成功</label>
-            <label class="toggle-row"><input type="checkbox" id="scenario-tcp-connected" checked> TCP 连接成功</label>
+            <label class="toggle-row">
+              <input type="checkbox" id="scenario-dns-resolved" checked="">
+              DNS 解析成功
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="scenario-tcp-connected" checked="">
+              TCP 连接成功
+            </label>
             <div class="behavior-row">
-              <label class="toggle-row"><input type="checkbox" id="scenario-http-reachable" checked> HTTP 请求可达</label>
-              <label>HTTP 状态码<input type="number" id="scenario-http-status" min="100" max="599" step="1" value="200"></label>
+              <label class="toggle-row">
+                <input type="checkbox" id="scenario-http-reachable" checked="">
+                HTTP 请求可达
+              </label>
+              <label>
+                HTTP 状态码
+                <input type="number" id="scenario-http-status" min="100" max="599" step="1" value="200">
+              </label>
             </div>
-            <label class="toggle-row"><input type="checkbox" id="scenario-traceroute-reached" checked> 路由追踪到达目标</label>
+            <label class="toggle-row">
+              <input type="checkbox" id="scenario-traceroute-reached" checked="">
+              路由追踪到达目标
+            </label>
           </fieldset>
           <p class="form-status" id="scenario-form-status" role="status" aria-live="polite"></p>
           <div class="scenario-form-actions">
@@ -342,7 +488,6 @@
         </div>
       </form>
     </dialog>
-
     <dialog class="report-dialog" id="report-dialog" aria-labelledby="report-title">
       <div class="report-dialog-heading">
         <div>
@@ -353,7 +498,6 @@
       </div>
       <pre class="report-content" id="report-content" tabindex="0">正在加载报告…</pre>
     </dialog>
-
     <dialog class="password-dialog" id="password-dialog" aria-labelledby="password-dialog-title">
       <form id="password-form" class="password-form">
         <div class="report-dialog-heading">
@@ -365,11 +509,11 @@
         </div>
         <div class="password-form-body">
           <label for="old-password">当前密码</label>
-          <input id="old-password" name="old_password" type="password" autocomplete="current-password" required>
+          <input id="old-password" name="old_password" type="password" autocomplete="current-password" required="">
           <label for="new-password">新密码（8–128 字符）</label>
-          <input id="new-password" name="new_password" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+          <input id="new-password" name="new_password" type="password" autocomplete="new-password" required="" minlength="8" maxlength="128">
           <label for="confirm-new-password">确认新密码</label>
-          <input id="confirm-new-password" name="confirm_new_password" type="password" autocomplete="new-password" required>
+          <input id="confirm-new-password" name="confirm_new_password" type="password" autocomplete="new-password" required="">
           <p class="form-status" id="password-status" role="status" aria-live="polite"></p>
           <div class="scenario-form-actions">
             <button type="button" class="secondary-button" id="password-cancel">取消</button>
@@ -378,45 +522,54 @@
         </div>
       </form>
     </dialog>
-
-    <script src="/vendor/marked.umd.js" defer></script>
-    <script src="/vendor/purify.min.js" defer></script>
-    <script src="/markdown.js?v=inline-citations" defer></script>
+    <script src="/vendor/marked.umd.js" defer=""></script>
+    <script src="/vendor/purify.min.js" defer=""></script>
+    <script src="/markdown.js?v=inline-citations" defer=""></script>
     <dialog id="client-check-dialog" aria-labelledby="client-check-title" class="client-check-dialog">
-      <div class="section-heading"><h2 id="client-check-title">网络检查</h2><button id="client-check-close" type="button" aria-label="关闭网络检查向导">关闭</button></div>
+      <div class="section-heading">
+        <h2 id="client-check-title">网络检查</h2>
+        <button id="client-check-close" type="button" aria-label="关闭网络检查向导">关闭</button>
+      </div>
       <p id="client-check-progress" aria-live="polite">第 1 步，共 3 步</p>
       <section data-client-check-step="1">
         <h3>1. 下载诊断工具</h3>
         <p>这个工具只读取与你当前网络故障有关的基础网络状态，不修改设置，也不会自动上传。</p>
         <p>会检查活动网络接口基本状态、默认网关、DNS 配置和少量固定 DNS/TCP 测试。不采集 Wi-Fi 密码、浏览历史、Cookie/Token、MAC 地址、SSID 或设备序列号。</p>
         <a class="client-check-download" href="/static/client-tools/netpilot-windows-check.zip" download="netpilot-windows-check.zip">下载 Windows 网络检查工具</a>
-        <details><summary>查看脚本源码与版本</summary>
+        <details>
+          <summary>查看脚本源码与版本</summary>
           <a href="/api/client-tools/windows/source" target="_blank" rel="noopener noreferrer">查看脚本源码</a>
           <pre id="client-check-metadata"></pre>
         </details>
         <button type="button" data-client-check-next="2">已下载，下一步</button>
       </section>
-      <section data-client-check-step="2" hidden>
+      <section data-client-check-step="2" hidden="">
         <h3>2. 在 Windows 本机运行</h3>
         <p>先解压下载的文件包，将里面两个文件放在同一文件夹，查看脚本后双击 run_client_diagnostic_windows.cmd。请使用发生问题的这台 Windows 电脑，普通用户运行即可。</p>
         <p>完成后，同一文件夹会生成 netpilot-client-diagnostic.json。工具只生成本地文件，由你决定是否提交。</p>
         <p>如果组织策略阻止脚本运行，可以跳过检查并继续受限排查。请勿关闭或降低安全策略。</p>
-        <button type="button" data-client-check-next="1">上一步</button><button type="button" data-client-check-next="3">已运行，上传结果</button>
+        <button type="button" data-client-check-next="1">上一步</button>
+        <button type="button" data-client-check-next="3">已运行，上传结果</button>
       </section>
-      <section data-client-check-step="3" hidden>
+      <section data-client-check-step="3" hidden="">
         <h3>3. 将结果拖回页面</h3>
         <p>运行完成后会生成 netpilot-client-diagnostic.json。</p>
         <div id="client-check-drop" class="client-check-drop" tabindex="0" role="button" aria-label="拖放网络检查结果，或按回车选择文件">把结果文件拖到这里，将上传并继续分析；也可以选择文件后点击上传。</div>
-        <label for="client-check-file">选择网络检查结果文件</label><input id="client-check-file" type="file" accept=".json,application/json">
+        <label for="client-check-file">选择网络检查结果文件</label>
+        <input id="client-check-file" type="file" accept=".json,application/json">
         <p id="client-check-file-label">尚未选择文件</p>
         <button id="client-check-upload" type="button">上传并继续分析</button>
         <button type="button" data-client-check-next="2">上一步</button>
       </section>
       <p id="client-check-status" role="status" aria-live="polite">等待上传</p>
-      <div id="client-check-historical" hidden><button id="client-check-rerun" type="button">重新运行网络检查</button><button id="client-check-use-old" type="button">仍然使用这份结果</button></div>
+      <div id="client-check-historical" hidden="">
+        <button id="client-check-rerun" type="button">重新运行网络检查</button>
+        <button id="client-check-use-old" type="button">仍然使用这份结果</button>
+      </div>
       <button id="client-check-skip" type="button">暂时不用</button>
     </dialog>
-    <script src="/client-check.js?v=13c" defer></script>
-    <script src="/app.js?v=client-check-13c" defer></script>
+    <script src="/client-check.js?v=13c" defer=""></script>
+    <script src="/student-ui.js?v=13d" defer=""></script>
+    <script src="/app.js?v=student-ui-13d" defer=""></script>
   </body>
 </html>

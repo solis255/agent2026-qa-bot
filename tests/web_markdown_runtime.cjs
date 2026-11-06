@@ -19,7 +19,9 @@ async function setup() {
   const w = dom.window;
   w.TextDecoder = TextDecoder;
   w.fetch = async () => ({ ok: false, status: 401, json: async () => ({ detail: "请登录" }) });
-  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "client-check.js", "app.js"]) {
+  w.HTMLDialogElement.prototype.showModal = function() {this.open=true;};
+  w.HTMLDialogElement.prototype.close = function() {this.open=false;this.dispatchEvent(new w.Event("close"));};
+  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "client-check.js", "student-ui.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(web, file), "utf8"), dom.getInternalVMContext(), { filename: file });
   }
   await tick();
@@ -281,8 +283,8 @@ Object.assign(cases, {
   },
   "CIT-10": async (w) => {
     assert.equal(w.document.querySelector("#source-list,.source-list,.source-type"), null);
-    assert.ok(!w.document.querySelector(".diagnostics-panel").textContent.includes("校园网络来源"));
-    assert.ok(!w.document.querySelector(".diagnostics-panel").textContent.includes("参考知识"));
+    assert.ok(!w.document.querySelector("#diagnostic-details-dialog").textContent.includes("校园网络来源"));
+    assert.ok(!w.document.querySelector("#diagnostic-details-dialog").textContent.includes("参考知识"));
     assert.equal(typeof w.renderSources, "undefined");
   },
 });
