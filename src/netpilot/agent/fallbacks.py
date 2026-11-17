@@ -27,7 +27,6 @@ def build_intent_fallback(
 ) -> str:
     """Generate a safe response that preserves the current Turn's purpose."""
 
-    del reason  # Exposed as metadata; do not clutter the user-facing answer.
     if intent is TurnIntent.REPORT_REQUEST or response_mode is ResponseMode.REPORT:
         return _report_fallback(user_message, steps, evidence, sources, hypotheses)
     if intent is TurnIntent.META_FEEDBACK or response_mode is ResponseMode.META:
@@ -39,7 +38,7 @@ def build_intent_fallback(
     } or response_mode in {ResponseMode.ANALYSIS, ResponseMode.COMPARISON}:
         return _analysis_fallback(evidence, steps, sources, hypotheses)
     if response_mode is ResponseMode.KNOWLEDGE:
-        return _knowledge_fallback(sources, evidence, steps)
+        return _knowledge_fallback(sources, evidence, steps, reason)
     if steps:
         network_steps = [step for step in steps if step.tool_name != "knowledge_search"]
         if network_steps:
@@ -141,8 +140,17 @@ def _knowledge_fallback(
     sources: list[KnowledgeSource],
     evidence: list[EvidenceRecord],
     steps: list[AgentToolStep],
+    reason: FallbackReason,
 ) -> str:
     chunks = knowledge_results(evidence, steps)
+    if reason is FallbackReason.LLM_RATE_LIMITED:
+        notice = "TJU 模型服务暂时限流（429）。"
+        if not chunks:
+            return notice + "本地知识库暂未提供可引用的资料，请稍后重试。"
+        return (
+            notice + "以下是本地知识库检索到的原文片段。\n\n"
+            + render_knowledge_fallback_chunks(chunks)
+        )
     if chunks:
         return (
             "知识库检索已完成，但模型最终整理失败。\n\n"

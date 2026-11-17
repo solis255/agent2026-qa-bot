@@ -209,7 +209,8 @@ class ReasoningTraceBuilder:
         if result.fallback_reason is not None or result.status.value == "llm_error":
             reason = getattr(result.fallback_reason, "value", None)
             detail = {"max_tool_rounds": "自动检测已达到步骤上限", "invalid_tool_loop": "模型工具请求不符合当前执行策略",
-                      "llm_error": "模型调用未能正常完成", "finalization_failed": "最终回答整理未能正常完成",
+                      "llm_error": "模型调用未能正常完成", "llm_rate_limited": "模型服务暂时限流", "finalization_failed": "最终回答整理未能正常完成",
+                      "knowledge_no_sources": "知识库没有提供可引用的资料",
                       "llm_empty_response": "模型未提供有效回答"}.get(reason, "模型调用未能正常完成")
             self.append("fallback", "进入安全兜底", detail + "；系统如实返回已有依据与限制，不将失败当作检测成功。", decision="fallback", severity="warning")
         if self.intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED}:

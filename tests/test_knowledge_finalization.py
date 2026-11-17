@@ -2,12 +2,12 @@ from uuid import uuid4
 
 import pytest
 
-from netpilot.agent import AgentOrchestrator, FallbackReason, ResponseMode, SessionStore, ToolRegistry, TurnIntent
+from netpilot.agent import AgentOrchestrator, AgentStatus, FallbackReason, ResponseMode, SessionStore, ToolRegistry, TurnIntent
 from netpilot.agent.knowledge import source_only_answer
 from netpilot.agent.prompts import KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT, NETPILOT_SYSTEM_PROMPT
 from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
-from netpilot.llm import ChatResult, FunctionCall, LLMTimeoutError, ToolCall
+from netpilot.llm import ChatResult, FunctionCall, LLMRateLimitError, LLMTimeoutError, ToolCall
 from netpilot.rag import KnowledgeSearchResult
 from netpilot.rag.schemas import source_ref_for
 from netpilot.tools import build_network_tools
@@ -121,6 +121,101 @@ def test_knowledge_finalization_retries_once_with_shorter_context():
     assert len(llm.calls[2][0][2].content) < len(llm.calls[1][0][2].content)
     assert all(call[1]["tools"] is None for call in llm.calls[1:])
     assert all(call[1]["tool_choice"] == "none" for call in llm.calls[1:])
+
+
+def test_vpn_question_searches_local_index_when_first_model_call_is_rate_limited():
+    class RateLimitedLLM:
+        calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            raise LLMRateLimitError("rate limited", status_code=429)
+
+    llm = RateLimitedLLM()
+    registry = ToolRegistry(build_network_tools(Settings(_env_file=None)), Retriever())
+    result = AgentOrchestrator(llm, registry, reasoning_summary_llm_enabled=True).run("天津大学 VPN 怎么使用？")
+
+    assert llm.calls == 1
+    assert result.status is AgentStatus.COMPLETED
+    assert result.fallback_reason is FallbackReason.LLM_RATE_LIMITED
+    assert result.rag_calls == 1
+    assert result.knowledge_finalization_attempts == 0
+    assert [step.tool_name for step in result.steps] == ["knowledge_search"]
+    assert result.steps[0].arguments == {"query": "天津大学 VPN 怎么使用？"}
+    assert all(citation(index) in result.answer for index in range(3))
+    assert len(result.sources) == 3
+
+
+def test_rate_limited_finalization_returns_local_sources_without_another_model_call():
+    llm = LLM([LLMRateLimitError("rate limited", status_code=429)])
+    result = run(llm)
+
+    assert len(llm.calls) == 2
+    assert result.status is AgentStatus.COMPLETED
+    assert result.fallback_reason is FallbackReason.LLM_RATE_LIMITED
+    assert result.knowledge_finalization_attempts == 1
+    assert result.knowledge_finalization_failure_kind == "llm_rate_limited"
+    assert all(citation(index) in result.answer for index in range(3))
+
+
+@pytest.mark.parametrize("vpn_sources_available", [True, False])
+def test_missing_tool_call_searches_current_question_after_an_unrelated_fallback(vpn_sources_available):
+    previous_question = "天津大学 eduroam 怎么连接？"
+    vpn_question = "天津大学 VPN 怎么使用？"
+    previous_source = KnowledgeSearchResult(
+        title="eduroam 连接说明", source="https://example.test/eduroam", source_type="official",
+        file="eduroam.md", chunk_id="eduroam-chunk-1", score=0.9, content="连接 eduroam 需要完成认证。",
+    )
+
+    class CampusRetriever(Retriever):
+        def search(self, query, top_k=None):
+            if query == previous_question:
+                return [previous_source]
+            assert query == vpn_question
+            return super().search(query, top_k) if vpn_sources_available else []
+
+    class Model:
+        def __init__(self):
+            self.calls = []
+
+        def chat(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            if len(self.calls) == 1:
+                raise LLMRateLimitError("rate limited", status_code=429)
+            if kwargs["tools"]:
+                return completed("请参考上一轮的资料。")
+            return completed()
+
+    llm = Model()
+    agent = AgentOrchestrator(llm, ToolRegistry(build_network_tools(Settings(_env_file=None)), CampusRetriever()))
+    sessions = SessionStore()
+    owner = uuid4()
+    session = sessions.create(owner).session_id
+    first = agent.run(previous_question, history=sessions.begin_turn(session, owner),
+                      task_state=sessions.task_state(session, owner))
+    assert first.fallback_reason is FallbackReason.LLM_RATE_LIMITED
+    assert first.sources[0].source == previous_source.source
+    sessions.finish_turn(session, previous_question, first.answer, result=first)
+
+    result = agent.run(vpn_question, history=sessions.begin_turn(session, owner),
+                       task_state=sessions.task_state(session, owner))
+
+    assert result.rag_calls == 1
+    assert [step.arguments for step in result.steps] == [{"query": vpn_question}]
+    assert previous_source.source not in {source.source for source in result.sources}
+    assert not result.reused_evidence_ids
+    if vpn_sources_available:
+        assert len(llm.calls) == 3
+        assert llm.calls[-1][1]["tools"] is None
+        assert result.knowledge_finalization_attempts == 1
+        assert result.fallback_reason is None
+        assert citation(0, 1, 2) in result.answer
+    else:
+        assert len(llm.calls) == 2
+        assert result.knowledge_finalization_attempts == 0
+        assert result.fallback_reason is FallbackReason.KNOWLEDGE_NO_SOURCES
+        assert not result.sources
+        assert "没有提供足够来源" in result.answer
 
 
 def test_final_sources_prefer_chunks_actually_cited_in_synthesis():

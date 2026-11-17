@@ -36,6 +36,8 @@ class FallbackReason(str, Enum):
     LLM_EMPTY_RESPONSE = "llm_empty_response"
     INVALID_TOOL_LOOP = "invalid_tool_loop"
     LLM_ERROR = "llm_error"
+    LLM_RATE_LIMITED = "llm_rate_limited"
+    KNOWLEDGE_NO_SOURCES = "knowledge_no_sources"
     FINALIZATION_FAILED = "finalization_failed"
 
 

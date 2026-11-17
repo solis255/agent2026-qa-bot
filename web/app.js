@@ -1566,14 +1566,14 @@ async function submitChat(event, options = {}) {
   const chatSessionId = state.sessionId;
   state.viewingHistory = false;
   renderEnvironmentProfile(state.environmentProfile);
-  const userMessage = appendMessage(options.continuation ? "assistant" : "user", options.continuation ? "系统：网络检查完成，自动继续分析。" : "消息已发送，正在进行隐私处理…");
+  const userMessage = appendMessage(options.continuation ? "assistant" : "user", options.continuation ? "系统：网络检查完成，自动继续分析。" : "正在发送消息…");
   renderDiagnosticTarget(state.diagnosticTarget);
   renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
   renderRemediationPlan(state.remediationPlan);
   const streamedAnswer = appendMessage("assistant", "");
   streamedAnswer.classList.add("is-streaming");
   elements.messageInput.value = "";
-  setBusy(true, "已连接流式诊断，Agent 正在收集证据…");
+  setBusy(true, "正在提交请求…");
   try {
     let response = null;
     await requestSSE(
@@ -1586,7 +1586,8 @@ async function submitChat(event, options = {}) {
       async (eventName, data) => {
         if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
         if (eventName === "start") {
-          elements.interactionNote.textContent = "流式连接已建立，正在执行诊断。";
+          if (!options.continuation) userMessage.textContent = "消息已接收。";
+          elements.interactionNote.textContent = "服务端正在处理请求，等待回答…";
         } else if (eventName === "delta") {
           streamedAnswer.textContent += String(data.text || "");
           elements.conversation.scrollTop = elements.conversation.scrollHeight;
@@ -1623,9 +1624,16 @@ async function submitChat(event, options = {}) {
     setReportRecord(response.record_id);
     await loadHistory();
     if (state.authEpoch !== authEpoch) return;
-    elements.interactionNote.textContent = "诊断完成。你可以继续追问或新建会话。";
+    if (response.diagnosis?.status === "llm_error") {
+      elements.interactionNote.textContent = "本轮回答未能完成，请稍后重试。";
+    } else if (response.metrics?.response_mode === "knowledge" && response.metrics?.fallback_reason === "llm_rate_limited") {
+      elements.interactionNote.textContent = "已返回本地知识库资料。";
+    } else {
+      elements.interactionNote.textContent = "本轮处理完成。你可以继续追问或新建会话。";
+    }
   } catch (error) {
     if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
+    if (!options.continuation && userMessage.textContent === "正在发送消息…") userMessage.textContent = "本次消息未能处理。";
     if (!streamedAnswer.textContent) streamedAnswer.textContent = "本次回答未能完成。";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;

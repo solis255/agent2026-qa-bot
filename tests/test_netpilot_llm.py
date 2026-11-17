@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,6 +12,7 @@ from openai import (
     APIResponseValidationError,
     APITimeoutError,
     AuthenticationError,
+    DefaultHttpxClient,
     InternalServerError,
     RateLimitError,
 )
@@ -30,6 +32,7 @@ from netpilot.llm import (
     TJUClient,
     ToolCall,
 )
+from netpilot.llm import tju_client
 
 
 class FakeCompletions:
@@ -129,6 +132,8 @@ def test_client_factory_receives_bounded_sdk_configuration() -> None:
     settings = make_settings(tju_timeout_seconds=45, tju_max_retries=3)
     client = TJUClient(settings, client_factory=factory)
 
+    http_client = captured.pop("http_client")
+    http_client.close()
     assert captured == {
         "api_key": "unit-test-secret",
         "base_url": "https://ai.tju.edu.cn/api/agent2026/unit-test",
@@ -136,6 +141,33 @@ def test_client_factory_receives_bounded_sdk_configuration() -> None:
         "max_retries": 3,
     }
     assert "unit-test-secret" not in repr(client)
+
+
+@pytest.mark.parametrize(
+    ("status", "error_type", "attempts"),
+    [(429, LLMRateLimitError, 1), (500, LLMServiceError, 3)],
+)
+def test_sdk_retries_server_errors_and_returns_rate_limits_immediately(
+    monkeypatch, status, error_type, attempts,
+) -> None:
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        headers = {"retry-after": "60"} if status == 429 else {"retry-after-ms": "1"}
+        return httpx.Response(status, headers=headers, json={"error": {"message": "test"}})
+
+    monkeypatch.setattr(tju_client, "DefaultHttpxClient", partial(
+        DefaultHttpxClient, transport=httpx.MockTransport(respond),
+    ))
+    client = TJUClient(make_settings(tju_max_retries=2))
+
+    try:
+        with pytest.raises(error_type):
+            client.chat(messages())
+    finally:
+        client.close()
+    assert len(requests) == attempts
 
 
 def test_chat_sends_an_ordinary_non_streaming_completion() -> None:
@@ -176,6 +208,36 @@ def test_chat_allows_a_response_without_usage() -> None:
     result = client.chat(messages())
 
     assert result.usage.total_tokens == 0
+
+
+def test_chat_merges_system_prompts_without_reordering_tool_messages() -> None:
+    fake = FakeSDKClient(make_response())
+    client = TJUClient(make_settings(), sdk_client=fake)
+    conversation = [
+        ChatMessage(role="user", content="检查 DNS。"),
+        ChatMessage(
+            role="assistant",
+            tool_calls=[
+                ToolCall(
+                    id="call_dns_1",
+                    function=FunctionCall(name="dns_lookup", arguments="{}"),
+                )
+            ],
+        ),
+        ChatMessage(role="tool", content="解析成功。", tool_call_id="call_dns_1"),
+    ]
+
+    client.chat([
+        ChatMessage(role="system", content="你是校园网络助手。"),
+        ChatMessage(role="system", content="回答要简洁。"),
+        *conversation,
+        ChatMessage(role="system", content="根据证据总结。"),
+    ])
+
+    assert fake.completions.calls[0]["messages"] == [
+        {"role": "system", "content": "你是校园网络助手。\n\n回答要简洁。\n\n根据证据总结。"},
+        *(message.to_api_dict() for message in conversation),
+    ]
 
 
 def test_chat_sends_tools_and_parses_native_function_calls() -> None:

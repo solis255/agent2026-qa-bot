@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from time import perf_counter
 from typing import Any
 
+from httpx import Response
 from openai import (
     APIConnectionError,
     APIError,
@@ -13,6 +14,7 @@ from openai import (
     APIStatusError,
     APITimeoutError,
     AuthenticationError,
+    DefaultHttpxClient,
     OpenAI,
     RateLimitError,
 )
@@ -32,6 +34,7 @@ from netpilot.llm.errors import (
 from netpilot.llm.schemas import (
     ChatMessage,
     ChatResult,
+    ChatRole,
     FunctionCall,
     TokenUsage,
     ToolCall,
@@ -62,6 +65,7 @@ class TJUClient:
                 base_url=settings.tju_api_base,
                 timeout=settings.tju_timeout_seconds,
                 max_retries=settings.tju_max_retries,
+                http_client=DefaultHttpxClient(event_hooks={"response": [_skip_rate_limit_retry]}),
             )
 
     @property
@@ -116,7 +120,18 @@ class TJUClient:
         if tools is not None and tool_choice not in {"auto", "none", "required"}:
             raise LLMRequestError("tool_choice 必须是 auto、none 或 required。")
 
-        request_messages = [message.to_api_dict() for message in messages]
+        system_prompts = []
+        request_messages = []
+        for message in messages:
+            serialized = message.to_api_dict()
+            if message.role is ChatRole.SYSTEM:
+                system_prompts.append(serialized["content"])
+            else:
+                request_messages.append(serialized)
+        # TJU's chat template accepts a single system message at the beginning.
+        if system_prompts:
+            request_messages.insert(0, {"role": "system", "content": "\n\n".join(system_prompts)})
+
         request: dict[str, Any] = {
             "model": self.model,
             "messages": request_messages,
@@ -138,7 +153,7 @@ class TJUClient:
             ) from exc
         except RateLimitError as exc:
             raise LLMRateLimitError(
-                "TJU API 请求过于频繁（429），有限重试后仍未成功。",
+                "TJU API 暂时限流（429），请稍后重试。",
                 retryable=True,
                 status_code=429,
                 request_id=_request_id(exc),
@@ -177,6 +192,12 @@ class TJUClient:
 
         duration_ms = (perf_counter() - started) * 1000
         return _parse_response(response, self.model, duration_ms)
+
+
+def _skip_rate_limit_retry(response: Response) -> None:
+    if response.status_code == 429:
+        # Let the application handle the limit without sleeping through Retry-After.
+        response.headers["x-should-retry"] = "false"
 
 
 def _parse_response(response: Any, configured_model: str, duration_ms: float) -> ChatResult:
