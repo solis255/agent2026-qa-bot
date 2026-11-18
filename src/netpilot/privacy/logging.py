@@ -11,6 +11,9 @@ LOG_FIELDS = frozenset({
     "has_content", "content_length", "has_tool_calls", "looks_like_textual_tool_call",
     "source_only_detected", "selected_chunk_count", "selected_context_chars", "llm_error_type",
     "knowledge_history_messages",
+    "status_code", "provider_request_id", "provider_error_code", "provider_reason",
+    "max_retries", "retry_after_seconds", "retry_delay_seconds", "will_retry",
+    "retry_stop_reason", "model",
 })
 
 

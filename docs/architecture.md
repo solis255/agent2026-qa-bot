@@ -357,6 +357,8 @@ Milestone 13D 仅调整原生静态前端的信息层级：居中的 `student-wo
 
 Session snapshot v3 在 DB schema v3 内保存 `PersistedConversationTurn[]` 和 `conversation_complete`，无需重建 SQLite 表。每次 Chat/SSE 共用 upsert 追加实际问答；旧 v1/v2 多轮累计快照只能兼容读取最后一对并标为不完整。历史查看不恢复内存 Session。Knowledge Finalization 使用独立知识 Prompt、受限 chunk 与最近最多 4 条短历史，支持来源筛选追问的 Evidence 复用。日志与 Web 调试指标提供具体失败类型。详见 [知识整理与完整会话验收](knowledge-transcript-validation.md)。
 
+明确知识咨询由 ToolPolicy 筛选后，先通过 Registry 执行一次本地 `knowledge_search`（或复用同查询的会话资料），再发送不带工具的 Knowledge Finalization；无需先让模型选择检索。无资料返回 `knowledge_no_sources` / `insufficient_sources`。`TJUClient` 是唯一 HTTP 重试层，SDK 禁用自动重试；整理收到最终 429 时不会再启动一个 HTTP 重试周期。每次上游尝试用 NetPilot `request_id` 与安全的 `provider_request_id` 关联，详见 [429 排查与验收](TJU_LLM_429_DIAGNOSIS_AND_VALIDATION.md)。
+
 知识最终整理、当前账号持久化历史上下文与 cursor 前端上一页缓存的最新流程和验收，见 [回答与历史修复](answer-history-fixes.md)。这三条路径继续遵守 Session History v3 唯一性和认证边界。
 
 `web/` 由 FastAPI `StaticFiles` 挂载到 `/`。9C 页面先请求 `/api/auth/me`：有效 Cookie 显示主界面并加载个人 Session/History，401 显示登录/注册面板。右上角当前用户菜单提供“我的诊断历史”、改密和退出；退出或登录过期会清空前一账号的会话、诊断与报告 DOM。浏览器用 `credentials: "same-origin"` 调用同源 API，不将密码或 Auth Token 放入本地浏览器存储。聊天、诊断摘要、Tool Timeline、来源、指标、历史、报告与 Mock 场景仍经文本 DOM 接口安全渲染。

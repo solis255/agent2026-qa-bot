@@ -27,6 +27,7 @@ class AgentStatus(str, Enum):
     COMPLETED = "completed"
     MAX_TOOL_ROUNDS = "max_tool_rounds"
     LLM_ERROR = "llm_error"
+    INSUFFICIENT_SOURCES = "insufficient_sources"
 
 
 class FallbackReason(str, Enum):

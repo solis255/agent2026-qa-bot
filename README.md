@@ -1,395 +1,127 @@
 # TJU NetPilot
 
-> 天津大学校园网络智能诊断与服务 Agent
+**面向天津大学师生的校园网络自助诊断与用网助手。** 用中文描述“校园 Wi‑Fi 连上了但网页打不开”之类的现象，NetPilot 会按需确认接入环境和受影响范围，结合当前设备证据给出排查步骤。用户可以在操作后复核，也可以把现象、检测结果和已尝试的操作整理为报修材料，自行交接给校内支持人员。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Model: tju-llm](https://img.shields.io/badge/model-tju--llm-brightgreen.svg)](https://ai.tju.edu.cn/)
+![TJU NetPilot 学生端桌面界面运行截图](screenshots/milestone13d-student-desktop.jpg)
 
-TJU NetPilot 面向校园网连通性排障与服务知识问答。它不是只给出通用建议的 Chatbot：面对实时网络问题时，Agent 会按需调用受控、只读的网络 Tool 获取证据，再给出带结论、置信度、建议和限制的诊断；面对 VPN、eduroam 等知识问题时，可从带来源标记的本地知识库检索参考资料。
+## 谁会使用它
 
-用户无需预先填写环境信息。NetPilot 会先从用户描述中提取已明确的设备与网络上下文，只在诊断确有需要且信息缺失时，通过对话询问最少必要信息。每次最多一个问题，可选快捷回答或直接输入，“不清楚”也是合法回答；原环境表单保留在默认折叠的“诊断详情 → 环境信息 → 修改环境”。实现范围与验收见 [Milestone 13A](docs/MILESTONE13A_VALIDATION.md)。
+| 用户 | 常见需求 | 校园应用价值 |
+| --- | --- | --- |
+| 新生和在校学生 | 初次连接校园网，遇到宿舍 Wi‑Fi 断连、网页打不开、只有某个应用异常 | 从日常用语开始排查，按步骤确认影响范围与连接状态，减少盲目重置网络配置 |
+| 教职工和科研团队 | 在校外访问校内资源，查询校园 VPN 或 eduroam，用教学和科研平台时发现连接异常 | 快速找到带来源的使用说明，结合诊断证据判断下一步应检查接入、解析、端口还是应用 |
+| 校园网络支持人员 | 接收师生转交的故障信息，了解故障影响、已经尝试的步骤和处理效果 | 使用结构化报修材料开展初步分诊，减少重复询问和重复检测 |
 
-Web 界面采用 Chat-first 设计。普通用户默认只需描述网络问题，环境追问、客户端网络检查和下一步操作会按需出现在对话中；Environment、Diagnostic Target、Evidence、Reasoning Trace、Tool Timeline、Verification、Report 等高级信息集中在“诊断详情”中按需查看。历史从账号菜单打开，查看时只读，可返回当前诊断继续。详见 [Milestone 13D 验收](docs/MILESTONE13D_VALIDATION.md)。
+## 核心功能
 
-正式产品代码位于 [`src/netpilot/`](src/netpilot/)。仓库中的 `labs/`、`lab/`、`examples/`、`bonus/` 等目录是保留的上游教学资源，不参与 TJU NetPilot 的正式运行时，详见[上游来源与教学资源](docs/upstream.md)。
+1. **用现象发起诊断。** 从“微信能用，但网页打不开”或“网页正常，SSH 连不上”开始，按需补充系统、接入方式、VPN / 代理和影响范围。诊断详情可查看当前对象、结论依据及未覆盖的检查项。
+2. **按设备取证。** 运行服务的主机支持网卡与网关信息、Ping、DNS、TCP、HTTP 和路由跟踪等只读检查。远程 Windows 用户可下载工具，在故障设备上手动运行，再选择上传 JSON 快照。其他远程终端可根据现象和已知环境获得有限的排查建议。
+3. **手动修复与前后复核。** 提供适用条件明确的低风险步骤，由用户自行执行并记录结果。系统比较修复前后的可比指标，并请用户确认原始症状；关键异常指标恢复且用户确认后，才标记为已解决。
+4. **校园用网知识问答。** 覆盖校园网接入、VPN、eduroam、IPv6 等主题。答案附行内引用，来源区分校方材料与社区资料；具体办理和配置要求以所引来源的适用范围与时效为准。
+5. **个人历史与报修交接。** 登录后可回看自己的会话、证据和处理记录，预览或导出 Markdown / JSON 报告。问题需要人工支持时，可另外生成脱敏报修材料，供用户自行发送。
 
-## 产品能力
+NetPilot 定位于校园用户侧的自助初诊与人工分诊辅助。工具只读，修复步骤由用户执行，报修材料由用户交接。服务的可观测范围以运行主机、用户上传的快照或明确标记的模拟数据为限。
 
-| 能力 | 当前实现 |
-|---|---|
-| 模型 | `tju-llm`，通过 OpenAI-compatible Chat Completions 接口进行原生 Function Calling |
-| Agent | 单 Agent、有界 Tool loop、Turn Intent / ToolPolicy、Coverage-based Stop、跨 Turn Evidence 与轻量 Hypothesis |
-| 网络检测 | 六个 allowlisted、只读 Tool；严格参数校验与统一结构化证据 |
-| Provider | 确定性离线 `MockNetworkProvider`；检测运行 NetPilot 主机的 `LocalNetworkProvider` |
-| RAG | 本地 Markdown/TXT → 分块 → Embedding → FAISS → 带来源检索 |
-| Web/API | 中文 Web、登录/注册/改密/退出、当前用户菜单、个人会话与历史、结构化 Tool Timeline、健康检查、Mock 场景控制 |
-| 历史与报告 | 每个 Session 一条累计 SQLite 诊断记录、账号历史分析、每页 10 条上一页/下一页、确定性报告、Markdown/JSON 导出 |
-| 环境画像 | 每个 Session 一份 EnvironmentProfile；浏览器低风险采集、用户编辑/明确表述更新、来源优先级、跨 Turn 复用、历史与报告保存 |
-| 诊断对象 | 区分浏览器设备 / NetPilot 服务主机 / Mock 模拟终端；按工具执行位置限制能力，证据与去重绑定对象版本 |
-| 客户端快照 | Windows 只读脚本 → 手动 JSON 上传 → 客户端 Evidence；校验/脱敏/时效/去重/替换归档，不启用远程执行 |
-| 引导式修复 | 批准目录生成低风险手动计划，展示理由/验证/回滚，记录完成/跳过/结果；不自动执行或重测 |
-| 流式传输 | JSON-only SSE：`start → delta... → complete`，带 keep-alive 与安全错误事件 |
-| 安全 | Tool allowlist、Pydantic 严格校验、SSRF 防护、`shell=False`、超时/输出/容量上限、日志脱敏 |
+## 系统概览
 
-### 普通 Chatbot 与 TJU NetPilot
+中文 Web 界面通过同源 FastAPI 调用服务。单 Agent 使用天津大学 `tju-llm` 和原生 Function Calling，由服务端根据意图、诊断对象、证据覆盖和工具白名单控制诊断。网络工具共用 Mock / Local 接口，校园资料由 FastEmbed 中文向量模型和 FAISS 本地检索，SQLite 支撑认证和个人历史。Web 使用原生 JavaScript 和本地静态资源，运行时无需 Node.js。
 
-| 对比项 | 普通 Chatbot | TJU NetPilot |
-|---|---|---|
-| 实时网络状态 | 只能依据用户描述推测 | 先通过只读 Tool 取证，再依据结构化结果判断 |
-| 工具边界 | 可能没有明确执行边界 | LLM 只能调用 `ToolRegistry` 中的 allowlisted tools |
-| 诊断过程 | 通常只有自然语言答案 | 展示 Tool 参数、轮次、耗时、结果和证据状态 |
-| 知识来源 | 可能不展示来源 | RAG 结果保留标题、URL、类型、文件、chunk 和相关度 |
-| 可复现性 | 依赖现场网络与模型措辞 | Mock 场景可离线、确定性复现；Local 用于本机实测 |
-| 留痕 | 通常只保留聊天文本 | 可持久化结构化诊断快照并导出报告 |
+架构图、诊断及复核流程、HTTP / SSE 接口和实现位置见 [DESIGN.md](DESIGN.md)。
 
-### 六个网络 Tool
+## 本地启动
 
-| Tool | 用途 | 关键结果 |
-|---|---|---|
-| `get_network_info` | 检查运行 NetPilot 主机的网卡、IPv4、默认网关和 DNS | 本地接入配置 |
-| `ping_host` | 有界 ICMP 探测 | 可达性、丢包、平均时延 |
-| `dns_lookup` | 有界域名解析 | 是否解析、地址列表 |
-| `tcp_check` | 检查指定 TCP 端口 | 是否连接、失败原因 |
-| `http_check` | 只读检查公开 HTTP(S) URL | 请求是否发送、状态码、重定向与解析地址 |
-| `traceroute` | 有界路由追踪 | 跳点与是否到达目标 |
-
-当本地 RAG 索引就绪时，`ToolRegistry` 还会注册可选的 `knowledge_search`。它是知识检索 Tool，不属于上述六个网络检测 Tool。
-
-`success=true` 表示 Tool 成功产生了诊断证据，并不表示网络一定健康。例如 `reachable=false` 是一次执行成功的异常观察；超时、执行错误与安全阻止会被单独分类。
-
-## 测试 Demo
-
-以下 Demo 建议使用 `TOOL_MODE=mock` 与 `SCENARIO_SWITCH_ENABLED=true`，以获得稳定、可复现的结构化结果。模型措辞可能变化，验收以 Tool Timeline、诊断分类和来源字段为准。
-
-### Demo 1：DNS 故障
-
-切换到 `dns_failure`，输入：
-
-> 我可以访问公网 IP，但打不开 github.com。请至少使用 ping_host 检查 1.1.1.1，并使用 dns_lookup 检查 github.com，最后根据证据简洁给出诊断。
-
-预期：Ping 为正常证据，DNS 为异常证据，结论优先指向 DNS 解析阶段，而不是把 `resolved=false` 误报成 Tool 执行失败。
-
-### Demo 2：SSH 端口受阻
-
-切换到 `tcp_ssh_blocked`，输入：
-
-> 网页可以打开，但 SSH 连接 ssh.example.com 的 22 端口失败。请使用 tcp_check 检查该主机的 22 端口，并依据结果判断。
-
-预期：`tcp_check` 返回 `connected=false` 与安全失败原因；结论定位到 TCP 22/SSH，不扩大为整个网络中断。
-
-### Demo 3：VPN / RAG
-
-确认 `/api/health` 的 `rag_ready=true`，输入：
-
-> 天津大学 VPN 怎么使用？请先调用 knowledge_search，只依据知识库回答，并标出资料类型、标题和原始 URL。
-
-预期：时间线显示知识参考，来源区展示 `community`、标题、相关度与原始 URL；回答明确社区资料不等于学校当前官方规定。
-
-## 架构
+需要 Python 3.10+。在仓库根目录创建虚拟环境并安装项目。
 
 ```text
-Browser / API Client
-        |
-        v
- FastAPI routes + Web static files
-        |
-        +--> SessionStore (有界文本历史 + SessionTaskState / Evidence Memory)
-        |
-        v
- Turn Intent --> ToolPolicy --> AgentOrchestrator <--> TJUClient <--> tju-llm
-        |
-        v
- ToolRegistry (allowlist + strict schemas)
-        |
-        +--> NetworkToolService --> MockNetworkProvider
-        |                      \--> LocalNetworkProvider（仅本机）
-        |
-        \--> knowledge_search --> FaissRetriever --> 本地知识索引
-        |
-        v
- Diagnosis / Evidence --> ChatResponse --> SQLite history --> Report export
-```
-
-`AgentOrchestrator` 将对话和 allowlisted function schemas 发送给 `tju-llm`。模型返回原生 `tool_calls` 后，服务端按名称查找、校验参数并执行 Tool，再把每个结构化结果按对应的 `tool_call_id` 作为 `tool` 消息回填。循环由 `MAX_TOOL_ROUNDS` 限制，并会避免重复执行相同目标。
-
-完整类名、请求流、错误边界与扩展点见[架构说明](docs/architecture.md)，设计取舍见[设计文档](DESIGN.md)。
-
-## 运行
-
-### 环境要求
-
-- Python 3.10+
-- Git
-- 比赛平台分配的 TJU API Key 与专属 base URL
-- 可选：构建 RAG 索引时需要首次下载 Embedding 模型
-
-### Quick Start
-
-```bash
-git clone https://github.com/solis255/agent2026-qa-bot.git
-cd agent2026-qa-bot
-
 python -m venv .venv
 ```
 
-Linux/macOS：
-
-```bash
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-cp .env.example .env
-```
-
-Windows PowerShell：
+**Windows PowerShell**
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
 python -m pip install -e .
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-在私有 `.env` 中填写：
+**Linux / macOS**
 
-```text
-TJU_API_KEY=你的比赛 API Key
-TJU_API_BASE=比赛平台分配的专属 SDK base URL
+```bash
+source .venv/bin/activate
+python -m pip install -e .
+test -f .env || cp .env.example .env
+```
+
+普通聊天需要在服务端的私有 `.env` 中填写比赛平台分配的 Key 和专属 SDK 基础地址。基础地址填写到项目路径，SDK 会追加 `/chat/completions`。将 `.env` 留在本机，避免在前端、截图和日志中暴露凭据。
+
+```dotenv
+TJU_API_KEY=你的比赛_API_Key
+TJU_API_BASE=比赛平台分配的专属_SDK_基础地址
 TJU_MODEL=tju-llm
-LLM_MAX_OUTPUT_TOKENS=1600
-LLM_REPORT_MAX_OUTPUT_TOKENS=2800
-MAX_RAG_CALLS_PER_TURN=2
+TOOL_MODE=mock
 ```
-
-不要把 `/chat/completions` 附加到 `TJU_API_BASE`；SDK 会自动补充该路径。`.env` 已被 Git 忽略，禁止提交或通过浏览器传递 API Key。
-
-启动正式应用：
 
 ```bash
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 <http://127.0.0.1:8000/>，注册专用演示账号或登录后即可创建个人会话；右上角菜单提供“我的诊断历史”、修改密码和退出。健康检查位于 <http://127.0.0.1:8000/api/health>。没有 `TJU_API_KEY` 时应用仍会启动并返回 `llm_configured=false`，但聊天接口不可用；Tool Provider 构造阶段不会发出网络请求。
+打开 [NetPilot 首页](http://127.0.0.1:8000/)，注册并登录。可通过 [健康检查](http://127.0.0.1:8000/api/health) 查看模型配置、工具模式、知识索引和历史存储是否就绪。`llm_configured` 反映配置是否存在；真实模型联通性可通过 `python scripts/test_tju_api.py` 单独验证。缺少 Key 时仍可启动并运行下述快照演示。跨设备使用见 [局域网启动说明](docs/MILESTONE9D_LAN_DEMO.md)。
 
-### Mock 演示
+## 演示与验证
+
+### 无 Key 演示完整诊断
+
+在独立的 Windows PowerShell 终端激活环境并启动演示实例，使用单独的 SQLite 文件保存演示账号和历史。
 
 ```powershell
-$env:TOOL_MODE="mock"
-$env:SCENARIO_SWITCH_ENABLED="true"
+$env:DEMO_MODE = "true"
+$env:TOOL_MODE = "mock"
+$env:SCENARIO_SWITCH_ENABLED = "false"
+$env:RAG_ENABLED = "false"
+$env:DIAGNOSIS_HISTORY_ENABLED = "true"
+$env:DIAGNOSIS_DB_PATH = ".cache/competition-demo.db"
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 ```
 
-内置场景：`healthy`、`dns_failure`、`gateway_unreachable`、`tcp_ssh_blocked`、`http_failure`、`partial_connectivity`。Mock Provider 不执行系统命令、Socket 或 HTTP 请求。
+登录 [演示实例](http://127.0.0.1:8001/)，打开“诊断详情 → 演示 / 开发 → 演示模式 · Demo / Mock”。可选择以下两条路线。
 
+| 场景 | 操作与预期 |
+| --- | --- |
+| DNS 恢复 | 加载修复前快照 → 记录完成手动步骤 → 加载修复后快照 → 确认原始症状已恢复。查看指标改善和“问题已解决”。 |
+| DNS 多轮无改善 | 完成两轮低风险步骤与复核。有效复核持续无改善且安全步骤耗尽后，查看人工支持建议并生成报修材料。 |
 
+演示快照、历史和导出均带有模拟数据标识。查看 [DNS 恢复截图](screenshots/milestone12i-dns-recovery.png)、[报修交接截图](screenshots/milestone12i-escalation.png) 或 [完整演示手册](docs/DEMO_SCENARIOS.md)。
 
-### Milestone 12I 场景演示与验收
+### 测试工具调用与实机诊断
 
-设置 `DEMO_MODE=true` 后，登录并打开“诊断详情 → 演示 / 开发 → 演示模式 · Demo / Mock”，可创建独立的 DNS 恢复、两轮失败升级、VPN（含未知状态对照）、单服务和复发演示。默认关闭；所有场景经过正式快照、修复反馈、复核、处理状态与隐私导出流程，重置保留已有历史。
+- **Mock 工具。** 已配置 Key 时，设置 `TOOL_MODE=mock` 和 `MOCK_SCENARIO=dns_failure` 后重启，输入“检查 `www.tju.edu.cn`：公网 IP 可达，但域名打不开”，观察 DNS 和连通性证据。也可用 `tcp_ssh_blocked` 测试 TCP 22 单端口故障。六个内置场景为 `healthy`、`dns_failure`、`gateway_unreachable`、`tcp_ssh_blocked`、`http_failure`、`partial_connectivity`。
+- **Local 工具。** 设置 `TOOL_MODE=local` 后重启，在“诊断详情”中将诊断对象切换为“NetPilot 服务主机”，再请求检查主机 DNS 或指定服务的连通性。结果对应服务进程所在主机的网络视角。
+- **远程 Windows 检查。** 在 Local 实例选中“当前浏览器设备”，描述故障。出现“开始网络检查”后，按页面引导下载、解压并确认脚本，在故障电脑上用普通用户运行，再手动上传结果。文件只代表采集时点的状态，修改网络后需重新采集。
 
-完整启动命令、A/B 比赛操作脚本、真实客户端展示及验收结果见 [Demo 操作手册](docs/DEMO_SCENARIOS.md)。离线自动验收：
-
-```powershell
-python scripts/run_demo_scenarios.py
-```
-
-Runner 使用临时账号和数据库；这些远程快照 Demo 无需模型 Key。普通聊天的配置要求保持不变。
-
-### RAG 索引
+### 构建校园知识索引
 
 ```bash
 python scripts/build_knowledge_index.py
-# 已有模型缓存时可离线重建
+# 已有向量模型缓存时可离线重建
 python scripts/build_knowledge_index.py --offline
 ```
 
-流水线从 `knowledge/raw/` 读取带 YAML front matter 的 UTF-8 Markdown/TXT，确定性分块，使用配置的 Embedding 模型生成向量并写入 FAISS。当前仓库内置的校园网、VPN、eduroam 摘要均来自 TJUBOT Wiki，并明确标记为 `community`；当前没有把这些材料宣称为天津大学官方资料。Schema 支持 `official`、`community`、`maintainer`，新增正式资料时必须据实标记并保留原始 URL。检索文本始终作为 untrusted reference data，不能覆盖系统指令或触发任意 Tool。同一 Turn 的检索默认最多两次；格式相同或词集合高度相似的 query 会复用已有结果。API 中 `sources` 是知识操作参考，`diagnosis.evidence` 只包含实时 Network Evidence。
+脚本读取 `knowledge/raw/` 下带 YAML 来源信息的 UTF‑8 文档，默认将索引写入 `knowledge/index/`。首次构建可能下载向量模型。设置 `RAG_ENABLED=true` 并重启，确认 `rag_ready=true` 后可试问“天津大学 VPN 怎么使用？”模型持续限流时，知识回答可展示带引用的检索片段并注明整理状态。索引缺失时，网络诊断可继续使用。配置项见 [.env.example](.env.example)，限流行为见 [429 排查与验收](docs/TJU_LLM_429_DIAGNOSIS_AND_VALIDATION.md)。
 
-索引缺失、损坏、模型不匹配或本地模型缓存不可用时，`rag_ready=false`，`knowledge_search` 不注册；网络诊断与应用启动继续可用。
-
-### API 与 SSE
-
-主要接口：
-
-```text
-GET  /api/health
-POST /api/session
-GET  /api/session/{session_id}
-PATCH /api/session/environment/browser
-PATCH /api/session/environment/user
-PATCH /api/session/diagnostic-target
-POST /api/chat
-POST /api/chat/stream
-GET  /api/diagnoses
-GET  /api/diagnoses/{record_id}
-GET  /api/diagnoses/{record_id}/report
-GET  /api/diagnoses/{record_id}/export?format=markdown|json
-GET  /api/scenarios
-```
-
-`POST /api/chat/stream` 当前是 transport-level SSE：后台先完成一次权威的、非流式 `tju-llm` + Tool loop，再把最终答案按字符块发出 `delta`，最后发送完整 `ChatResponse`。它不是模型 token streaming，也不会为流式显示发起第二次模型请求。
-
-### 当前环境（Milestone 12A）
-
-“诊断详情 → 当前诊断 → 环境信息 → 修改环境”可编辑操作系统、接入方式、VPN、Proxy、影响范围及受影响服务；来源信息继续保留在更深层详情中。
-浏览器只自动提供归一化 OS、在线状态、语言及可选 Network Information API 估计；
-不会自动判断校园 WiFi、VPN 或代理。未知保留为 `unknown` / `null`，不等于关闭。
-用户确认的值优先于浏览器推断。明确陈述（如“我现在用 Windows 11，连校园 WiFi，没开 VPN”）
-可由本地规则更新画像，不额外调用 LLM。
-
-画像是上下文，不是实时 Tool Evidence。Local Tools 仍只检测运行 NetPilot 的主机。
-正常刷新页面时通过 URL 片段里的 Session ID 从服务端恢复画像，不使用 localStorage 保存环境；
-Session 仍是有界进程内存，重启/清理后需新建 Session，已完成会话的画像可从 SQLite 历史读取。
-仅保存最新画像，不新增诊断记录/Turn，不因普通字段补充推进 `task_version`。
-12A 快照新增 `environment_profile` 并升级到 v5（12G 当前为 v11），SQLite 表结构仍为 v3；旧快照保持未知，不反推环境。
-接口、隐私边界和验收见 [Milestone 12A](docs/MILESTONE12A_VALIDATION.md)。
-
-### 自适应诊断流程（Milestone 13B）
-
-正式诊断前，NetPilot 会计算确定性的 Diagnostic Readiness，根据请求类型、必要环境、诊断对象、当前证据和对象能力，决定直接回答、继续询问、复用证据、运行允许的检测，或说明需要客户端侧证据。
-
-远程 Windows 的广泛网页/全网故障和明确的自身 DNS/网关检测请求，在缺少当前证据时会提示使用已有快照功能；OS 未知时复用 13A 只问系统。macOS/Linux/手机继续受限排查，不推荐不适用的采集命令；单站点故障优先低风险建议。过期、时钟偏差、旧任务或旧对象快照保留历史，但不能满足当前准备度。服务主机检测结果不会代替远程客户端证据。
-
-Chat、SSE、Session 和历史/JSON Report 提供 `diagnostic_readiness`；历史持久化快照 schema v12 兼容旧数据，SQLite 表结构仍为 v3，客户端上传格式仍为 v1。13B 沿用手动上传，不增加一键检查、自动下载、自动上传或页面重构。规则、测试和验收记录见 [Milestone 13B](docs/MILESTONE13B_VALIDATION.md)。
-
-### 学生友好的网络检查（Milestone 13C）
-
-当 13B 判断远程 Windows 设备需要客户端结果时，对话会提供“开始网络检查”和“暂时不用”。检查向导分为下载工具、在本机运行、上传结果三步；固定工具包包含现有只读 PowerShell 采集器和普通用户 `.cmd` 启动文件，不降低执行策略、不提权、不修改网络，也不会自行上传。
-
-用户主动拖入结果，或选择文件后点击上传，仍走原 12C 校验。新鲜、适用的新结果会获得服务端一次性继续凭据，自动回到聊天、重新评估准备度并分析，不需要再输入“请分析”。系统自动继续有独立来源标记，不冒充用户原话。重复、过期或时钟偏差结果不会伪造新鲜检测；原 12E 修复后检查使用“重新检查”入口和原 Before/After 对比。
-
-“暂时不用”仅记录当前任务和诊断对象下的选择，可继续受限排查；说“现在可以检查”或进入新任务/对象后可再建议。macOS/Linux/手机没有 Windows 工具入口。高级手动上传、历史/报告与 Demo Fixture 流程保留。详见 [Milestone 13C 验收](docs/MILESTONE13C_VALIDATION.md)。
-
-### 诊断对象（Milestone 12B）
-
-“诊断详情 → 当前诊断 → 诊断对象”显示当前对象，展开后可切换并查看直接检测能力和工具执行位置。Local Web 默认选择远程的“当前浏览器设备”，
-**不会调用服务主机的 DNS、Ping、网卡、TCP、HTTP 或路由工具来冒充用户设备检测**。
-未上传客户端快照时，这类请求会依据现象/环境给出安全建议或追问；明确知识请求仍可检索 RAG。
-选择“NetPilot 服务主机”，或明确说“检查这台 NetPilot 服务器的 DNS”，才允许 Local 主机工具。
-Mock 模式保持只读的“Mock 模拟终端”，结果明确为模拟，不代表真实校园网络。
-
-对象切换增加 `target_version`，但不增加任务版本、不创建空 Turn；旧网络观察保留作历史，不参与当前对象的
-Evidence、Coverage、Hypothesis、工具去重或模型对话。Timeline 标记对象与执行位置；报告区分当前证据和其他对象历史检测。
-Target API 只接受 `session_id` 与 `subject`，执行位置/限制由服务端计算，沿用账号 ownership。
-快照 v6 保存最新 `diagnostic_target`，旧记录保持“未记录”；完整会话及历史对象证据仍保留。
-实现、DT-01～DT-15、验证记录与四个人工验收状态见 [Milestone 12B](docs/MILESTONE12B_VALIDATION.md)。
-
-### 客户端诊断快照（Milestone 12C）
-
-Local 部署的远程“当前浏览器设备”可在“诊断详情 → 网络检查 → 高级详情 / 手动上传”下载 [Windows 只读脚本](scripts/client_diagnostic_windows.ps1)，
-审阅后在允许运行脚本的 Windows 10/11 普通用户 PowerShell 执行 `./client_diagnostic_windows.ps1`，
-得到 `netpilot-client-diagnostic.json`，再主动上传。不提供一键执行、自动上传、提权或降低执行策略。
-
-服务端校验 Snapshot v1、敏感字段与大小（默认 256 KiB），只保存脱敏摘要和规范化 Evidence。
-证据属于 `user_client` 的采集时点，不是 NetPilot Tool Call，也不允许服务主机网络 Tool 冒充客户端检测。
-超过 15 分钟按历史快照解释，未来超过 5 分钟提示时钟偏差；重新上传替换当前快照，旧证据保留归档，
-相同快照不重复生成 Evidence/Trace。历史 JSON 升级 v7，SQLite 结构仍 v3，不清除既有记录。
-
-13C 上传新鲜结果后自动继续分析，高级手动上传也复用同一链路；仍可主动问“生成诊断报告”。DNS 同类证据聚合展示；
-unsupported/error/unknown 不当网络异常。WinHTTP 代理不等于浏览器代理，Wi-Fi 不等于校园 Wi-Fi。
-真实 Windows 普通用户运行尚待验收：本环境执行策略为 Restricted，未绕过策略，也未声称真实采集成功。
-完整契约、CS-01～CS-18 与四个人工 Case 状态见 [12C 验收记录](docs/MILESTONE12C_VALIDATION.md)。
-
-### 引导式修复计划（Milestone 12D）
-
-诊断或明确询问“怎么解决 / 下一步怎么办”时，服务端可从本地批准目录生成最多 5 步手动计划。
-主区在有可用计划时显示“查看修复步骤”，打开“诊断详情 → 处理过程 → 修复计划”，展示低风险标签、适用对象、理由、操作、验证和回滚；可标记完成、跳过、失败及是否改善。
-“还是不行”复用既有状态，不重复已完成无效或跳过的等价操作，也不会自动升级为高风险操作。
-
-**Plan 不是执行。** 不运行 Shell、不提权、不改 DNS/Proxy/Route、防火墙或执行策略，不自动重测。
-VPN/代理为未知时仅确认；已启用也只在普通公网且用户确认无依赖时建议短暂对比，并提供恢复方法。
-对象、关键环境、诊断依据或快照时效变化使旧计划失效。completed 只表示步骤流程结束，不等于故障 resolved。
-
-结构化计划与反馈保存在 Session 级 History / Report，历史 JSON 当前为 v11，SQLite 结构仍 v3，旧记录不会从文本反推计划。
-完整接口、批准模板、GR-01～GR-20 和人工验收状态见 [12D 验收记录](docs/MILESTONE12D_VALIDATION.md)。
-
-### 修复前后验证（Milestone 12E）
-
-计划创建时冻结同一诊断对象的 Before 基线。手动步骤标记“已完成”后，进入新的 task version，但不会立即判定改善：
-
-- 远程浏览器设备：重新运行 Windows 诊断脚本并上传新快照；不能用服务主机检测替代用户设备证据。
-- NetPilot 服务主机：点击“开始验证”，只重测基线中的相关关键只读指标，不重跑完整诊断链。
-- 按同一域名、同一网关、同一 TCP host/port 或同一 URL 比较，输出“有改善 / 无变化 / 变差 / 暂时无法确认”。
-- 用户反馈单独记录；与客观证据冲突时显示“暂时无法确认”。过期、不支持或错误结果不会冒充恢复证据。
-
-网页提供 Before/After 表格和主观反馈，History 与 Markdown/JSON 报告保存每轮验证。默认保留最近 `VERIFICATION_MAX_CYCLES=10` 轮；普通重复验证复用已有结果，只有显式“重新验证”才创建下一轮。
-**Verification ≠ Resolution**：12E 本身不判定 resolved、不自动修复；闭环状态见 12F，报修材料见 12G。
-完整接口、BV-01～BV-20 和四个人工验收步骤见 [12E 验收记录](docs/MILESTONE12E_VALIDATION.md)。
-
-### 诊断闭环状态（Milestone 12F）
-
-每个 Session 保存确定性的 Support Case 状态：诊断中、等待操作、正在验证、已解决、有改善、未解决、建议人工处理。
-状态由结构化复核、低风险步骤、用户确认、对象/任务版本及证据时效计算，不能由 LLM 或前端直接指定。
-
-- “已解决”要求关键异常指标恢复、有效客观复核和用户明确确认，单独说“好了”、计划完成或复核 improved 均不充分。
-- DNS 有改善但用户仍报告网页故障，状态为“有改善”；12E 的主客观冲突记录继续保留。
-- 连续有效复核无改善且无安全步骤、权限/风险边界、充分支持的基础设施假设或用户请求，可建议人工处理；跳过和动作失败不算修复无效。
-- 症状复发开启新 task version，切换对象重回诊断中；旧闭环记录保留。默认保留最近 `RESOLUTION_MAX_TRANSITIONS=30` 次真实状态转换，重复确认不增加状态版本。
-- 用户可确认原始症状或请求人工支持，History、Trace、Markdown/JSON 报告保存闭环依据。Mock 继续明确标注为模拟终端。
-
-**人工支持只是一项建议，不会提交工单、发送邮件、接入 ITSM、执行高风险修复或提权。** 默认无改善建议阈值为 `RESOLUTION_ESCALATE_AFTER_NO_IMPROVEMENT=2`。
-详细决策规则、API、RS-01～RS-24 和人工验收状态见 [12F 验收记录](docs/MILESTONE12F_VALIDATION.md)。
-
-### 升级报修材料（Milestone 12G）
-
-在“报修材料”卡片点击“生成报修材料”，或输入“我要报修”“帮我整理给运维人员”。未解决、有改善、等待操作等状态也可主动生成；**生成材料不会把处理状态改为 escalated**。
-
-材料不是聊天记录复制，而是当前诊断对象、环境、问题、关键证据、假设、实际步骤反馈、Before/After、处理状态和人工核查建议的脱敏摘要。默认最多 12 条去重证据、保留最近 5 个版本，缺少信息明确标注 `partial` / `limited`；Mock 继续突出模拟身份，RAG 来源不作为实时证据。
-
-支持预览、Markdown/JSON 下载及历史版本原样导出。相同状态重复生成复用原版本；新观察或状态变化生成新版本，旧版不会重写。默认移除设备主机名、MAC、SSID、凭据与敏感 URL 参数；`ESCALATION_MASK_PRIVATE_IP=true` 可额外掩码私有 IP。材料仍可能包含症状和合法诊断目标，转交前请人工复核。
-
-**仅生成报修材料，不会提交工单、发送邮件/短信/Webhook、通知网络中心或接入 ITSM。** 接口、Schema、版本和隐私边界见 [12G 验收记录](docs/MILESTONE12G_VALIDATION.md)。
-
-### 测试
-
-Milestone 11 新增可折叠的“诊断思路”：由 Turn Intent、Coverage、结构化 Evidence、
-候选原因状态和停止条件本地生成，不是模型隐藏思维链，也不复制 Tool Timeline。
-API 的 `reasoning_trace` 是当前 Turn 新增条目，History/Report 保存有界的 Session 累计条目。
-默认 `REASONING_TRACE_ENABLED=true`、`REASONING_TRACE_MAX_STEPS=50`、
-`REASONING_SUMMARY_LLM_ENABLED=false`，不会增加 LLM/Tool 调用。
-显式启用可选摘要时最多增加一次 LLM 选择调用，只能选取已有结构化摘要，失败不影响聊天。
-Milestone 11 当时快照升级到 v4（12G 当前为 v11），SQLite 表结构仍为 v3；旧记录的 Trace 为空，不根据旧答案反推。
-实现、RT-01～RT-14 与四场景实际结果见 [Milestone 11 验收](docs/MILESTONE11_VALIDATION.md)。
-
-Web 回答和历史回放使用本地 Marked + DOMPurify 安全渲染 Markdown；User/Error
-保持纯文本，SSE 增量先显示原文，完成后统一排版。知识回答使用稳定 `source_ref` 的
-行内尾标引用 `[1][2]`，直接打开对应来源，hover/focus 可查看来源类型与标题。
-独立来源面板已移除；异常 fallback 同样按片段引用。报告/导出的独立来源区保留。
-诊断时间线采用原生折叠区，初始/新 Session 默认收起，同 Session 更新步骤不改变展开状态。
-运行应用无需 npm/CDN。首次运行前端 DOM/XSS 回归测试前，请安装测试依赖：
-
-```powershell
-cd web
-npm ci --ignore-scripts
-npm test
-cd ..
-```
-
-需要 Node.js 22.13+（22.x）或兼容的 24+。缺少 Node/jsdom 时 pytest 会明确跳过
-82 项 DOM 测试；完整验收应先安装依赖，确保这些测试没有跳过。
-依赖版本、许可证及更新方法见 [本地 Markdown 依赖](web/vendor/README.md)。
-最新验证结果与人工检查项见 [折叠时间线与行内引用验收](docs/INLINE_CITATIONS_VALIDATION.md)；
-上阶段记录见 [Markdown 与来源输出验收](docs/MARKDOWN_SOURCE_OUTPUT_VALIDATION.md)。
-
-在已激活的项目虚拟环境中运行：
+### 自动测试
 
 ```bash
 python -m pytest -q
+python scripts/run_demo_scenarios.py
 ```
 
-Milestone 12G 修改前基线为 `880 passed in 212.86s`；2026-10-19 升级报修材料实现后的最终全量回归实测为：
+测试使用模拟模型、Mock Provider、临时数据库或受控替身。需要运行完整的前端 DOM 回归时，先准备 Node.js 22.13+（22.x）或 24+，安装测试依赖后再运行 Python 全量测试和前端测试。
 
-```text
-954 passed in 193.74s
+```bash
+npm ci --prefix web --ignore-scripts
+npm test --prefix web
 ```
 
-测试默认使用 Fake LLM、Mock Provider 或受控替身，不依赖真实 TJU API 与现场网络状态。最终验收结果以本 README 后续提交对应的 CI/本地测试输出为准。
+## 上游与许可
 
-## 上游来源与许可证
-
-本仓库由 Packt 项目 *Building AI Agents for Network Operations* 演进而来，并保留书籍 Chapter/Lab、Mock spine/leaf、Containerlab 和教学模板。TJU NetPilot 在此基础上形成独立的 `src/netpilot/` 正式产品路径与比赛功能。详细的复用边界、Lab Map 和上游链接见 [`docs/upstream.md`](docs/upstream.md)。
-
-上游版权与 MIT 许可声明保留在 [`LICENSE`](LICENSE) 中：Copyright (c) 2026 Sif Baksh；Copyright (c) 2026 Packt。使用、修改和分发时须继续保留 MIT attribution。
-
-贡献前请运行上述测试，遵守工具与数据安全边界，并保留上游许可声明。
+正式应用位于 `src/netpilot/`，界面、校园知识和复现脚本分别位于 `web/`、`knowledge/` 和 `scripts/`。感谢 Sif Baksh 与 Packt 的 *Building AI Agents for Network Operations*。仓库保留其教学 Labs、Containerlab 示例和设计模板，并在此基础上开发 NetPilot。复用说明与 MIT 版权声明见 [上游来源](docs/upstream.md) 和 [LICENSE](LICENSE)。

@@ -7,7 +7,7 @@ from netpilot.agent.knowledge import source_only_answer
 from netpilot.agent.prompts import KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT, NETPILOT_SYSTEM_PROMPT
 from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
-from netpilot.llm import ChatResult, FunctionCall, LLMRateLimitError, LLMTimeoutError, ToolCall
+from netpilot.llm import ChatResult, FunctionCall, LLMAuthenticationError, LLMRateLimitError, LLMRequestError, LLMResponseError, LLMTimeoutError, ToolCall
 from netpilot.rag import KnowledgeSearchResult
 from netpilot.rag.schemas import source_ref_for
 from netpilot.tools import build_network_tools
@@ -33,13 +33,6 @@ class LLM:
 
     def chat(self, messages, **kwargs):
         self.calls.append((list(messages), kwargs))
-        if len(self.calls) == 1:
-            return ChatResult(
-                model="test", duration_ms=1,
-                tool_calls=[ToolCall(id="rag-call", function=FunctionCall(
-                    name="knowledge_search", arguments='{"query":"天津大学 VPN 使用"}'
-                ))],
-            )
         value = self.finalizations.pop(0)
         if isinstance(value, Exception):
             raise value
@@ -72,18 +65,18 @@ def test_knowledge_finalization_answers_using_bounded_original_content():
     assert result.knowledge_finalization_attempts == 1
     assert result.rag_calls == 1
     assert result.fallback_reason is None
-    prompt = "\n".join(m.content or "" for m in llm.calls[1][0])
+    prompt = "\n".join(m.content or "" for m in llm.calls[0][0])
     assert all(f"真实片段 {index}" in prompt for index in range(3))
     assert len(prompt) < 10000
     assert len(result.steps[0].result.data.results[0].content) > 900
-    assert llm.calls[1][1]["tools"] is None
-    assert llm.calls[1][1]["tool_choice"] == "none"
+    assert llm.calls[0][1]["tools"] is None
+    assert llm.calls[0][1]["tool_choice"] == "none"
 
 
 def test_synthesis_prompts_separate_answer_from_bibliography():
     llm = LLM([completed()])
     run(llm)
-    prompt = "\n".join(message.content or "" for message in llm.calls[1][0])
+    prompt = "\n".join(message.content or "" for message in llm.calls[0][0])
     assert "不要在答案末尾输出" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "[[cite:<source_ref>]]" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "source_type" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
@@ -117,13 +110,13 @@ def test_knowledge_finalization_retries_once_with_shorter_context():
     result = run(llm)
     assert result.knowledge_finalization_attempts == 2
     assert result.fallback_reason is None
-    assert len(llm.calls) == 3
-    assert len(llm.calls[2][0][2].content) < len(llm.calls[1][0][2].content)
-    assert all(call[1]["tools"] is None for call in llm.calls[1:])
-    assert all(call[1]["tool_choice"] == "none" for call in llm.calls[1:])
+    assert len(llm.calls) == 2
+    assert len(llm.calls[1][0][2].content) < len(llm.calls[0][0][2].content)
+    assert all(call[1]["tools"] is None for call in llm.calls)
+    assert all(call[1]["tool_choice"] == "none" for call in llm.calls)
 
 
-def test_vpn_question_searches_local_index_when_first_model_call_is_rate_limited():
+def test_vpn_retrieves_before_the_rate_limited_synthesis():
     class RateLimitedLLM:
         calls = 0
 
@@ -139,18 +132,19 @@ def test_vpn_question_searches_local_index_when_first_model_call_is_rate_limited
     assert result.status is AgentStatus.COMPLETED
     assert result.fallback_reason is FallbackReason.LLM_RATE_LIMITED
     assert result.rag_calls == 1
-    assert result.knowledge_finalization_attempts == 0
+    assert result.knowledge_finalization_attempts == 1
     assert [step.tool_name for step in result.steps] == ["knowledge_search"]
     assert result.steps[0].arguments == {"query": "天津大学 VPN 怎么使用？"}
     assert all(citation(index) in result.answer for index in range(3))
     assert len(result.sources) == 3
 
 
-def test_rate_limited_finalization_returns_local_sources_without_another_model_call():
-    llm = LLM([LLMRateLimitError("rate limited", status_code=429)])
+def test_rate_limited_finalization_does_not_start_a_second_retry_budget():
+    llm = LLM([LLMRateLimitError("rate limited", status_code=429, attempts_made=3)])
     result = run(llm)
 
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 1
+    assert "有限次数的重试" in result.answer
     assert result.status is AgentStatus.COMPLETED
     assert result.fallback_reason is FallbackReason.LLM_RATE_LIMITED
     assert result.knowledge_finalization_attempts == 1
@@ -158,8 +152,21 @@ def test_rate_limited_finalization_returns_local_sources_without_another_model_c
     assert all(citation(index) in result.answer for index in range(3))
 
 
+@pytest.mark.parametrize("error", [
+    LLMRequestError("bad request", status_code=400),
+    LLMAuthenticationError("auth", status_code=401),
+    LLMAuthenticationError("permissions", status_code=403),
+])
+def test_rejected_synthesis_request_does_not_restart_the_http_call(error):
+    llm = LLM([error])
+    result = run(llm)
+    assert len(llm.calls) == result.knowledge_finalization_attempts == 1
+    assert result.fallback_reason is FallbackReason.LLM_ERROR
+    assert "429" not in result.answer and len(result.sources) == 3
+
+
 @pytest.mark.parametrize("vpn_sources_available", [True, False])
-def test_missing_tool_call_searches_current_question_after_an_unrelated_fallback(vpn_sources_available):
+def test_retrieval_searches_current_question_after_an_unrelated_fallback(vpn_sources_available):
     previous_question = "天津大学 eduroam 怎么连接？"
     vpn_question = "天津大学 VPN 怎么使用？"
     previous_source = KnowledgeSearchResult(
@@ -182,8 +189,6 @@ def test_missing_tool_call_searches_current_question_after_an_unrelated_fallback
             self.calls.append((messages, kwargs))
             if len(self.calls) == 1:
                 raise LLMRateLimitError("rate limited", status_code=429)
-            if kwargs["tools"]:
-                return completed("请参考上一轮的资料。")
             return completed()
 
     llm = Model()
@@ -205,13 +210,14 @@ def test_missing_tool_call_searches_current_question_after_an_unrelated_fallback
     assert previous_source.source not in {source.source for source in result.sources}
     assert not result.reused_evidence_ids
     if vpn_sources_available:
-        assert len(llm.calls) == 3
+        assert len(llm.calls) == 2
         assert llm.calls[-1][1]["tools"] is None
         assert result.knowledge_finalization_attempts == 1
         assert result.fallback_reason is None
         assert citation(0, 1, 2) in result.answer
     else:
-        assert len(llm.calls) == 2
+        assert len(llm.calls) == 1
+        assert result.status is AgentStatus.INSUFFICIENT_SOURCES
         assert result.knowledge_finalization_attempts == 0
         assert result.fallback_reason is FallbackReason.KNOWLEDGE_NO_SOURCES
         assert not result.sources
@@ -247,7 +253,7 @@ def test_bad_citations_retry_then_fallback_preserves_provenance(answer, kind):
     assert result.fallback_reason == FallbackReason.FINALIZATION_FAILED
     assert all(citation(index) in result.answer for index in range(3))
     assert "http" not in result.answer
-    assert "source_ref" in result_llm.calls[2][0][2].content
+    assert "source_ref" in result_llm.calls[1][0][2].content
 
 
 def test_missing_citations_retry_can_recover_without_new_tools():
@@ -277,7 +283,8 @@ def test_sourced_comparison_retrieves_and_finalizes_without_comparison_refusal(q
     assert result.rag_calls == 1
     assert result.knowledge_finalization_attempts == 1
     assert [step.tool_name for step in result.steps] == ["knowledge_search"]
-    assert {tool["function"]["name"] for tool in llm.calls[0][1]["tools"]} == {"knowledge_search"}
+    assert len(llm.calls) == 1
+    assert llm.calls[0][1]["tools"] is None
     assert "比较模式" not in "\n".join(message.content or "" for message in llm.calls[0][0])
     assert "由于当前处于比较模式" not in result.answer
     assert result.sources
@@ -285,6 +292,7 @@ def test_sourced_comparison_retrieves_and_finalizes_without_comparison_refusal(q
 
 @pytest.mark.parametrize("failure,reason", [
     (LLMTimeoutError("timeout", retryable=True), FallbackReason.LLM_ERROR),
+    (LLMResponseError("bad response"), FallbackReason.LLM_ERROR),
     (ChatResult(model="test", duration_ms=1, tool_calls=[
         ToolCall(id="forbidden", function=FunctionCall(name="dns_lookup", arguments='{"domain":"example.com"}'))
     ]), FallbackReason.INVALID_TOOL_LOOP),
@@ -297,7 +305,7 @@ def test_two_finalization_failures_return_real_chunks_and_observable_reason(fail
     public = present_chat(uuid4(), result)
     assert result.knowledge_finalization_attempts == 2
     assert result.fallback_reason == reason
-    assert len(llm.calls) == 3
+    assert len(llm.calls) == 2
     assert len(result.steps) == 1
     assert all(f"真实片段 {index}" in result.answer for index in range(3))
     assert "https://example.test/0" not in result.answer
@@ -305,6 +313,7 @@ def test_two_finalization_failures_return_real_chunks_and_observable_reason(fail
     assert public.sources[0].source == "https://example.test/0"
     assert "[community]" in result.answer
     assert "原文片段" in result.answer
+    assert "429" not in result.answer
     assert public.metrics.response_mode == "knowledge"
     assert public.metrics.fallback_reason == reason.value
     assert public.metrics.rag_calls == 1
@@ -317,10 +326,10 @@ def test_synthesis_uses_knowledge_only_prompt_and_dedicated_token_budget():
         build_network_tools(Settings(_env_file=None)), Retriever()
     ), max_output_tokens=800, knowledge_max_output_tokens=2300)
     agent.run("请检索天津大学 VPN 知识库资料。")
-    assert llm.calls[0][1]["max_tokens"] == 800
-    assert llm.calls[1][1]["max_tokens"] == 2300
-    assert llm.calls[1][0][0].content == KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT.strip()
-    assert all(message.content != NETPILOT_SYSTEM_PROMPT for message in llm.calls[1][0])
+    assert len(llm.calls) == 1
+    assert llm.calls[0][1]["max_tokens"] == 2300
+    assert llm.calls[0][0][0].content == KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT.strip()
+    assert all(message.content != NETPILOT_SYSTEM_PROMPT for message in llm.calls[0][0])
 
 
 def test_knowledge_followup_reuses_evidence_and_retains_short_text_history():
@@ -390,8 +399,8 @@ def test_length_retry_shortens_context_and_asks_for_concise_body():
     assert result.fallback_reason is None
     assert result.knowledge_finalization_attempts == 2
     assert result.knowledge_finalization_failure_kind == "length"
-    assert "缩短正文" in llm.calls[2][0][2].content
-    assert len(llm.calls[2][0][2].content) < len(llm.calls[1][0][2].content)
+    assert "缩短正文" in llm.calls[1][0][2].content
+    assert len(llm.calls[1][0][2].content) < len(llm.calls[0][0][2].content)
 
 
 def test_failure_log_records_each_observation_without_raw_prompt_or_error_secrets(caplog):
@@ -415,7 +424,7 @@ def test_failure_log_records_each_observation_without_raw_prompt_or_error_secret
         assert item["selected_chunk_count"] > 0
         assert item["selected_context_chars"] > 0
         assert item["llm_error_type"] is None
-    assert "实质正文" in llm.calls[2][0][2].content
+    assert "实质正文" in llm.calls[1][0][2].content
     assert result.knowledge_finalization_failure_kind == "source_only_answer"
     assert present_chat(uuid4(), result).metrics.knowledge_finalization_failure_kind == "source_only_answer"
 
@@ -447,5 +456,5 @@ def test_retry_guidance_matches_failed_synthesis(bad, kind, retry_text):
     assert result.knowledge_finalization_attempts == 2
     assert result.knowledge_finalization_failure_kind == kind
     assert result.fallback_reason is None
-    assert retry_text in result_llm.calls[2][0][2].content
+    assert retry_text in result_llm.calls[1][0][2].content
     assert len(result.steps) == 1

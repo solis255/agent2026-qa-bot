@@ -112,7 +112,9 @@ def test_tc01_knowledge_and_tc09_hypothetical_do_not_request_context(context_app
         assert result["ui_action"] is None and result["metrics"]["response_mode"] == "knowledge"
         assert result["environment_profile"]["network_access"] == "unknown"
         assert result["metrics"]["network_tool_calls"] == 0
-    assert tools.handler_calls == 0 and llm.calls
+        assert result["diagnostic_readiness"]["state"] == "knowledge_only"
+        assert result["diagnosis"]["status"] == "insufficient_sources"  # Fixture has no RAG index.
+    assert tools.handler_calls == 0 and not llm.calls
 
 
 def test_knowledge_uses_existing_rag_without_context_model_call():
@@ -121,7 +123,7 @@ def test_knowledge_uses_existing_rag_without_context_model_call():
     agent = AgentOrchestrator(llm, ToolRegistry(FixtureOnlyTools(), Retriever()))
     result = agent.run("天津大学 VPN 怎么使用？")
     assert result.ui_action is None and result.rag_calls == 1
-    assert len(result.sources) == 3 and len(llm.calls) == 2
+    assert len(result.sources) == 3 and len(llm.calls) == 1
     assert [step.tool_name for step in result.steps] == ["knowledge_search"]
 
 

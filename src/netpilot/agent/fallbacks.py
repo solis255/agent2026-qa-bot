@@ -12,6 +12,7 @@ from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.schemas import AgentToolStep, FallbackReason
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.rag import KnowledgeSource
+from netpilot.llm.errors import LLMRateLimitError
 
 
 def build_intent_fallback(
@@ -24,6 +25,7 @@ def build_intent_fallback(
     evidence: list[EvidenceRecord],
     sources: list[KnowledgeSource],
     hypotheses: list[Hypothesis],
+    rate_limit: LLMRateLimitError | None = None,
 ) -> str:
     """Generate a safe response that preserves the current Turn's purpose."""
 
@@ -38,7 +40,7 @@ def build_intent_fallback(
     } or response_mode in {ResponseMode.ANALYSIS, ResponseMode.COMPARISON}:
         return _analysis_fallback(evidence, steps, sources, hypotheses)
     if response_mode is ResponseMode.KNOWLEDGE:
-        return _knowledge_fallback(sources, evidence, steps, reason)
+        return _knowledge_fallback(sources, evidence, steps, reason, rate_limit)
     if steps:
         network_steps = [step for step in steps if step.tool_name != "knowledge_search"]
         if network_steps:
@@ -141,14 +143,21 @@ def _knowledge_fallback(
     evidence: list[EvidenceRecord],
     steps: list[AgentToolStep],
     reason: FallbackReason,
+    rate_limit: LLMRateLimitError | None,
 ) -> str:
     chunks = knowledge_results(evidence, steps)
     if reason is FallbackReason.LLM_RATE_LIMITED:
-        notice = "TJU 模型服务暂时限流（429）。"
+        if rate_limit and rate_limit.quota_exhausted:
+            notice = "当前模型 API 的可用配额可能已耗尽，暂时无法生成完整回答。"
+        elif rate_limit and (rate_limit.attempts_made or 0) > 1:
+            notice = "当前模型服务请求繁忙（429 限流）。系统已进行有限次数的重试，但仍未能生成完整回答。"
+        else:
+            notice = "当前模型服务请求繁忙（429 限流），暂时无法生成完整回答。"
         if not chunks:
-            return notice + "本地知识库暂未提供可引用的资料，请稍后重试。"
+            return notice + "本地知识库没有提供足够来源，可补充关键词或查看校方官方渠道。"
         return (
-            notice + "以下是本地知识库检索到的原文片段。\n\n"
+            notice + "\n\n以下是本地知识库资料的原文片段，尚未经过模型完整整理。"
+            "请核对资料类型，以校方最新官方说明为准。\n\n"
             + render_knowledge_fallback_chunks(chunks)
         )
     if chunks:
@@ -160,7 +169,7 @@ def _knowledge_fallback(
             "资料内容仅作参考，不是实时网络证据；community 不代表官方说明。"
         )
     if not sources:
-        return "知识库没有提供足够来源完成回答；本轮没有把实时网络状态当作知识依据。"
+        return "当前知识库没有提供足够来源，无法给出有依据的回答。你可以补充更具体的关键词，或查看校方官方渠道。"
     return (
         "已找到以下知识库 Source，但模型未能完成最终整理。它们仅作操作参考：\n"
         + _bullets([f"[{item.source_type.value}] {item.title}[[cite:{item.source_ref}]]" for item in sources])

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from netpilot.agent import AgentOrchestrator, AgentStatus, ToolRegistry
 from netpilot.config import Settings
-from netpilot.llm import ChatMessage, ChatResult, FunctionCall, ToolCall
+from netpilot.llm import ChatMessage, ChatResult
 from netpilot.main import create_app
 from netpilot.rag import (
     KnowledgeSearchResult,
@@ -53,21 +53,6 @@ class RAGFakeLLM:
         **_kwargs: Any,
     ) -> ChatResult:
         self.calls.append(list(messages))
-        if len(self.calls) == 1:
-            return ChatResult(
-                content=None,
-                tool_calls=[
-                    ToolCall(
-                        id="call_knowledge",
-                        function=FunctionCall(
-                            name="knowledge_search",
-                            arguments='{"query":"天津大学 VPN 怎么使用"}',
-                        ),
-                    )
-                ],
-                model="fake-tju-llm",
-                duration_ms=1,
-            )
         return ChatResult(
             content=(
                 "参考社区资料，VPN 用于校外访问校内资源，具体步骤需核验最新官方说明。[[cite:"
@@ -123,7 +108,7 @@ def test_knowledge_tool_explicitly_reports_insufficient_evidence() -> None:
     assert execution.result.summary == "知识库没有找到足够依据。"
 
 
-def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
+def test_agent_searches_locally_then_synthesizes_and_exposes_sources() -> None:
     llm = RAGFakeLLM()
     agent = AgentOrchestrator(llm, ToolRegistry(network_service(), FakeRetriever()))
 
@@ -137,10 +122,11 @@ def test_fake_llm_uses_knowledge_search_and_agent_exposes_sources() -> None:
     assert result.sources[0].title == "校园网 VPN 服务（社区资料测试摘要）"
     assert "https://wiki.tjubot.cn/e-life/vpn" not in result.answer
     assert result.knowledge_finalization_attempts == 1
-    assert not any(message.tool_calls for message in llm.calls[1])
+    assert len(llm.calls) == 1
+    assert not any(message.tool_calls for message in llm.calls[0])
     context = next(
         message.content
-        for message in reversed(llm.calls[1])
+        for message in reversed(llm.calls[0])
         if message.role.value == "system" and "KNOWLEDGE FINALIZATION" in message.content
     )
     assert "untrusted reference data" in context

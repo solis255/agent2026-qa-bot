@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from time import perf_counter
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import logging
+import math
+from random import random
+import re
+from time import perf_counter, sleep
 from typing import Any
 
-from httpx import Response
+from httpx import Headers
 from openai import (
     APIConnectionError,
     APIError,
@@ -15,9 +21,11 @@ from openai import (
     APITimeoutError,
     AuthenticationError,
     DefaultHttpxClient,
+    BadRequestError,
+    PermissionDeniedError,
     OpenAI,
-    RateLimitError,
 )
+from netpilot.observability import log_event
 
 from netpilot.config import Settings
 from netpilot.llm.errors import (
@@ -42,6 +50,11 @@ from netpilot.llm.schemas import (
 
 
 ClientFactory = Callable[..., Any]
+logger = logging.getLogger(__name__)
+_RETRY_WAIT_BUDGET = 10.0  # Cumulative delay per completion; HTTP timeout remains per attempt.
+_QUOTA_CODES = {"insufficient_quota", "quota_exceeded", "billing_hard_limit", "daily_quota_exceeded"}
+_CODE_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,47}", re.ASCII)
+_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}", re.ASCII)
 
 
 class TJUClient:
@@ -64,9 +77,11 @@ class TJUClient:
                 api_key=settings.tju_api_key.get_secret_value().strip(),
                 base_url=settings.tju_api_base,
                 timeout=settings.tju_timeout_seconds,
-                max_retries=settings.tju_max_retries,
-                http_client=DefaultHttpxClient(event_hooks={"response": [_skip_rate_limit_retry]}),
+                max_retries=0,
+                http_client=DefaultHttpxClient(),
             )
+        elif isinstance(self._client, OpenAI):
+            self._client = self._client.with_options(max_retries=0)
 
     @property
     def configured(self) -> bool:
@@ -142,62 +157,134 @@ class TJUClient:
         if tools is not None:
             request["tools"] = list(tools)
             request["tool_choice"] = tool_choice
+        return self._complete(request)
+
+    def _complete(self, request: dict[str, Any]) -> ChatResult:
         started = perf_counter()
+        budget = _RETRY_WAIT_BUDGET
+        max_retries = self._settings.tju_max_retries
+        api_key = self._settings.tju_api_key
+        assert api_key is not None
+        secret = api_key.get_secret_value().strip()
+        for attempt in range(1, max_retries + 2):
+            attempt_started = perf_counter()
+            headers = Headers()
+            try:
+                response = self._client.chat.completions.create(**request)
+                result = _parse_response(response, self.model, (perf_counter() - started) * 1000)
+            except APIError as exc:
+                if isinstance(exc, (APIStatusError, APIResponseValidationError)):
+                    headers = exc.response.headers
+                error = _map_sdk_error(exc, headers, secret, attempt)
+            except LLMResponseError as exc:
+                error = LLMResponseError(str(exc), status_code=200, attempts_made=attempt,
+                                         request_id=_safe_metadata(getattr(response, "_request_id", None), _ID_PATTERN, secret))
+            else:
+                request_id = _safe_metadata(result.request_id, _ID_PATTERN, secret)
+                log_event(logger, "tju_llm_request", success=True, status_code=200, attempt=attempt,
+                          max_retries=max_retries, provider_request_id=request_id, model=self.model,
+                          will_retry=False, duration_ms=round((perf_counter() - attempt_started) * 1000))
+                return result.model_copy(update={"attempts_made": attempt, "request_id": request_id})
+
+            delay, stop_reason = _retry_decision(error, headers, attempt, max_retries, budget)
+            rate_limit = isinstance(error, LLMRateLimitError)
+            log_event(logger, "tju_llm_request", success=False, status_code=error.status_code,
+                      error_type=type(error).__name__, provider_error_code=error.provider_error_code,
+                      provider_request_id=error.request_id, model=self.model, attempt=attempt,
+                      max_retries=max_retries, retry_after_seconds=error.retry_after_seconds,
+                      will_retry=delay is not None, retry_delay_seconds=delay, retry_stop_reason=stop_reason,
+                      provider_reason=("quota_exhausted" if error.quota_exhausted else "unknown_429") if rate_limit else None,
+                      duration_ms=round((perf_counter() - attempt_started) * 1000))
+            if delay is None:
+                # Raised outside the SDK's except block: no underlying body/request in
+                # the exception chain or in the public/logged error.
+                raise error from None
+            budget -= delay
+            sleep(delay)
+        raise AssertionError("retry loop must return or raise on its last attempt")
+
+
+def _retry_after(headers: Headers) -> float | None:
+    for header, scale in (("retry-after", 1.0), ("retry-after-ms", 0.001)):
+        value = headers.get(header)
+        if not value:
+            continue
         try:
-            response = self._client.chat.completions.create(**request)
-        except AuthenticationError as exc:
-            raise LLMAuthenticationError(
-                "TJU API 认证失败（401），请检查 TJU_API_KEY。",
-                status_code=401,
-                request_id=_request_id(exc),
-            ) from exc
-        except RateLimitError as exc:
-            raise LLMRateLimitError(
-                "TJU API 暂时限流（429），请稍后重试。",
-                retryable=True,
-                status_code=429,
-                request_id=_request_id(exc),
-            ) from exc
-        except APITimeoutError as exc:
-            raise LLMTimeoutError(
-                "TJU API 请求超时。",
-                retryable=True,
-                request_id=_request_id(exc),
-            ) from exc
-        except APIConnectionError as exc:
-            raise LLMConnectionError(
-                "无法连接 TJU API，请检查网络和专属地址。",
-                retryable=True,
-                request_id=_request_id(exc),
-            ) from exc
-        except APIResponseValidationError as exc:
-            raise LLMResponseError(
-                "TJU API 返回了无法解析的响应。",
-                status_code=_status_code(exc),
-                request_id=_request_id(exc),
-            ) from exc
-        except APIStatusError as exc:
-            status_code = _status_code(exc)
-            raise LLMServiceError(
-                _safe_status_message(status_code),
-                retryable=status_code is None or status_code >= 500,
-                status_code=status_code,
-                request_id=_request_id(exc),
-            ) from exc
-        except APIError as exc:
-            raise LLMResponseError(
-                "TJU API 返回了无法处理的响应。",
-                request_id=_request_id(exc),
-            ) from exc
-
-        duration_ms = (perf_counter() - started) * 1000
-        return _parse_response(response, self.model, duration_ms)
+            delay = float(value) * scale
+        except ValueError:
+            if header != "retry-after":
+                continue
+            try:
+                when = parsedate_to_datetime(value)
+                delay = max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+            except (ValueError, TypeError, OverflowError):
+                continue
+        if math.isfinite(delay) and delay >= 0:
+            return delay
+    return None
 
 
-def _skip_rate_limit_retry(response: Response) -> None:
-    if response.status_code == 429:
-        # Let the application handle the limit without sleeping through Retry-After.
-        response.headers["x-should-retry"] = "false"
+def _safe_metadata(value: Any, pattern: re.Pattern[str], secret: str) -> str | None:
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        return None
+    lower = value.lower()
+    if (secret and secret in value) or lower.startswith(("tk-", "sk-", "bearer", "token_", "api_key")):
+        return None
+    return value
+
+
+def _map_sdk_error(exc: APIError, headers: Headers, secret: str, attempt: int) -> TJUClientError:
+    status = _status_code(exc)
+    code = _safe_metadata(getattr(exc, "code", None), _CODE_PATTERN, secret)
+    kind = _safe_metadata(getattr(exc, "type", None), _CODE_PATTERN, secret)
+    code = code or kind
+    quota_code = next((value for value in (code, kind) if value and value.lower() in _QUOTA_CODES), None)
+    metadata = {
+        "status_code": status,
+        "request_id": _safe_metadata(getattr(exc, "request_id", None), _ID_PATTERN, secret),
+        "retry_after_seconds": _retry_after(headers),
+        "provider_error_code": code,
+        "attempts_made": attempt,
+    }
+    if status == 429 and isinstance(exc, APIStatusError):
+        if quota_code:
+            metadata["provider_error_code"] = quota_code
+            return LLMRateLimitError("TJU 模型 API 的可用配额可能已耗尽。", quota_exhausted=True, **metadata)
+        return LLMRateLimitError("TJU API 暂时限流（429），请稍后重试。", retryable=True, **metadata)
+    if isinstance(exc, BadRequestError) or status == 400:
+        return LLMRequestError("TJU API 拒绝请求（400），请检查请求参数。", **metadata)
+    if isinstance(exc, AuthenticationError) or status == 401:
+        return LLMAuthenticationError("TJU API 认证失败（401），请检查 TJU_API_KEY。", **metadata)
+    if isinstance(exc, PermissionDeniedError) or status == 403:
+        return LLMAuthenticationError("TJU API 拒绝访问（403），请检查项目权限。", **metadata)
+    if isinstance(exc, APITimeoutError):
+        return LLMTimeoutError("TJU API 请求超时。", retryable=True, **metadata)
+    if isinstance(exc, APIConnectionError):
+        return LLMConnectionError("无法连接 TJU API，请检查网络和专属地址。", retryable=True, **metadata)
+    if isinstance(exc, APIResponseValidationError):
+        return LLMResponseError("TJU API 返回了无法解析的响应。", **metadata)
+    if isinstance(exc, APIStatusError):
+        return LLMServiceError(_safe_status_message(status),
+                               retryable=status in {408, 409} or (status is not None and status >= 500),
+                               **metadata)
+    return LLMResponseError("TJU API 返回了无法处理的响应。", **metadata)
+
+
+def _retry_decision(
+    error: TJUClientError, headers: Headers, attempt: int, max_retries: int, budget: float,
+) -> tuple[float | None, str | None]:
+    if isinstance(error, LLMRateLimitError) and error.quota_exhausted:
+        return None, "quota_exhausted"
+    if not error.retryable or headers.get("x-should-retry", "").lower() == "false":
+        return None, "not_retryable"
+    if attempt > max_retries:
+        return None, "attempt_limit"
+    delay = error.retry_after_seconds
+    if delay is None:
+        delay = min(0.5 * 2 ** (attempt - 1), 4.0) * (1.0 - 0.25 * random())
+    if delay > budget:
+        return None, "wait_budget"
+    return delay, None
 
 
 def _parse_response(response: Any, configured_model: str, duration_ms: float) -> ChatResult:
@@ -273,11 +360,6 @@ def _token_count(usage: Any, field: str) -> int:
     if not isinstance(value, int) or value < 0:
         raise ValueError(f"invalid usage field: {field}")
     return value
-
-
-def _request_id(exc: Exception) -> str | None:
-    value = getattr(exc, "request_id", None)
-    return value if isinstance(value, str) and value else None
 
 
 def _status_code(exc: Exception) -> int | None:

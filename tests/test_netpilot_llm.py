@@ -138,7 +138,7 @@ def test_client_factory_receives_bounded_sdk_configuration() -> None:
         "api_key": "unit-test-secret",
         "base_url": "https://ai.tju.edu.cn/api/agent2026/unit-test",
         "timeout": 45.0,
-        "max_retries": 3,
+        "max_retries": 0,
     }
     assert "unit-test-secret" not in repr(client)
 
@@ -147,7 +147,7 @@ def test_client_factory_receives_bounded_sdk_configuration() -> None:
     ("status", "error_type", "attempts"),
     [(429, LLMRateLimitError, 1), (500, LLMServiceError, 3)],
 )
-def test_sdk_retries_server_errors_and_returns_rate_limits_immediately(
+def test_server_error_retries_and_excessive_wait_is_rejected(
     monkeypatch, status, error_type, attempts,
 ) -> None:
     requests = []

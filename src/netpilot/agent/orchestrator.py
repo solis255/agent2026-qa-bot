@@ -76,6 +76,7 @@ from netpilot.privacy import redact_text
 
 MAX_TOOL_ROUNDS_ANSWER = "已达到自动诊断步骤上限，当前证据不足以继续自动分析。"
 logger = logging.getLogger(__name__)
+_TERMINAL_LLM_HTTP_STATUSES = {400, 401, 403}
 
 
 class AgentOrchestrator:
@@ -296,7 +297,7 @@ class AgentOrchestrator:
         if result.task_version_advanced and target.limitation_code == "client_snapshot_available":
             target = target.model_copy(update={"limitation_code":"remote_client_not_directly_observable"})
         trace.finish(result)
-        if self.reasoning_summary_llm_enabled and result.fallback_reason is not FallbackReason.LLM_RATE_LIMITED and result.ui_action is None and not result.environment_update_only and not continuation and not (readiness and readiness.state == "need_client_evidence"):
+        if self.reasoning_summary_llm_enabled and result.response_mode is not ResponseMode.KNOWLEDGE and result.status is not AgentStatus.LLM_ERROR and result.fallback_reason not in {FallbackReason.LLM_ERROR, FallbackReason.LLM_RATE_LIMITED} and result.ui_action is None and not result.environment_update_only and not continuation and not (readiness and readiness.state == "need_client_evidence"):
             result = trace.optional_summary(self.llm, result)
         if result.status is not AgentStatus.LLM_ERROR and result.response_mode not in {ResponseMode.KNOWLEDGE, ResponseMode.META, ResponseMode.HISTORY} and (
             result.turn_intent in {TurnIntent.DIAGNOSE, TurnIntent.STATE_CHANGED, TurnIntent.ANALYZE_EXISTING, TurnIntent.REPORT_REQUEST, TurnIntent.COMPARE}
@@ -497,6 +498,7 @@ class AgentOrchestrator:
                         usage=TokenUsage(), llm_duration_ms=0.0, tool_rounds=0,
                         reused_evidence_ids=[record.evidence_id for record in relevant],
                         result_metadata=result_metadata, history=history, environment=environment, target=target,
+                        trace=trace,
                     )
 
         sources = _sources_from_evidence(existing_records)
@@ -541,9 +543,8 @@ class AgentOrchestrator:
         }
         if classification.needs_rag and "knowledge_search" in tool_schemas:
             requested_tools.add("knowledge_search")
-        knowledge_search_requested = (
-            response_mode is ResponseMode.KNOWLEDGE and "knowledge_search" in requested_tools
-        )
+        direct_knowledge = (classification.intent is TurnIntent.KNOWLEDGE_REQUEST
+                            and classification.needs_rag and response_mode is ResponseMode.KNOWLEDGE)
         completed_requested_tools: set[str] = set()
         executed_calls: set[str] = set(policy.blocked_signatures)
         reused_evidence_ids: list[str] = ([r.evidence_id for r in existing_records]
@@ -572,7 +573,7 @@ class AgentOrchestrator:
                 if record.tool_name == "knowledge_search" and record.evidence_id in reused_evidence_ids
             ]
 
-        def search_local_knowledge(detail: str) -> None:
+        def search_local_knowledge() -> None:
             nonlocal rag_calls, tool_rounds
             if rag_calls >= self.max_rag_calls_per_turn or tool_rounds >= self.max_tool_rounds:
                 return
@@ -590,14 +591,12 @@ class AgentOrchestrator:
                     record.evidence_id for record in matching_records
                     if record.evidence_id not in reused_evidence_ids
                 )
+                trace.append("decision", "复用同一知识查询", "沿用当前会话中与本次查询匹配的资料。",
+                             evidence_ids=reused_evidence_ids)
                 return
-            if not query_key or any(
-                step.tool_name == "knowledge_search"
-                and normalize_rag_query(str(step.arguments.get("query", ""))) == query_key
-                for step in steps
-            ):
+            if not query_key:
                 return
-            trace.append("decision", "使用本地知识库", detail)
+            trace.append("decision", "使用本地知识库", "按当前知识问题直接检索本地知识库，不先请求模型选择工具。")
             execution = self.registry.execute(
                 "knowledge_search", json.dumps({"query": query}, ensure_ascii=False), target=target,
             )
@@ -618,6 +617,7 @@ class AgentOrchestrator:
                 usage=usage, llm_duration_ms=llm_duration_ms, tool_rounds=tool_rounds,
                 reused_evidence_ids=reused_evidence_ids, result_metadata=result_metadata,
                 history=history, environment=environment, target=target,
+                trace=trace,
             )
 
         def fallback(
@@ -632,8 +632,8 @@ class AgentOrchestrator:
                     llm_duration_ms=llm_duration_ms, tool_rounds=tool_rounds,
                     fallback_reason=reason, **result_metadata,
                 )
-            evidence = reused_knowledge_evidence() if knowledge_search_requested else existing_records
-            fallback_sources = result_sources(knowledge_results(evidence, steps)) if knowledge_search_requested else sources
+            evidence = reused_knowledge_evidence() if direct_knowledge else existing_records
+            fallback_sources = result_sources(knowledge_results(evidence, steps)) if direct_knowledge else sources
             return _fallback_result(
                 steps,
                 fallback_sources,
@@ -671,6 +671,17 @@ class AgentOrchestrator:
                 escalation_packages=task_state.escalation_packages if task_state else (),
             )
 
+        if direct_knowledge:
+            if "knowledge_search" in tool_schemas:
+                search_local_knowledge()
+                relevant = reused_knowledge_evidence()
+                if knowledge_results(relevant, steps):
+                    return finalize_knowledge(relevant)
+                return fallback(FallbackReason.KNOWLEDGE_NO_SOURCES, status=AgentStatus.INSUFFICIENT_SOURCES)
+            # No configured retriever: do not synthesize campus instructions
+            # or cite unrelated records as if a search had succeeded.
+            return fallback(FallbackReason.KNOWLEDGE_NO_SOURCES, status=AgentStatus.INSUFFICIENT_SOURCES)
+
         while True:
             final_answer_requested = next_tool_choice == "none"
             try:
@@ -686,13 +697,8 @@ class AgentOrchestrator:
                     ),
                 )
             except TJUClientError as exc:
-                rate_limited = isinstance(exc, LLMRateLimitError)
+                rate_limited = isinstance(exc, LLMRateLimitError) and exc.status_code == 429
                 reason = FallbackReason.LLM_RATE_LIMITED if rate_limited else FallbackReason.LLM_ERROR
-                if rate_limited and knowledge_search_requested:
-                    if not tool_rounds:
-                        search_local_knowledge("TJU 模型服务限流，直接检索本地知识库。")
-                    chunks = knowledge_results(reused_knowledge_evidence(), steps)
-                    return fallback(reason, status=AgentStatus.COMPLETED if chunks else AgentStatus.LLM_ERROR)
                 missing_requested = requested_tools - completed_requested_tools
                 if steps or existing_records or response_mode in {
                     ResponseMode.REPORT,
@@ -701,7 +707,8 @@ class AgentOrchestrator:
                     ResponseMode.COMPARISON,
                     ResponseMode.HISTORY,
                 }:
-                    if not rate_limited and missing_requested and missing_tool_attempts < 2:
+                    if (not rate_limited and exc.status_code not in _TERMINAL_LLM_HTTP_STATUSES
+                            and missing_requested and missing_tool_attempts < 2):
                         missing_tool_attempts += 1
                         continue
                     return fallback(reason)
@@ -726,12 +733,6 @@ class AgentOrchestrator:
 
             if not response.tool_calls:
                 assert response.content is not None
-                if knowledge_search_requested:
-                    search_local_knowledge("当前问答缺少检索依据，按当前问题查询本地知识库。")
-                    relevant = reused_knowledge_evidence()
-                    if knowledge_results(relevant, steps):
-                        return finalize_knowledge(relevant)
-                    return fallback(FallbackReason.KNOWLEDGE_NO_SOURCES)
                 missing_requested = requested_tools - completed_requested_tools
                 if missing_requested and missing_tool_attempts < 2:
                     next_tools = [
@@ -970,9 +971,6 @@ class AgentOrchestrator:
             )
             trace.observe(steps=steps, evidence=existing_records, hypotheses=hypotheses)
             trace.assess(sufficiency, hypotheses)
-            reused_rag_records = reused_knowledge_evidence()
-            if response_mode is ResponseMode.KNOWLEDGE and knowledge_results(reused_rag_records, steps):
-                return finalize_knowledge(reused_rag_records)
             missing_requested = requested_tools - completed_requested_tools
             if missing_requested:
                 if missing_tool_attempts >= 2:
@@ -1007,6 +1005,7 @@ class AgentOrchestrator:
     def _finalize_knowledge_answer(
         self, *, user_message, evidence, steps, usage, llm_duration_ms,
         tool_rounds, reused_evidence_ids, result_metadata,
+        trace: ReasoningTraceBuilder,
         history: Sequence[ChatMessage] = (),
         environment: EnvironmentProfile | None = None,
         target: DiagnosticTarget | None = None,
@@ -1016,6 +1015,8 @@ class AgentOrchestrator:
         chunks = knowledge_results(evidence, steps)
         reason = FallbackReason.FINALIZATION_FAILED
         last_failure_kind = None
+        rate_limit = None
+        tool_limit_traced = False
         for attempt in range(1, 3):
             selected = chunks[:6] if attempt == 1 else chunks[:2 if last_failure_kind == "length" else 3]
             chunk_context = render_knowledge_chunks(
@@ -1075,14 +1076,16 @@ class AgentOrchestrator:
                     max_tokens=self.knowledge_max_output_tokens,
                 )
             except TJUClientError as exc:
-                rate_limited = isinstance(exc, LLMRateLimitError)
+                rate_limited = isinstance(exc, LLMRateLimitError) and exc.status_code == 429
                 reason = FallbackReason.LLM_RATE_LIMITED if rate_limited else FallbackReason.LLM_ERROR
-                last_failure_kind = reason.value
+                rate_limit = exc if rate_limited else None
+                last_failure_kind = "llm_quota_exhausted" if rate_limit and rate_limit.quota_exhausted else reason.value
                 log_event(logger, "knowledge_finalization", success=False,
                           failure_kind=last_failure_kind,
                           fallback_reason=reason.value,
                           **{**observation, "llm_error_type": type(exc).__name__})
-                if rate_limited:
+                if rate_limited or exc.status_code in _TERMINAL_LLM_HTTP_STATUSES:
+                    # Do not restart the HTTP retry budget or repeat a rejected request.
                     break
                 continue
             usage = usage.add(response.usage)
@@ -1112,6 +1115,9 @@ class AgentOrchestrator:
                 "missing_citations" if selected_sources and not refs else None
             )
             if failure_kind is not None:
+                if failure_kind == "tool_calls" and not tool_limit_traced:
+                    trace.append("decision", "限制不适用的检测", "知识整理阶段不允许调用工具，未执行模型请求的工具。")
+                    tool_limit_traced = True
                 last_failure_kind = failure_kind
                 reason = (FallbackReason.INVALID_TOOL_LOOP if failure_kind == "tool_calls"
                           else FallbackReason.FINALIZATION_FAILED)
@@ -1134,6 +1140,7 @@ class AgentOrchestrator:
         result = _fallback_result(
             steps, result_sources(chunks), usage, llm_duration_ms, tool_rounds,
             reason=reason, user_message=user_message, evidence=evidence,
+            rate_limit=rate_limit,
             reused_evidence_ids=reused_evidence_ids, **result_metadata,
         )
         return result.model_copy(update={
@@ -1293,6 +1300,7 @@ def _fallback_result(
     hypotheses: list[Hypothesis] | None = None,
     rag_calls: int = 0,
     history_context_records: int = 0,
+    rate_limit: LLMRateLimitError | None = None,
 ) -> AgentResult:
     return AgentResult(
         answer=build_intent_fallback(
@@ -1304,6 +1312,7 @@ def _fallback_result(
             evidence=evidence,
             sources=sources,
             hypotheses=list(hypotheses or ()),
+            rate_limit=rate_limit,
         ),
         status=status,
         tool_rounds=tool_rounds,

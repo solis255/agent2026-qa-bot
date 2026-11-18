@@ -130,6 +130,11 @@ class ChatResult(BaseModel):
     usage: TokenUsage = Field(default_factory=TokenUsage)
     request_id: str | None = None
     duration_ms: float = Field(ge=0)
+    attempts_made: int = Field(default=1, ge=1)
+
+    @property
+    def retry_count(self) -> int:
+        return self.attempts_made - 1
 
     @field_validator("content")
     @classmethod

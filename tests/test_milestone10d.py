@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from netpilot.agent import (
 )
 from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
+from netpilot.history_context import DiagnosisHistoryContextRecord, HistoryContext
 from netpilot.llm import (
     ChatMessage,
     ChatResult,
@@ -169,11 +171,20 @@ def _task_state() -> SessionTaskState:
 def test_rag_queries_are_semantically_deduplicated_and_capped_at_two() -> None:
     retriever = CountingRetriever()
     llm = BatchedRAGLLM()
+    now = datetime.now(timezone.utc)
+    history = HistoryContext(records=[DiagnosisHistoryContextRecord(
+        record_id=uuid4(), session_id=uuid4(), created_at=now, updated_at=now,
+        turn_count=1, user_message="DNS 问题", latest_user_message="DNS 问题",
+        primary_issue="dns_resolution_failure", confidence="high", summary="域名未解析",
+        recommendations=[], tool_calls=[], sources=[], token_metrics={},
+    )])
+    # History with an explicit documentation request still uses the native
+    # loop; ordinary knowledge questions no longer send the search schemas.
     result = AgentOrchestrator(
         llm,
         ToolRegistry(_network_service(), retriever),
         max_rag_calls_per_turn=2,
-    ).run("请检索天津大学 DNS、VPN 和 eduroam 知识库资料")
+    ).run("分析我的诊断历史，并检索天津大学 DNS、VPN 和 eduroam 知识库资料", history_context=history)
 
     assert find_duplicate_rag_query(
         "天津大学校园网 DNS", ["天津大学校园 DNS"]
@@ -184,8 +195,11 @@ def test_rag_queries_are_semantically_deduplicated_and_capped_at_two() -> None:
         "knowledge_search",
     ]
     assert result.rag_calls == 2
-    assert result.knowledge_finalization_attempts == 1
-    assert not any(message.tool_calls for message in llm.calls[1])
+    assert result.knowledge_finalization_attempts == 0
+    rag_feedback = [message.content for message in llm.calls[1] if message.role.value == "tool"]
+    assert len(rag_feedback) == 4
+    assert any("reference_reused" in feedback for feedback in rag_feedback)
+    assert any("rag_turn_limit" in feedback for feedback in rag_feedback)
     public = present_chat(uuid4(), result)
     assert public.diagnosis.evidence == []
     assert len(public.sources) == 2

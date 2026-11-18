@@ -48,7 +48,7 @@ def test_knowledge_finalization_also_receives_profile_without_extra_calls():
     sessions.update_environment(sid, owner, {"os_family":"macos", "network_access":"off_campus", "vpn_enabled":None}, source="user")
     agent = AgentOrchestrator(llm, ToolRegistry(build_network_tools(Settings(_env_file=None)), Retriever()))
     run_session(agent, sessions, sid, owner, "天津大学 VPN 怎么使用？请检索知识库并标出来源。")
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 1
     prompt = "\n".join(m.content or "" for m in llm.calls[-1][0])
     assert "ENVIRONMENT PROFILE" in prompt and "OS: macos (user confirmed)" in prompt
     assert "VPN: unknown" in prompt and "field_sources" not in prompt

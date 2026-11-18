@@ -125,15 +125,19 @@ def test_clarify_returns_deterministic_questions_without_llm_or_tools() -> None:
 
 
 def test_knowledge_request_exposes_only_rag() -> None:
-    llm = DirectLLM()
-    result = AgentOrchestrator(llm, _registry()).run(
-        "天津大学 VPN 怎么使用？请检索知识库"
-    )
+    from netpilot.agent.intent import classify_turn_intent
+    from netpilot.agent.tool_policy import build_tool_policy
 
-    names = {item["function"]["name"] for item in llm.calls[0]["tools"]}
+    llm = DirectLLM()
+    registry = _registry()
+    question = "天津大学 VPN 怎么使用？请检索知识库"
+    policy = build_tool_policy(classify_turn_intent(question))
+    allowed = policy.filter_schemas(registry.schemas(), execution_scopes=registry.execution_scopes)
+    assert {item["function"]["name"] for item in allowed} == {"knowledge_search"}
+    result = AgentOrchestrator(llm, registry).run(question)
     assert result.turn_intent is TurnIntent.KNOWLEDGE_REQUEST
-    assert names == {"knowledge_search"}
-    assert llm.calls[0]["tool_choice"] == "auto"
+    assert [step.tool_name for step in result.steps] == ["knowledge_search"]
+    assert not llm.calls  # No synthesis with the empty index; no tool-selection call.
 
 
 def test_diagnose_exposes_only_six_network_tools() -> None:

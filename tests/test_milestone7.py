@@ -147,8 +147,10 @@ def test_knowledge_tool_is_gated_by_campus_information_intent() -> None:
     assert "knowledge_search" not in _schema_names(general_llm.calls[0])
 
     campus_llm = RecordingLLM()
-    AgentOrchestrator(campus_llm, registry).run("天津大学 VPN 应该怎么配置？")
-    assert "knowledge_search" in _schema_names(campus_llm.calls[0])
+    result = AgentOrchestrator(campus_llm, registry).run("天津大学 VPN 应该怎么配置？")
+    assert [step.tool_name for step in result.steps] == ["knowledge_search"]
+    assert not campus_llm.calls
+    assert result.fallback_reason.value == "knowledge_no_sources"
 
 
 class ApiAgent:

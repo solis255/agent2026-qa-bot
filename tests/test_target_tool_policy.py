@@ -31,22 +31,23 @@ def test_dt03_knowledge_neutral_allowed_remote_and_actual_rag_runs():
 
 
 def test_llm_requesting_unoffered_host_tools_during_rag_never_reaches_handlers():
-    from netpilot.llm import ChatResult, FunctionCall, ToolCall
+    from netpilot.agent import FallbackReason
+    from netpilot.llm import FunctionCall, ToolCall
     from target_helpers import TargetLLM, NETWORK_TOOLS
     class AdversarialLLM(TargetLLM):
         def chat(self,messages,**options):
             result = super().chat(messages,**options)
-            if any(call.function.name == "knowledge_search" for call in result.tool_calls):
-                result = result.model_copy(update={"tool_calls":[
-                    *result.tool_calls,
-                    *(ToolCall(id=name,function=FunctionCall(name=name,arguments="{}")) for name in NETWORK_TOOLS),
-                ]})
-            return result
+            assert options["tools"] is None
+            return result.model_copy(update={"tool_calls":[
+                ToolCall(id=name,function=FunctionCall(name=name,arguments="{}")) for name in NETWORK_TOOLS
+            ]})
     agent,store,sid,owner,counts,_ = local_session(rag=True)
     agent.llm = AdversarialLLM()
     result = run(agent,store,sid,owner,"天津大学 VPN 怎么使用？请检索知识库并标出来源。")
     assert sum(counts.values()) == 0 and result.rag_calls == 1
     assert [step.tool_name for step in result.steps] == ["knowledge_search"]
+    assert result.knowledge_finalization_attempts == 2
+    assert result.fallback_reason is FallbackReason.INVALID_TOOL_LOOP
     assert sum(step.title == "限制不适用的检测" for step in result.reasoning_trace) == 1
 
 
