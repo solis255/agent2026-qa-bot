@@ -1145,7 +1145,7 @@ agent2026-netpilot/
 ├── labs/                       # 上游示例，第一阶段保留
 ├── examples/                   # 上游示例，第一阶段保留
 ├── docs/
-│   ├── architecture.md
+│   ├── DEMO_SCENARIOS.md
 │   └── test-cases.md
 │
 ├── .env.example
@@ -1769,7 +1769,7 @@ pytest
 ```text
 README.md
 DESIGN.md
-docs/architecture.md
+docs/DEMO_SCENARIOS.md
 docs/test-cases.md
 screenshots/
 ```

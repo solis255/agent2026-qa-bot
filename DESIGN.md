@@ -192,7 +192,7 @@ flowchart LR
 | 会话归属、并发或快照问题 | 未登录的受保护请求返回 401，跨账号资源访问与无效会话返回 404，会话忙或网络检查动作过期返回 409。快照过大或格式不符按情况返回 413、415 或 422。 |
 | RAG 或历史不可用 | RAG 降级后仍可进行网络诊断；历史不可用时历史接口返回 503，普通聊天可继续。若同一数据库也无法提供认证，受保护功能不可用。 |
 
-验收以模拟 LLM、Mock Provider、临时 SQLite、FastAPI TestClient 和前端 jsdom 回归为主。覆盖工具和对象隔离、会话所有权、引用、客户端快照、修复复核、状态迁移、SSE 与脱敏导出。
+验收以模拟 LLM、Mock Provider、临时 SQLite、FastAPI TestClient 和前端 jsdom 回归为主。覆盖工具和对象隔离、会话所有权、引用、客户端快照、修复复核、状态迁移、SSE 与脱敏导出。执行步骤见 [测试与验收](docs/test-cases.md)，模型错误与日志字段见 [TJU 模型排查](docs/tju-llm-troubleshooting.md)。
 
 ## 9. 当前边界与演进方向
 

@@ -178,7 +178,7 @@ python labs/lab4-agentic/lab4b_agentic_network_bot_netmiko.py
 
 上游 Labs 用于学习和受控实验。涉及 SSH、Containerlab 或网络设备时，只应在用户拥有授权的环境中运行；生产封装应保持只读 allowlist，不允许 `configure terminal`、`reload`、`copy`、`delete`、`write memory`、`bash` 等配置或破坏性命令。
 
-教学示例的实现和安全强度不等同于 `src/netpilot/` 的正式产品边界。比赛评审、部署和测试应以根 README、`DESIGN.md`、`docs/architecture.md` 与 `tests/` 为准。
+比赛评审、部署和测试以正式应用代码及 [项目说明](../README.md)、[技术设计](../DESIGN.md) 和 [测试与验收](test-cases.md) 为准。
 
 ## 版权与 MIT Attribution
 

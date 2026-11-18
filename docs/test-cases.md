@@ -1,109 +1,46 @@
-# TJU NetPilot 比赛验收矩阵
+# TJU NetPilot 测试与验收
 
-本文档统一整理 TJU NetPilot（天津大学校园网络智能诊断与服务 Agent）的自动与手工验收。正式产品代码位于 [`src/netpilot/`](../src/netpilot/)。自动测试默认使用 Fake LLM、Mock Provider、临时 SQLite 或受控替身，不调用真实 `tju-llm`，也不依赖现场网络。
+从仓库根目录运行，安装方法见 [README](../README.md)。Python 回归使用模拟模型、Mock Provider 或受控替身。离线演示 Runner 使用临时 SQLite，自动走登录、聊天、快照、修复反馈、复核、历史和导出接口。
 
-## Milestone 13B — Adaptive Diagnostic Flow
-
-新增 `test_diagnostic_readiness.py`、`test_adaptive_diagnostic_flow.py`、`test_readiness_ui.py`，覆盖 Prompt TC-13B-01～25：四状态、平台、必要追问、当前证据充分度、旧 task/target、时效/时钟偏差、单站点、显式 DNS、Host/Mock、特殊动作优先级、权限隔离、Chat/SSE、历史与旧 schema。额外覆盖重复提示、重测后 OS 问答版本、证据缓存失效及 Windows 指引展示；DOM 测试只消费服务端平台标志。
-
-实现细节、真实验证结果、场景 A–H 和完整交付索引见 [MILESTONE13B_VALIDATION.md](MILESTONE13B_VALIDATION.md)。
-
-## 运行方式
-
-Milestone 13C 新增 `test_client_check_flow.py`、`test_client_check_collector.py` 和 `test_client_check_ui.py`：覆盖结构化动作、拒绝与重新开启、正式上传链、一次性继续、task/target/owner 隔离、过期/偏差/重复、原 12E 对比、只读工具包、三步向导、拖放、键盘、异步退役和 Chat/SSE。结果与人工验收范围见 [MILESTONE13C_VALIDATION.md](MILESTONE13C_VALIDATION.md)。
-
-Milestone 13D 新增 `test_student_ui.py` / `web_student_ui_runtime.cjs` 的 24 项真实 DOM 契约与交互检查：无重复 ID、required elements、默认折叠、抽屉与 Escape/焦点、环境编辑、对象/检查摘要、13A/13C 动作位置、修复/复核/报修入口、历史分页/只读/完整返回/跨账号异步隔离、Demo 降级与 reduced-motion。原 113 项前端回归继续运行，后端全量与 12I Runner 保持原验证。五种宽度、键盘、历史及实际业务页面验收见 [MILESTONE13D_VALIDATION.md](MILESTONE13D_VALIDATION.md)。
-
-在已激活的项目虚拟环境中：
+## 自动检查
 
 ```bash
+npm ci --prefix web --ignore-scripts
 python -m pytest -q
+npm test --prefix web
+python scripts/run_demo_scenarios.py
+git diff --check
 ```
 
-需要稳定演示 Web Mock 场景时：
+前端检查需要 Node.js 22.13+（22.x）或 24+。先安装 `web/` 测试依赖，再运行 Python 全量测试，以启用其中调用 Node.js 的 DOM 测试。
 
-```powershell
-$env:TOOL_MODE="mock"
-$env:SCENARIO_SWITCH_ENABLED="true"
-python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
+| 测试主题 | 检查点 | 测试入口 |
+| --- | --- | --- |
+| 只读工具与 Agent | 参数校验、调用轮次、诊断覆盖与证据去重、Mock 和 Local 输出契约 | [工具测试](../tests/test_tools.py)、[Agent 测试](../tests/test_agent_orchestrator.py) |
+| 诊断对象与上下文 | 必要时澄清、对象切换后证据失效、远程对象限制服务主机工具 | [环境采集](../tests/test_context_acquisition.py)、[对象策略](../tests/test_target_tool_policy.py) |
+| 客户端检查 | 向导、授权上传、隐私校验、重复或过期结果、回执续接 | [客户端检查流程](../tests/test_client_check_flow.py)、[快照上传](../tests/test_client_snapshot_upload.py) |
+| 修复与闭环 | 手动步骤、前后证据范围、结果比较、恢复与升级条件 | [计划 API](../tests/test_remediation_api.py)、[验证 API](../tests/test_verification_api.py)、[处理状态 API](../tests/test_resolution_api.py) |
+| 校园知识与限流 | 本地检索、行内引用、限流重试、带来源片段降级 | [知识整理](../tests/test_knowledge_finalization.py)、[429 API](../tests/test_knowledge_429_api.py)、[客户端重试](../tests/test_tju_429_retries.py) |
+| 账号、历史与隐私 | 所有权、分页和持久化、脱敏、安全 Markdown、报修导出 | [所有权](../tests/test_auth_ownership.py)、[诊断历史](../tests/test_diagnosis_history.py)、[隐私导出](../tests/test_privacy_export.py)、[报修 API](../tests/test_escalation_api.py) |
+| Web 与传输 | 学生端、历史回放、引用交互、SSE 事件顺序及会话释放 | [学生端](../tests/test_student_ui.py)、[SSE](../tests/test_chat_stream.py)、[前端命令](../web/package.json) |
+| 演示场景 | DNS 恢复、两轮无改善后升级、VPN 状态对照、单服务异常和复发 | [Demo Runner](../scripts/run_demo_scenarios.py) |
+
+## 浏览器和现场检查
+
+| 场景 | 验收要点 |
+| --- | --- |
+| DNS 恢复和两轮无改善 | 按 [演示手册](DEMO_SCENARIOS.md) 核对 Before / After、处理状态及导出中的模拟数据标识。 |
+| Windows 客户端检查 | 在实际故障电脑上按向导采集并上传。核对采集时点、证据来源和过期提示。 |
+| 局域网与个人历史 | 按 [局域网指南](lan-demo.md) 用两个设备和两个账号核对连通性、登录、历史与报告。 |
+| 校园知识与模型 | 配置私有 Key 和本地知识索引，分别运行下方在线检查，核对回答与来源类型。 |
+| 桌面和移动布局 | 检查对话输入、诊断详情、操作按钮及历史回看。现有界面示例见 [截图目录](../screenshots/README.md)。 |
+
+在线检查会调用配置的 TJU 模型服务。
+
+```bash
+python scripts/test_tju_api.py
+python scripts/test_netpilot_agent.py
+python scripts/test_netpilot_rag.py
 ```
 
-打开 <http://127.0.0.1:8001/>，先注册或登录专用演示账号。模型自然语言措辞允许变化，优先验收结构化 Tool Timeline、finding status、diagnosis、sources 和 HTTP/SSE contract。完整浏览器人工流程与 LAN Demo 硬化仍需执行。
-
-## 验收矩阵
-
-| ID | 类型 | 输入 / 场景 | 预期 | 自动 / 手工 | 对应 pytest 文件 |
-|---|---|---|---|---|---|
-| NP-SC-001 | Mock 场景：healthy | `TOOL_MODE=mock`，场景 `healthy`；运行六 Tool | 六 Tool 全部返回统一 `ToolResult`；未出现基础连通性异常；不发生外部 I/O | 自动 | `tests/test_mock_scenarios.py`、`tests/test_tools.py` |
-| NP-SC-002 | Mock 场景：dns_failure | 场景 `dns_failure`；“能访问公网 IP，但打不开 github.com”，检查 `1.1.1.1` Ping 与 `github.com` DNS | Ping 正常；DNS `resolved=false`；该负面观察为成功证据；Agent 诊断指向 DNS 解析 | 自动 + 手工 | `tests/test_mock_scenarios.py`、`tests/test_agent_dns_scenario.py`、`tests/test_agent_orchestrator.py` |
-| NP-SC-003 | Mock 场景：gateway_unreachable | 场景 `gateway_unreachable`；检查本机网络信息及默认网关 `192.168.1.1` | 保留接口/默认网关证据；网关 Ping `reachable=false`；建议优先本地接入/网关，不先归因 DNS | 自动 + 手工 | `tests/test_mock_scenarios.py`；Agent/Web 结论按本页手工验收 |
-| NP-SC-004 | Mock 场景：tcp_ssh_blocked | 场景 `tcp_ssh_blocked`；“网页正常但 `ssh.example.com:22` 失败”，调用 `tcp_check` | `connected=false` 与安全 `failure_reason`；诊断定位 TCP 22/SSH，不扩大为整体断网 | 自动 + 手工 | `tests/test_mock_scenarios.py`；Agent/Web 结论按本页手工验收 |
-| NP-SC-005 | Mock 场景：http_failure | 场景 `http_failure`；对 `example.com` 检查 DNS、TCP 443、HTTPS | DNS/Ping/TCP 证据健康；HTTP 为异常或错误状态证据；定位 HTTP/TLS/应用层 | 自动 + 手工 | `tests/test_mock_scenarios.py`、`tests/test_custom_scenarios.py` |
-| NP-SC-006 | Mock 场景：partial_connectivity | 场景 `partial_connectivity`；检查 `1.1.1.1` Ping 和 `example.com` traceroute | 同时存在成功和退化证据；不无限重复相同 Tool/目标；结论保留限制 | 自动 + 手工 | `tests/test_mock_scenarios.py`、`tests/test_agent_orchestrator.py` |
-| NP-RAG-001 | VPN / RAG | RAG ready；“天津大学 VPN 怎么使用？请调用 knowledge_search，并给出资料类型和来源” | 仅校园知识意图启用 `knowledge_search`；返回 title/URL/source_type/file/chunk/score；当前种子显示 `community`；资料作为 untrusted reference，不冒充实时证据或官方现行规定 | 自动 + 手工 | `tests/test_agent_rag_scenario.py`、`tests/test_milestone7.py`、`tests/test_rag_loader.py`、`tests/test_rag_index.py` |
-| NP-RAG-002 | RAG 去重与上限 | 同一 Turn 请求相同、近义及三个不同知识 query | 相同/近义 query 复用；默认最多执行两次 Retriever；第三个不同 query 被受控阻止；Knowledge Sources 不进入 `diagnosis.evidence` | 自动 | `tests/test_milestone10d.py` |
-| NP-AG-004 | Intent-aware fallback | 在 report、meta、analysis 模式令 LLM 超时 | 分别生成六段报告、反馈回应和已有 Evidence 分析；`response_mode` / `fallback_reason` 出现在 metrics；不落回固定 DNS 模板 | 自动 | `tests/test_milestone10d.py` |
-| NP-CTX-001 | Compact Context | TaskState 同时含 DNS 原始 data 和 RAG 结果 | 上下文包含七个固定区段；Network Evidence 与 Knowledge Sources 分离；不注入原始 Tool JSON | 自动 | `tests/test_milestone10d.py`、`tests/test_evidence_memory.py` |
-| NP-AG-001 | Multiple tool calls | Fake LLM 一次返回多个原生 `tool_calls` | 每个 allowlisted Tool 都执行；保留完整 assistant/tool 顺序；每个结果匹配自己的 `tool_call_id` | 自动 | `tests/test_agent_orchestrator.py`、`tests/test_agentic_tju_loop.py` |
-| NP-AG-002 | `MAX_TOOL_ROUNDS` | Fake LLM 持续请求新的 Tool；默认 `MAX_TOOL_ROUNDS=6` | 第七轮执行前停止；状态为 `max_tool_rounds`；有证据时给出保守 fallback，不无限循环 | 自动 | `tests/test_agent_orchestrator.py`、`tests/test_netpilot_config.py` |
-| NP-AG-003 | Invalid tool arguments | 未知 Tool、非 JSON、数组参数、额外 `command` 字段、越界端口 | 不执行 handler；返回 `unsupported` 或 `invalid_input`；安全错误可回填模型 | 自动 | `tests/test_tool_registry.py`、`tests/test_agent_orchestrator.py`、`tests/test_tools.py` |
-| NP-SEC-001 | SSRF | `file://`、FTP、localhost、回环、metadata、私网解析、重定向到 localhost、带凭据 URL | 在请求前或重定向前阻止；返回 `security_blocked`；不把 blocked 当成站点返回失败；限制重定向 | 自动 | `tests/test_tool_security.py`、`tests/test_milestone7.py` |
-| NP-SEC-002 | Shell injection | Host 含 `;shutdown`、`&& whoami`、换行、参数前缀；检查所有子进程调用 | 输入校验拒绝；子进程始终固定 argv、`shell=False`；输出与超时有界 | 自动 | `tests/test_tool_security.py`、`tests/test_tools.py`、`tests/test_command_safety.py` |
-| NP-HIS-001 | Session / History | 同一会话多轮；重启 repository；并发写入；超出保留上限；非法 cursor | `SessionStore` 保留有界文本上下文并拒绝并发 turn；SQLite 快照跨重启、可分页/筛选；失败安全降级 | 自动 | `tests/test_sessions.py`、`tests/test_chat_api.py`、`tests/test_diagnosis_history.py` |
-| NP-AUTHZ-001 | 9B 多用户隔离 | A/B 各建会话和诊断；B 猜 A 的 session/record ID；v1 DB 迁移 | 未登录 401；跨用户 Chat/SSE、详情、报告、导出 404；列表仅本人；旧记录 `user_id=NULL` 保留且不可见；新记录带 owner | 自动 | `tests/test_auth_ownership.py`、`tests/test_sessions.py` |
-| NP-WEB-AUTH-001 | 9C Web 认证 | 无 Cookie 打开首页；注册 A、改密、退出；注册 B；A 重新登录 | `/api/auth/me` 决定登录面板/主界面；Cookie 同源；A/B 历史隔离；退出清空旧内容；不在浏览器存储保存密码/Token | API 流程 + 静态断言自动；真实浏览器待手工 | `tests/test_web_auth_ui.py`、`tests/test_auth_api.py`、`tests/test_auth_ownership.py` |
-| NP-LAN-001 | 9D LAN 预检 | `AUTH_ENABLED=false`；默认本机监听；HTTP Cookie Secure 误开；缺密钥/Mock 场景/RAG 索引 | 禁止关闭认证；预检只给安全动作提示、不输出密钥；缺项时非零退出，不宣称 LAN 或 RAG 已可用 | 自动配置/预检 + 现场手工连通 | `tests/test_lan_demo_preflight.py`、`tests/test_netpilot_config.py`；现场步骤见 `docs/MILESTONE9D_LAN_DEMO.md` |
-| NP-SHOT-001 | 9D 真实截图 | 登录、DNS、SSH、VPN/RAG、个人历史/报告、B 空历史 | 文件来自当前版本真实浏览器运行画面；不含密码/Token/API Key；Mock、community 来源标识如实；未采集时不引用 PNG | 手工部分完成：`05`/`06` 已收录，`00`–`04` 待采集 | 无可替代的 pytest；采集规范见 `screenshots/README.md` |
-| NP-REP-001 | Report / Export | 对同一 `record_id` 预览并重复导出 Markdown/JSON；非法格式/超限 | 不再次调用 Agent/LLM；ID、时间、正文稳定；内容完整且 Markdown 安全；非法请求被拒绝 | 自动 + 手工 | `tests/test_diagnosis_reports.py`、`tests/test_web_demo.py` |
-| NP-SSE-001 | SSE | `POST /api/chat/stream`；正常、慢 worker、异常、客户端关闭；不可信换行文本 | `start` → keep-alive 可选 → `delta...` → `complete`，或安全 `error`；完整 response 一致；JSON 防事件行注入；session 被释放 | 自动 | `tests/test_chat_stream.py` |
-| NP-SSE-002 | SSE 事实边界 | 检查 `TJUClient` 请求和 delta 时机 | 上游请求 `stream=false`；delta 只在完整 Agent 结果后分块；不得宣称模型 token streaming，不发生第二次模型请求 | 自动 + 文档审查 | `tests/test_netpilot_llm.py`、`tests/test_chat_stream.py` |
-| NP-WEB-001 | Web manual demo | 先登录演示账号，再依次演示 DNS、SSH、VPN/RAG、个人历史与报告下载；手机宽度复核 | 中文界面可用；Tool Timeline、来源、指标、历史/报告与当前记录一致；退出后旧账号数据不再显示；响应式布局可读 | 手工待执行；静态表面有自动检查 | `tests/test_web_demo.py`、`tests/test_web_auth_ui.py`；原流程见 `docs/MILESTONE6_MANUAL_TEST_CASES.md` |
-| NP-CLR-001 | 模糊问题主动澄清 | 仅输入“网络不行”或缺少目标/现象的信息 | 返回确定性澄清问题；0 次 LLM、0 次 Network Tool；询问连接类型、影响范围及 VPN/Proxy 状态 | 自动 + 手工 | `tests/test_tool_policy.py`、`tests/test_turn_intent.py` |
-
-## 手工 Demo 详细步骤
-
-先用专用非敏感测试凭据在首页注册并自动登录；确认右上角显示当前昵称/用户名，“我的诊断历史”初始为空。结束时退出，确认旧对话、报告与历史不再出现在页面；以第二账号登录，确认历史仍为空，再切回原账号复查其记录。
-跨设备可信 LAN 配置、防火墙与真实截图按 [`MILESTONE9D_LAN_DEMO.md`](MILESTONE9D_LAN_DEMO.md) 验收；本矩阵的自动测试不证明现场 Wi-Fi 可达。
-
-### DNS
-
-1. 切换 `dns_failure`，确认切换后页面创建了新 session。
-2. 输入 NP-SC-002 的问题。
-3. 展开 Tool Timeline，确认 `ping_host` 为正常、`dns_lookup` 为发现异常，且 DNS Tool 自身 `success=true`。
-4. 确认结论没有把域名解析失败写成“Tool 崩溃”。
-
-### SSH
-
-1. 切换 `tcp_ssh_blocked`。
-2. 输入 NP-SC-004 的问题。
-3. 确认 `tcp_check` 的目标和端口正确，`connected=false`，结论范围限于 SSH/TCP 22。
-
-### VPN / RAG
-
-1. 先查看 `/api/health`；只有 `rag_ready=true` 才继续。
-2. 输入 NP-RAG-001 的问题。
-3. 确认 Tool Timeline 显示知识参考，来源展示原始 URL 和 `community`。
-4. 确认回答没有宣称来自天津大学官方现行政策。
-
-### History / Report
-
-1. 完成任一诊断并记录 `record_id`。
-2. 新建 session 后从历史列表重新打开旧记录，确认问题、答案、diagnosis、metrics、Tool Timeline 和 sources 被完整恢复。
-3. 预览报告并下载 Markdown/JSON；同一记录重复下载内容应稳定。
-4. 重启服务后复查旧记录；若 `DIAGNOSIS_HISTORY_ENABLED=false`，应显示历史不可用但聊天仍可用。
-
-### SSE
-
-在浏览器 Network 面板确认聊天调用 `/api/chat/stream`，响应 Content-Type 是 `text/event-stream`。`delta` 逐块渲染不等于模型 token streaming；它们应在后台 Agent/Tool turn 完成后出现，最后的 `complete.response.answer` 应与拼接后的 delta 完全一致。
-
-## 判定原则
-
-Milestone 13A 新增 TC-13A-01～14：知识/平台需求、单题规划、明确环境提取、unknown/provenance、Chips 严格校验/真实会话、Chat/SSE 一致性、旧状态兼容与高级表单。测试见 `test_context_{needs,questions,acquisition,ui_action}.py`，并包含 6 项 Web DOM 用例；完整规则、旧测试调整依据与人工 A–E 步骤见 [13A 验收](MILESTONE13A_VALIDATION.md)。12I 六条演示和原完整回归继续执行。
-
-Milestone 12G 新增 EP-01～EP-25：结构化材料包、证据去重、完整度、隐私、不可变版本、所有权、重启读取、导出及 9 个 Web DOM 场景。对应 `tests/test_escalation_{models,builder,privacy,handoff,api,history,export,ui}.py`；完整逐项映射和四项真实人工验收状态见 [12G 验收](MILESTONE12G_VALIDATION.md)。
-
-- 以结构化证据为准，不要求模型自然语言逐字一致。
-- Mock 结果只代表模拟场景；Local 结果只代表运行 NetPilot 的主机。
-- `success=false` 与网络异常不是同义词；`abnormal`、`inconclusive`、`blocked` 必须区分。
-- community 来源不能当作 official；RAG 参考不能当作实时检测。
-- 未出现可靠自动测试的行为必须明确为 TODO，不用手工观察替代自动完成声明。
+`/api/health` 用于查看组件是否配置和就绪，在线脚本用于确认真实模型调用。出现 429 或凭据异常时见 [TJU 模型排查](tju-llm-troubleshooting.md)。

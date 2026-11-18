@@ -2,7 +2,9 @@
 
 **面向天津大学师生的校园网络自助诊断与用网助手。** 用中文描述“校园 Wi‑Fi 连上了但网页打不开”之类的现象，NetPilot 会按需确认接入环境和受影响范围，结合当前设备证据给出排查步骤。用户可以在操作后复核，也可以把现象、检测结果和已尝试的操作整理为报修材料，自行交接给校内支持人员。
 
-![TJU NetPilot 学生端桌面界面运行截图](screenshots/milestone13d-student-desktop.jpg)
+![TJU NetPilot 学生端桌面界面运行截图](screenshots/student-desktop.jpg)
+
+[更多界面与演示截图](screenshots/README.md)
 
 ## 谁会使用它
 
@@ -65,7 +67,7 @@ TOOL_MODE=mock
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 [NetPilot 首页](http://127.0.0.1:8000/)，注册并登录。可通过 [健康检查](http://127.0.0.1:8000/api/health) 查看模型配置、工具模式、知识索引和历史存储是否就绪。`llm_configured` 反映配置是否存在；真实模型联通性可通过 `python scripts/test_tju_api.py` 单独验证。缺少 Key 时仍可启动并运行下述快照演示。跨设备使用见 [局域网启动说明](docs/MILESTONE9D_LAN_DEMO.md)。
+打开 [NetPilot 首页](http://127.0.0.1:8000/)，注册并登录。可通过 [健康检查](http://127.0.0.1:8000/api/health) 查看模型配置、工具模式、知识索引和历史存储是否就绪。`llm_configured` 反映配置是否存在；真实模型联通性可通过 `python scripts/test_tju_api.py` 单独验证。缺少 Key 时仍可启动并运行下述快照演示。跨设备使用见 [局域网启动说明](docs/lan-demo.md)。
 
 ## 演示与验证
 
@@ -90,7 +92,7 @@ python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8001
 | DNS 恢复 | 加载修复前快照 → 记录完成手动步骤 → 加载修复后快照 → 确认原始症状已恢复。查看指标改善和“问题已解决”。 |
 | DNS 多轮无改善 | 完成两轮低风险步骤与复核。有效复核持续无改善且安全步骤耗尽后，查看人工支持建议并生成报修材料。 |
 
-演示快照、历史和导出均带有模拟数据标识。查看 [DNS 恢复截图](screenshots/milestone12i-dns-recovery.png)、[报修交接截图](screenshots/milestone12i-escalation.png) 或 [完整演示手册](docs/DEMO_SCENARIOS.md)。
+演示快照、历史和导出均带有模拟数据标识。查看 [DNS 恢复截图](screenshots/demo-dns-recovery.jpg)、[报修交接截图](screenshots/demo-escalation.jpg) 或 [完整演示手册](docs/DEMO_SCENARIOS.md)。
 
 ### 测试工具调用与实机诊断
 
@@ -106,7 +108,7 @@ python scripts/build_knowledge_index.py
 python scripts/build_knowledge_index.py --offline
 ```
 
-脚本读取 `knowledge/raw/` 下带 YAML 来源信息的 UTF‑8 文档，默认将索引写入 `knowledge/index/`。首次构建可能下载向量模型。设置 `RAG_ENABLED=true` 并重启，确认 `rag_ready=true` 后可试问“天津大学 VPN 怎么使用？”模型持续限流时，知识回答可展示带引用的检索片段并注明整理状态。索引缺失时，网络诊断可继续使用。配置项见 [.env.example](.env.example)，限流行为见 [429 排查与验收](docs/TJU_LLM_429_DIAGNOSIS_AND_VALIDATION.md)。
+脚本读取 `knowledge/raw/` 下带 YAML 来源信息的 UTF‑8 文档，默认将索引写入 `knowledge/index/`。首次构建可能下载向量模型。设置 `RAG_ENABLED=true` 并重启，确认 `rag_ready=true` 后可试问“天津大学 VPN 怎么使用？”模型持续限流时，知识回答可展示带引用的检索片段并注明整理状态。索引缺失时，网络诊断可继续使用。配置项见 [.env.example](.env.example)，限流行为见 [TJU 模型排查](docs/tju-llm-troubleshooting.md)。
 
 ### 自动测试
 
@@ -121,6 +123,8 @@ python scripts/run_demo_scenarios.py
 npm ci --prefix web --ignore-scripts
 npm test --prefix web
 ```
+
+测试入口与现场验收步骤见 [测试与验收](docs/test-cases.md)。
 
 ## 上游与许可
 
