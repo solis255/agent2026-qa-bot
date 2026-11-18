@@ -59,10 +59,10 @@ function renderCaseStatus() {
     }
     container.append(row);
   };
-  if (state.activeContextGroup?.isConnected) add("需要补充一个信息", "查看问题", () => {
-    state.activeContextGroup?.scrollIntoView?.({block:"nearest"});state.activeContextGroup?.querySelector("button:not(:disabled)")?.focus();
+  const check = state.nextChatAction;
+  if (check?.type === "context_question" && isCurrentChatAction(check) && state.chatActionGroup?.isConnected) add("需要补充一个信息", "查看问题", () => {
+    state.chatActionGroup?.scrollIntoView?.({block:"nearest"});state.chatActionGroup?.querySelector("button:not(:disabled)")?.focus();
   });
-  const check = state.clientCheck.action;
   if (clientCheckActionCurrent(check)) add(check.mode === "recheck" ? "等待重新检查" : "需要进行网络检查", check.mode === "recheck" ? "重新检查" : "开始网络检查", openClientCheck);
   const plan = state.remediationPlan;
   const inScope = item => item && item.target_subject === state.diagnosticTarget?.subject && item.target_version === state.diagnosticTarget?.target_version;
@@ -131,7 +131,7 @@ function preserveCurrentPresentation(note = elements.interactionNote.textContent
     escalationSessionId:state.escalationSessionId};
 }
 
-function closeHistoryView() {
+async function closeHistoryView() {
   if (!state.viewingHistory || state.busy) return;
   const saved = state.historyPresentation;
   state.viewingHistory = false;state.historyRecord = null;state.historyPresentation = null;
@@ -147,7 +147,12 @@ function closeHistoryView() {
     elements.conversation.scrollTop=saved.scrollTop;
     setReportRecord(saved.recordId);
   }
-  document.querySelector("#client-check-launch").hidden = !clientCheckActionCurrent(state.clientCheck.action);
+  if (state.nextChatAction?.schema_version === 1) {
+    const epoch = state.authEpoch, sid = state.sessionId;
+    setBusy(true);
+    await refreshCurrentChatAction();
+    if (epoch !== state.authEpoch || sid !== state.sessionId) return;
+  }
   setBusy(false);elements.messageInput.focus();
 }
 

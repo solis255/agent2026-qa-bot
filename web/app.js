@@ -7,9 +7,10 @@ const state = {
   authEpoch: 0,
   sessionId: null,
   environmentProfile: null,
-  activeContextGroup: null,
+  nextChatAction: null,
+  chatActionGroup: null,
   taskVersion: null,
-  clientCheck: {action:null, open:false, mode:null, step:1, file:null, uploading:false, declined:false, generation:0, continuation:null},
+  clientCheck: {open:false, mode:null, step:1, file:null, uploading:false, declined:false, generation:0, continuation:null},
   diagnosticTarget: null,
   clientSnapshotSummary: null,
   clientEvidence: [],
@@ -197,16 +198,11 @@ const ISSUE_LABELS = {
 };
 
 const CONFIDENCE_LABELS = { high: "高", medium: "中", low: "低" };
+const LEGACY_CHAT_ACTION = Symbol("legacyChatAction");
 
 function setBusy(busy, message = "") {
   state.busy = busy;
-  for (const button of document.querySelectorAll(".client-check-button")) button.disabled = busy || !clientCheckActionCurrent(state.clientCheck.action) || button.closest(".client-check-actions") !== state.clientCheck.group;
-  document.querySelector("#client-check-upload").disabled = busy;
-  document.querySelector("#client-check-skip").disabled = busy;
-  document.querySelector("#client-check-launch").disabled = busy;
-  for (const button of document.querySelectorAll(".context-choice")) {
-    button.disabled = busy || !state.user || state.viewingHistory || button.closest(".context-choices") !== state.activeContextGroup;
-  }
+  syncChatActionControls();
   for (const control of elements.resolutionContent.querySelectorAll("button,select")) control.disabled = busy || !state.user || state.viewingHistory || (control.dataset.export === "true" && !state.activeRecordId);
   elements.escalationGenerate.disabled = busy || !state.user || !state.sessionId || state.viewingHistory;
   for(const control of elements.escalationContent.querySelectorAll("button"))control.disabled=busy || !state.user;
@@ -422,7 +418,7 @@ function setAuthMode(mode) {
 function showAuthGate(message = "请先登录或注册。") {
   resetStudentUI();
   renderDiagnosticReadiness(null);
-  retireContextQuestions();
+  retireNextChatAction();
   state.authEpoch += 1;
   state.user = null;
   state.health = null;
@@ -646,7 +642,7 @@ function appendMessage(role, text, sources = [], citationMode = null) {
 }
 
 function resetConversation() {
-  retireContextQuestions();
+  retireNextChatAction();
   state.viewingHistory = false;
   state.historyRecord = null;
   state.historyPresentation = null;
@@ -718,15 +714,102 @@ function renderEnvironmentProfile(profile, { historical = false } = {}) {
   }
 }
 
-function retireContextQuestions() {
-  retireUIActions();
+function resolveNextChatAction(response) {
+  if ("next_chat_action" in response) return response.next_chat_action;
+  const legacy = response.ui_action;
+  if (legacy?.type === "context_question") {
+    // The old server sends no scope for questions. Bind to the response's
+    // current view locally and use the server's legacy answer validation.
+    return { ...legacy, [LEGACY_CHAT_ACTION]:true, action_id: `legacy-context:${legacy.field}`,
+      session_id: response.session_id ?? state.sessionId, task_version: state.taskVersion,
+      target_subject: state.diagnosticTarget?.subject, target_version: state.diagnosticTarget?.target_version };
+  }
+  return legacy?.type === "client_check" ? { ...legacy, [LEGACY_CHAT_ACTION]:true, target_subject:"user_client" } : null;
+}
+
+function isCurrentChatAction(action) {
+  return Boolean(action?.action_id && state.user && state.sessionId && state.diagnosticTarget && !state.viewingHistory &&
+    (action.schema_version === 1 || action[LEGACY_CHAT_ACTION]) &&
+    Number.isInteger(action.task_version) && action.task_version >= 1 &&
+    Number.isInteger(action.target_version) && action.target_version >= 1 &&
+    action.session_id === state.sessionId && action.task_version === state.taskVersion &&
+    action.target_subject === state.diagnosticTarget?.subject && action.target_version === state.diagnosticTarget?.target_version);
+}
+
+function syncChatActionControls() {
+  const current = isCurrentChatAction(state.nextChatAction);
+  for (const button of state.chatActionGroup?.querySelectorAll("button") ?? []) button.disabled = state.busy || !current;
+  const check = clientCheckActionCurrent(state.nextChatAction);
+  for (const id of ["client-check-upload", "client-check-skip", "client-check-launch"]) {
+    document.getElementById(id).disabled = state.busy || !check;
+  }
+  document.querySelector("#client-check-launch").hidden = !check;
+}
+
+function retireNextChatAction() {
+  for (const button of state.chatActionGroup?.querySelectorAll("button") ?? []) button.disabled = true;
+  state.chatActionGroup?.remove();
+  const wasCheck = state.nextChatAction?.type === "client_check";
+  state.nextChatAction = null;
+  state.chatActionGroup = null;
+  if (wasCheck) {
+    closeClientCheck();
+    state.clientCheck.mode = null;
+  }
+  syncChatActionControls();
+}
+
+function renderNextChatAction(action, body = null) {
+  const valid = isCurrentChatAction(action) &&
+    (action.type === "context_question" ? Array.isArray(action.choices) : clientCheckActionCurrent(action));
+  const previous = state.nextChatAction;
+  if (valid && isCurrentChatAction(previous) && previous.action_id === action.action_id &&
+      previous.type === action.type && previous.mode === action.mode && state.chatActionGroup?.isConnected) {
+    syncChatActionControls();
+    renderCaseStatus();
+    return;
+  }
+  retireNextChatAction();
+  if (valid) {
+    state.nextChatAction = action;
+    state.chatActionGroup = action.type === "context_question"
+      ? renderContextQuestion(body ?? appendMessage("assistant", action.question), action)
+      : renderClientCheckAction(body, action);
+  }
+  syncChatActionControls();
+  renderCaseStatus();
+}
+
+function applyNextChatAction(response, body = null) {
+  const provided = "next_chat_action" in response || "ui_action" in response;
+  if (provided) {
+    renderNextChatAction(resolveNextChatAction(response), body);
+  }
+  return provided;
+}
+
+async function refreshCurrentChatAction() {
+  const sid = state.sessionId, epoch = state.authEpoch;
+  if (!state.user || !sid || state.viewingHistory) return;
+  try {
+    const session = await requestJSON(`/api/session/${encodeURIComponent(sid)}`, {cache:"no-store"});
+    if (epoch !== state.authEpoch || sid !== state.sessionId || state.viewingHistory) return;
+    if (session.session_id !== sid) {
+      retireNextChatAction();
+      return;
+    }
+    applyClientCheckPayload(session);
+    renderNextChatAction(resolveNextChatAction(session));
+    renderVerification(state.verificationCycles);
+  } catch (_error) {
+    if (epoch === state.authEpoch && sid === state.sessionId && !state.viewingHistory) retireNextChatAction();
+  }
 }
 
 function renderContextQuestion(body, action) {
-  retireContextQuestions();
-  if (!action || action.type !== "context_question" || !Array.isArray(action.choices)) return;
   const group = document.createElement("div");
   group.className = "context-choices";
+  group.dataset.actionId = action.action_id;
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", action.question);
   for (const choice of action.choices) {
@@ -736,17 +819,19 @@ function renderContextQuestion(body, action) {
     button.textContent = choice.label;
     button.setAttribute("aria-pressed", "false");
     button.addEventListener("click", async () => {
-      if (state.busy || state.activeContextGroup !== group || !state.user || state.viewingHistory) return;
+      if (state.busy || state.nextChatAction !== action || !isCurrentChatAction(action)) return;
       button.setAttribute("aria-pressed", "true");
-      await submitChat({preventDefault() {}}, {message:choice.label, contextAnswer:{field:action.field, value:choice.value}});
-      if (state.activeContextGroup === group) button.setAttribute("aria-pressed", "false");
+      const scope = action.schema_version === 1
+        ? {action_id:action.action_id, task_version:action.task_version, target_version:action.target_version} : {};
+      await submitChat({preventDefault() {}}, {message:choice.label, contextAnswer:{field:action.field, value:choice.value, ...scope}});
+      if (state.nextChatAction === action) button.setAttribute("aria-pressed", "false");
     });
     button.disabled = state.busy || !state.user || state.viewingHistory;
     group.append(button);
   }
   body.after(group);
-  state.activeContextGroup = group;
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
+  return group;
 }
 
 function collectBrowserEnvironment() {
@@ -776,6 +861,8 @@ async function uploadBrowserEnvironment(authEpoch, sessionId) {
     state.environmentProfile = profile;
     renderEnvironmentProfile(profile);
     invalidateDisplayedPlan(baseline, profile);
+    if (profile.os_family !== baseline?.os_family &&
+        (state.nextChatAction || (baseline?.os_family && baseline.os_family !== "unknown"))) await refreshCurrentChatAction();
   } catch (_error) {
     if (state.authEpoch === authEpoch && state.sessionId === sessionId) elements.environmentStatus.textContent = "浏览器环境上报不可用；仍可手动填写环境，不影响诊断。";
   }
@@ -800,9 +887,10 @@ async function saveEnvironment(event) {
     if (state.authEpoch !== authEpoch || state.sessionId !== sessionId) return;
     state.environmentProfile = profile;
     renderEnvironmentProfile(profile);
-    elements.environmentStatus.textContent = "环境已保存到服务端；已有诊断证据保持不变。";
     renderDiagnosticReadiness(null);
     invalidateDisplayedPlan(baseline, profile);
+    await refreshCurrentChatAction();
+    if (state.authEpoch === authEpoch && state.sessionId === sessionId) elements.environmentStatus.textContent = "环境已保存到服务端。";
   } catch (error) {
     if (state.authEpoch === authEpoch) elements.environmentStatus.textContent = error.message;
   } finally {
@@ -1064,7 +1152,7 @@ function renderVerification(cycles = [], {historical = false} = {}) {
       if(cycle.target_subject === "user_client"){
         const prompt=document.createElement("p");prompt.textContent=state.isDemo ? "演示模式：使用场景提供的 After 数据继续验证。" : "需要修复后验证：完成手动步骤后，用发生问题的这台设备重新检查网络。";
         card.append(prompt);
-        if (clientCheckActionCurrent(state.clientCheck.action) && state.clientCheck.action.mode === "recheck") {
+        if (clientCheckActionCurrent(state.nextChatAction) && state.nextChatAction.mode === "recheck") {
           const check=document.createElement("button");check.type="button";check.textContent="重新检查";check.addEventListener("click",openClientCheck);card.append(check);
         }
         if(cycle.status === "baseline_ready" && state.remediationPlan?.steps?.some(s=>s.status === "completed")){
@@ -1098,7 +1186,7 @@ async function verificationRequest(suffix, body) {
     const result=await requestJSON(`/api/session/verification${suffix}`,{method:"POST",body:JSON.stringify(body)});
     if(epoch !== state.authEpoch || sid !== state.sessionId)return;
     applyClientCheckPayload(result);
-    if ("ui_action" in result) renderUIAction(null, result.ui_action);
+    applyNextChatAction(result);
     state.verificationCycles=result.verification_cycles || [];renderVerification(state.verificationCycles);appendTurnReasoningTrace(result.reasoning_trace || []);
     applyResolution(result);
     if(result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
@@ -1114,7 +1202,7 @@ async function remediationRequest(url, options) {
     const result=await requestJSON(url, options);
     if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
     applyClientCheckPayload(result);
-    if ("ui_action" in result) renderUIAction(null, result.ui_action);
+    applyNextChatAction(result);
     state.remediationPlan=result.remediation_plan || null;
     applyResolution(result);
     state.verificationCycles=result.verification_cycles || [];
@@ -1153,6 +1241,7 @@ async function uploadClientSnapshot(event) {
     const result = await requestJSON("/api/session/client-snapshot", {method:"POST", body:form});
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
     applyClientCheckPayload(result);
+    applyNextChatAction(result);
     receipt = result.client_check_continuation;
     state.clientSnapshotSummary = result.client_snapshot_summary;
     state.clientEvidence = result.client_evidence || [];
@@ -1170,7 +1259,9 @@ async function uploadClientSnapshot(event) {
     appendTurnReasoningTrace(result.reasoning_trace || []);
     if (!result.duplicate) renderDiagnosis(null);
     elements.snapshotFile.value = "";
-    elements.snapshotStatus.textContent += result.duplicate ? " 相同快照，未重复创建证据或轨迹。" : " 上传成功，可继续提问分析。";
+    elements.snapshotStatus.textContent += result.duplicate ? " 相同快照，未重复创建证据或轨迹。"
+      : result.client_check_upload_status === "outdated_scope" ? " 此快照在诊断范围变更前采集，仅供回看。"
+      : " 上传成功，可继续提问分析。";
   } catch (error) {
     if (state.authEpoch === epoch && state.sessionId === sessionId) elements.snapshotStatus.textContent = error.message;
   } finally {
@@ -1188,8 +1279,8 @@ async function saveDiagnosticTarget(event) {
   try {
     const target = await requestJSON("/api/session/diagnostic-target", {method:"PATCH",body:JSON.stringify({session_id:sessionId,subject:elements.targetSubject.value})});
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
-    const changed = state.diagnosticTarget?.target_version !== target.target_version;
-    if (changed) retireUIActions();
+    const changed = state.diagnosticTarget?.target_version !== target.target_version || state.diagnosticTarget?.subject !== target.subject;
+    if (changed) retireNextChatAction();
     state.diagnosticTarget = target;
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
@@ -1241,7 +1332,8 @@ async function createSession({ announce = true, restore = false } = {}) {
     window.history?.replaceState(null, "", `#session=${encodeURIComponent(session.session_id)}`);
     elements.sessionLabel.textContent = `会话 ${session.session_id.slice(0, 8)}`;
     resetConversation();
-    if ("ui_action" in session) renderUIAction(null, session.ui_action);
+    renderNextChatAction(resolveNextChatAction(session));
+    renderVerification(state.verificationCycles);
     if (!state.isDemo) await uploadBrowserEnvironment(authEpoch, session.session_id);
     if (state.isDemo) await refreshDemoStatus();
     else clearDemoSessionUI();
@@ -1252,6 +1344,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     if (announce) elements.messageInput.focus();
   } catch (error) {
     if (state.authEpoch !== authEpoch) return;
+    retireNextChatAction();
     state.sessionId = null;
     elements.sessionLabel.textContent = "会话创建失败";
     appendMessage("error", error.message);
@@ -1611,14 +1704,14 @@ async function submitChat(event, options = {}) {
     state.remediationPlan = response.remediation_plan || null;
     state.verificationCycles = response.verification_cycles || [];
     applyResolution(response);
-    renderVerification(state.verificationCycles);
     state.remediationReadiness = response.remediation_readiness || null;
     renderRemediationPlan(state.remediationPlan);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources, response.metrics?.citation_mode);
-    renderUIAction(streamedAnswer, response.ui_action);
+    renderNextChatAction(resolveNextChatAction(response), streamedAnswer);
+    renderVerification(state.verificationCycles);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     if (state.isDemo) await refreshDemoStatus();
@@ -1640,7 +1733,15 @@ async function submitChat(event, options = {}) {
     if (!streamedAnswer.textContent) streamedAnswer.textContent = "本次回答未能完成。";
     appendMessage("error", error.message);
     elements.interactionNote.textContent = error.message;
-    if (error.message.includes("会话不存在")) state.sessionId = null;
+    if (error.status === 409 && options.contextAnswer && error.message === "这个操作已经过期，请根据当前对话继续。") {
+      retireNextChatAction();
+      await refreshCurrentChatAction();
+    }
+    if (error.message.includes("会话不存在")) {
+      retireNextChatAction();
+      state.sessionId = null;
+      setBusy(false);
+    }
   } finally {
     if (state.authEpoch === authEpoch && state.sessionId === chatSessionId) {
       setBusy(false);
@@ -1833,6 +1934,7 @@ async function activateScenario(scenario) {
   });
   if (state.authEpoch !== authEpoch) return;
   state.sessionId = response.session_id;
+  state.taskVersion = response.task_version ?? 1;
   state.environmentProfile = response.environment_profile || null;
   state.diagnosticTarget = response.diagnostic_target || null;
   state.clientSnapshotSummary = null;
@@ -1953,6 +2055,7 @@ async function deleteCurrentCustomScenario() {
     if (state.authEpoch !== authEpoch) return;
     if (response.session_id) {
       state.sessionId = response.session_id;
+      state.taskVersion = response.task_version ?? 1;
       state.environmentProfile = response.environment_profile || null;
       state.diagnosticTarget = response.diagnostic_target || null;
       state.clientSnapshotSummary = null;
@@ -2094,6 +2197,7 @@ function applyDemoSession(session,{reset=false}={}) {
   elements.sessionLabel.textContent=`Demo · ${session.session_id.slice(0,8)}`;
   if(reset){resetConversation();setReportRecord(null);renderDiagnosis(null);renderTools([]);}
   else {renderEnvironmentProfile(state.environmentProfile);renderDiagnosticTarget(state.diagnosticTarget);renderClientSnapshot(state.clientSnapshotSummary,state.clientEvidence);renderRemediationPlan(state.remediationPlan);renderVerification(state.verificationCycles);applyResolution(session);appendTurnReasoningTrace(session.reasoning_trace || []);}
+  applyNextChatAction(session);
 }
 
 async function refreshDemoStatus() {

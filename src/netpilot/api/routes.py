@@ -7,7 +7,6 @@ import re
 from contextvars import copy_context
 from typing import Annotated, Literal
 from uuid import UUID
-from netpilot.client_snapshot.check_flow import client_check_action, declined
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -23,7 +22,7 @@ from netpilot.agent import (
 )
 from netpilot.auth.dependencies import require_current_user
 from netpilot.auth.models import UserRecord
-from netpilot.api.presenters import present_chat
+from netpilot.api.presenters import present_chat, present_session
 from netpilot.api.sse import iter_chat_sse
 from netpilot.config import MockScenario, Settings, ToolMode
 from netpilot.environment import EnvironmentProfile, EnvironmentSource
@@ -104,49 +103,24 @@ def health(request: Request) -> HealthResponse:
     tags=["chat"],
 )
 def create_session(request: Request, user: CurrentUser) -> SessionResponse:
+    sessions = _sessions(request)
     try:
-        snapshot = _sessions(request).create(user.id)
+        snapshot = sessions.create(user.id)
     except SessionCapacityError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="会话容量已满，请稍后重试。",
         ) from exc
-    return SessionResponse(
-        resolution=_sessions(request).task_state(snapshot.session_id,user.id).resolution,
-        session_id=snapshot.session_id,
-        created_at=snapshot.created_at,
-        environment_profile=_sessions(request).task_state(snapshot.session_id, user.id).environment_profile,
-        diagnostic_target=_sessions(request).task_state(snapshot.session_id, user.id).diagnostic_target,
-        remediation_readiness=_sessions(request).task_state(snapshot.session_id,user.id).remediation_readiness,
-    )
+    return present_session(sessions.task_state(snapshot.session_id, user.id), snapshot.created_at)
 
 
 @router.get("/session/{session_id}", response_model=SessionResponse, tags=["chat"])
 def get_session(session_id: UUID, request: Request, user: CurrentUser, response: Response) -> SessionResponse:
     response.headers["Cache-Control"] = "no-store"
     try:
-        snapshot = _sessions(request, session_id).get(session_id, user.id)
-        task = _sessions(request, session_id).task_state(session_id, user.id)
-        return SessionResponse(
-            ui_action=client_check_action(task), client_check_declined=declined(task),
-            task_version=task.task_version,
-            diagnostic_readiness=task.last_diagnostic_readiness,
-            context_acquisition=task.context_acquisition,
-            is_demo=task.is_demo, demo_scenario_id=task.demo_scenario_id, data_notice=task.data_notice,
-            session_id=session_id, created_at=snapshot.created_at,
-            escalation_packages=_sessions(request, session_id).task_state(session_id,user.id).escalation_packages,
-            resolution=_sessions(request, session_id).task_state(session_id,user.id).resolution,
-            resolution_transitions=_sessions(request, session_id).task_state(session_id,user.id).resolution_transitions,
-            environment_profile=_sessions(request, session_id).task_state(session_id, user.id).environment_profile,
-            diagnostic_target=_sessions(request, session_id).task_state(session_id, user.id).diagnostic_target,
-            client_snapshot_summary=_sessions(request, session_id).task_state(session_id, user.id).client_snapshot_summary,
-            remediation_plan=_sessions(request, session_id).task_state(session_id,user.id).remediation_plan,
-            verification_cycles=_sessions(request, session_id).task_state(session_id,user.id).verification_cycles,
-            verification_evidence=[e for e in _sessions(request, session_id).task_state(session_id,user.id).evidence if e.evidence_origin == "tool"],
-            remediation_plan_history=_sessions(request, session_id).task_state(session_id,user.id).remediation_plan_history,
-            remediation_readiness=_sessions(request, session_id).task_state(session_id,user.id).remediation_readiness,
-            client_evidence=[item for item in _sessions(request, session_id).task_state(session_id, user.id).evidence if item.evidence_origin == "client_snapshot"],
-        )
+        sessions = _sessions(request, session_id)
+        snapshot = sessions.get(session_id, user.id)
+        return present_session(sessions.task_state(session_id, user.id), snapshot.created_at)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="会话不存在或已失效。") from exc
 
@@ -207,13 +181,11 @@ def update_target(payload: DiagnosticTargetRequest, request: Request, user: Curr
 
 def _present_and_persist(request: Request, owner_id: UUID, payload: ChatRequest, result: AgentResult) -> ChatResponse:
     from netpilot.privacy import redact_text, safe_value
-    target = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).diagnostic_target
-    result = result.model_copy(update={"diagnostic_target":target})
-    response = present_chat(payload.session_id, result)
-    response.redacted_user_message = redact_text(payload.message).value
-    response.environment_profile = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).environment_profile
-    response.diagnostic_target = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id).diagnostic_target
     task = _sessions(request, payload.session_id).task_state(payload.session_id, owner_id)
+    result = result.model_copy(update={"diagnostic_target":task.diagnostic_target})
+    response = present_chat(payload.session_id, result, task=task)
+    response.redacted_user_message = redact_text(payload.message).value
+    response.environment_profile = task.environment_profile
     response.context_acquisition=task.context_acquisition
     response.task_version=task.task_version
     response.is_demo=task.is_demo
@@ -264,7 +236,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
         ) from exc
     except ValueError as exc:
         reset_session_id(session_token)
-        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个快捷回答已失效，请根据当前问题继续对话。") from exc
+        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个操作已经过期，请根据当前对话继续。") from exc
 
     try:
         with request.app.state.runtime_lock:
@@ -342,7 +314,7 @@ def chat_stream(
             detail="当前会话正在诊断，请等待本次请求完成。",
         ) from exc
     except ValueError as exc:
-        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个快捷回答已失效，请根据当前问题继续对话。") from exc
+        raise HTTPException(409, "这份网络检查结果已过期、已处理或不再适用于当前会话，请重新检查。" if payload.continuation else "这个操作已经过期，请根据当前对话继续。") from exc
 
     session_token = set_session_id(payload.session_id)
     stream_context = copy_context()

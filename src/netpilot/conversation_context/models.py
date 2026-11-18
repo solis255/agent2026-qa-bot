@@ -1,5 +1,6 @@
 """Bounded context contracts shared by the Agent and chat transport."""
 from typing import Literal, Annotated
+from uuid import UUID
 from netpilot.client_snapshot.check_models import ClientCheckAction
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -46,11 +47,17 @@ ChatUIAction = Annotated[ContextQuestion | ClientCheckAction, Field(discriminato
 class ContextAnswer(ContextModel):
     field: ContextField
     value: str = Field(max_length=24, strict=True)
+    action_id: UUID | None = None
+    task_version: int | None = Field(default=None, ge=1, strict=True)
+    target_version: int | None = Field(default=None, ge=1, strict=True)
 
     @model_validator(mode="after")
-    def allowlisted_value(self):
+    def validate_answer(self):
         if self.value not in CONTEXT_VALUES[self.field]:
             raise ValueError("unsupported context answer")
+        scope = {"action_id", "task_version", "target_version"}
+        if scope & self.model_fields_set and any(getattr(self, name) is None for name in scope):
+            raise ValueError("incomplete context action scope")
         return self
 
 

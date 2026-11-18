@@ -126,9 +126,9 @@ flowchart LR
 
 ### 5.1 客户端检查向导与快照
 
-- 远程 Windows 设备需要补充证据或复核时，服务端可返回 `ui_action.type=client_check`，并带上 `initial` / `recheck`、`session_id`、`action_id`、任务和对象版本。浏览器依据该结构展示“开始网络检查”或“重新检查”。用户可以选择暂时跳过，在当前任务范围保留这个选择。其他远程平台当前按已知现象提供受限建议。
+- 远程 Windows 设备需要补充证据或复核时，服务端可返回 `next_chat_action.type=client_check`，并以 `mode` 区分 `initial` 与 `recheck`。浏览器据此打开现有网络检查向导。用户可以选择暂时跳过，在当前任务范围保留这个选择。其他远程平台当前按已知现象提供受限建议。Demo 使用原有模拟数据流程。
 - 下载包包含 PowerShell 采集器和 CMD 启动器。用户在故障设备上主动运行并上传 JSON。采集内容包括网卡、网关和 DNS 配置、路由摘要及固定目标的 DNS / TCP 443 等检查。上传通过同源、归属、大小、Schema、敏感字段、对象和版本校验；快照转换为结构化摘要与证据，通过内容摘要判重。接收端归档规范化结果，采集文件原文不进入会话历史。
-- 证据记录带 `target_subject`、`target_version`、`task_version`、实际执行范围和采集时刻。默认当前证据时效为 15 分钟，过期及疑似时钟偏差的快照供回看。合格上传可获得绑定当前快照和版本的一次性回执，由聊天接口继续原诊断。该继续动作不能改变服务端工具权限。
+- 证据记录带 `target_subject`、`target_version`、`task_version`、实际执行范围和采集时刻。默认当前证据时效为 15 分钟；过期、有疑似时钟偏差或在当前任务范围变更前采集的快照供回看。合格上传可获得绑定当前快照和版本的一次性回执，由聊天接口继续原诊断。该继续动作不能改变服务端工具权限。
 
 ### 5.2 手动计划、验证和状态机
 
@@ -171,9 +171,16 @@ flowchart LR
 
 普通 `ChatRequest` 的 `message` 上限为 4000 字符。客户端检查向导在上传时发送 `X-NetPilot-Check-Id`、`X-NetPilot-Task-Version` 和 `X-NetPilot-Target-Version`。获得 `client_check_continuation` 后，客户端可调用聊天接口，提交 `session_id`、`continuation=client_evidence_uploaded` 与回执的 `receipt_id`（填入 `continuation_id`），由服务端使用当前证据续接。
 
-`ChatResponse` 的主要字段为 `answer`、`diagnosis`、`tool_calls`、`sources`、`reasoning_trace`、`metrics` 及当前对象、环境和处理状态，适用时返回 `record_id` 与 `ui_action`。API `metrics` 可用于核对意图、Token、工具和检索数量、耗时与降级原因。
+`ChatResponse` 的主要字段为 `answer`、`diagnosis`、`tool_calls`、`sources`、`reasoning_trace`、`metrics` 及当前对象、环境和处理状态，适用时返回 `record_id`。API `metrics` 可用于核对意图、Token、工具和检索数量、耗时与降级原因。
 
 **SSE 时序。** `POST /api/chat/stream` 先完成认证与会话预检，返回 `text/event-stream` 后发送 `start`，后台任务运行一次与同步接口等价的对话。等待期间可发送 `: keep-alive`，得到完整回答后按字符分片发送 `delta`，最后发送 `complete` 内的完整 `response`。已开始传输的执行异常使用 `error`。事件数据为带 `schema_version=1` 的 JSON。模型请求使用 `stream=false`，分片发生在 NetPilot 的传输层。浏览器断开时后台仍负责结束轮次并释放会话占用。
+
+**统一聊天动作（14A）。** `ChatResponse`（包括 SSE 的 `complete.response`）和 `SessionResponse` 使用同一个工厂，由当前服务端任务状态生成 `next_chat_action`。它是单个对象或 `null`。公共字段为 `schema_version: 1`、`action_id`、`session_id`、`task_version`、`target_subject` 和 `target_version`。Pydantic 按 `type` 校验，只支持 `context_question` 与 `client_check`。动作不携带命令、URL、凭据或快照原文。
+
+- 有实际发出且仍需回答的环境问题时优先返回 `context_question`。会话刷新只有在问题、准备度、缺失字段和版本仍匹配时才恢复原卡片。问题和选项使用固定模板。动作 ID 使用会话 UUID 作为 UUID5 命名空间，名称为 `context_question:{task_version}:{target_subject}:{target_version}:{field}`。
+- `client_check` 复用原有 Windows 流程，初次检查依据诊断准备度，复核依据当前验证周期。其 UUID5 名称继续使用 `client_check:{task_version}:{target_version}:{mode}`。任务版本隔离不同诊断阶段和环境，对象版本隔离诊断对象。上传、拒绝和续接继续分别校验会话归属、当前动作与版本或快照和回执。
+- 选项回答提交 `field`、`value`、`action_id`、`task_version` 和 `target_version`。服务端在标记会话繁忙前持锁核对归属、当前待答问题和选项。过期返回 HTTP 409，并保持会话状态。旧客户端可以同时省略三个动作元数据字段，但仍只能回答当前待答字段。只提交部分元数据会被拒绝。
+- `ui_action` 已弃用，仍从同一个动作投影成旧结构。前端仅在响应没有 `next_chat_action` 键时回退；显式 `null` 会撤下操作。浏览器按 ID 去重，并在展示和点击时核对会话与版本。历史诊断仅加载只读内容，返回当前会话时可重新确认其动作。
 
 ## 7. 状态、持久化和安全
 

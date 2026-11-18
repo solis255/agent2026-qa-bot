@@ -21,12 +21,16 @@ LABELS = {
 }
 
 
+def build_context_question(field):
+    return ContextQuestion(field=field, question=QUESTIONS[field], choices=[
+        ContextChoice(value=value, label=LABELS[field][value]) for value in CONTEXT_VALUES[field]])
+
+
 def plan_context_question(assessment, environment, acquisition_state):
     for name in assessment.missing_fields:
         if name in acquisition_state.asked_fields or not is_unknown(environment, name):
             continue
-        return ContextQuestion(field=name, question=QUESTIONS[name], choices=[
-            ContextChoice(value=value, label=LABELS[name][value]) for value in CONTEXT_VALUES[name]])
+        return build_context_question(name)
     return None
 
 

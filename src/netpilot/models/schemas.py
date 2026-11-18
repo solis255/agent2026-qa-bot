@@ -19,6 +19,7 @@ from netpilot.agent.reasoning_trace import ReasoningTraceStep
 from netpilot.config import ToolMode
 from netpilot.environment import EnvironmentProfile, BrowserEnvironmentValues, EnvironmentUpdate, legacy_environment
 from netpilot.conversation_context.models import ContextAcquisitionState, ContextAnswer, ChatUIAction, DiagnosticReadiness
+from netpilot.chat_actions.models import ChatAction
 from netpilot.client_snapshot.check_models import CONTINUATION_MESSAGE, ClientCheckReceipt
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, TargetSubject, legacy_target
 from netpilot.rag import SourceType
@@ -61,7 +62,8 @@ class RemediationStateView(BaseModel):
 
 
 class SessionResponse(RemediationStateView):
-    ui_action: ChatUIAction | None = None
+    next_chat_action: ChatAction | None = None
+    ui_action: ChatUIAction | None = Field(default=None, json_schema_extra={"deprecated": True})
     task_version: int = Field(default=1, ge=1)
     client_check_continuation: ClientCheckReceipt | None = None
     client_check_declined: bool = False
@@ -203,7 +205,8 @@ class ExecutionMetricsView(BaseModel):
 
 class ChatResponse(RemediationStateView):
     task_version: int = Field(default=1, ge=1)
-    ui_action: ChatUIAction | None = None
+    next_chat_action: ChatAction | None = None
+    ui_action: ChatUIAction | None = Field(default=None, json_schema_extra={"deprecated": True})
     turn_origin: Literal["user", "system_continuation"] = "user"
     redacted_user_message: str | None = None
     session_id: UUID

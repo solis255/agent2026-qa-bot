@@ -109,6 +109,7 @@ class SessionTaskState(BaseModel):
     reasoning_trace: list[ReasoningTraceStep] = Field(default_factory=list)
     client_snapshot_summary: ClientSnapshotSummary | None = None
     client_snapshot_id: str | None = None
+    client_snapshot_scope_changed_at: datetime | None = None
     snapshot_sequence: int = 0
     pending_snapshot_trace: list[ReasoningTraceStep] = Field(default_factory=list)
     remediation_plan: RemediationPlan | None = None
@@ -141,6 +142,7 @@ class SessionTaskState(BaseModel):
             if record.task_version == self.task_version:
                 record.superseded = True
         self.task_version += 1
+        self.client_snapshot_scope_changed_at = datetime.now(timezone.utc)
         self.last_diagnostic_readiness = None
         self.client_check = ClientCheckState()
         from netpilot.remediation.service import supersede
@@ -163,6 +165,7 @@ class SessionTaskState(BaseModel):
         if (self.diagnostic_target.subject, self.diagnostic_target.target_version) != (target.subject, target.target_version):
             self.last_diagnostic_readiness = None
             self.client_check = ClientCheckState()
+            self.client_snapshot_scope_changed_at = datetime.now(timezone.utc)
         self.diagnostic_target = target.model_copy(deep=True)
         active = self.reusable_evidence()
         from netpilot.client_snapshot.service import refresh_snapshot_availability

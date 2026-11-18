@@ -9,12 +9,132 @@ const event = {preventDefault(){}};
 const target = {subject:'user_client',target_version:1,relationship_to_netpilot:'remote'};
 const action = {type:'client_check',session_id:'current-session',action_id:'one',task_version:1,target_version:1,mode:'initial',platform:'windows',collector_supported:true,upload_required:true};
 const question = {type:'context_question',field:'network_access',question:'连接哪种网络？',choices:[{value:'campus_wifi',label:'校园 WiFi'},{value:'unknown',label:'不清楚'}]};
+const canonicalCheck = {...action, schema_version:1, target_subject:target.subject};
+const canonicalQuestion = {...question, schema_version:1, target_subject:target.subject, task_version:1, target_version:1, session_id:'current-session', action_id:'question-id'};
 const plan = {plan_id:'plan',plan_version:1,status:'proposed',readiness:'ready',target_subject:'user_client',target_version:1,steps:[{step_id:'s1',order:1,title:'记录现象',status:'pending',risk:'low',instructions:['记录'],rollback_instructions:[]}]};
 const record = {record_id:'old',session_id:'old-session',environment_profile:{os_family:'linux'},diagnostic_target:{subject:'netpilot_host',target_version:2},conversation_turns:[{user_message:'旧问题',assistant_answer:'旧回答'}],tool_calls:[],resolution:{state:'unresolved'},updated_at:new Date().toISOString()};
 const put = (w,js) => w.eval(js);
 const button = (w,text) => [...w.document.querySelectorAll('#case-next-action button')].find(b=>b.textContent===text);
+const render = (w,body,action) => w.renderNextChatAction(w.resolveNextChatAction({ui_action:action}),body);
 function prepare(w) {put(w,`state.taskVersion=1;state.diagnosticTarget=${JSON.stringify(target)};state.environmentProfile={os_family:'windows',os_version:'11',network_access:'campus_wifi'};`);w.setBusy(false);}
+function complete(response) {
+  let sent = false;
+  return {ok:true, headers:{get:()=>'text/event-stream'}, body:{getReader:()=>({
+    read:async()=>sent ? {done:true} : (sent=true,{done:false,value:new TextEncoder().encode(`event: complete\ndata: ${JSON.stringify({response})}\n\n`)}),
+    cancel:async()=>{},
+  })}};
+}
 const cases = {
+ 'ST-14A-01':async w=>{
+   prepare(w);w.applyNextChatAction({next_chat_action:canonicalQuestion,ui_action:action});
+   assert.equal(w.eval('state.nextChatAction.action_id'),'question-id');
+   assert.ok(button(w,'查看问题'));
+   assert.equal(w.document.querySelector('.client-check-actions'),null);
+ },
+ 'ST-14A-02':async w=>{
+   prepare(w);w.applyNextChatAction({ui_action:question});
+   assert.equal(w.eval('state.nextChatAction.session_id'),'current-session');
+   assert.equal(w.document.querySelector('.context-choice').disabled,false);
+   w.applyNextChatAction({ui_action:action});
+   assert.ok(button(w,'开始网络检查'));
+ },
+ 'ST-14A-03':async w=>{
+   prepare(w);w.renderNextChatAction(canonicalQuestion);
+   const prior=w.document.querySelector('.context-choice');
+   w.applyNextChatAction({next_chat_action:null,ui_action:action});
+   assert.equal(w.eval('state.nextChatAction'),null);
+   assert.equal(prior.disabled,true);
+   assert.equal(w.document.querySelector('.client-check-actions'),null);
+ },
+ 'ST-14A-04':async w=>{
+   prepare(w);
+   for (const original of [canonicalQuestion,canonicalCheck]) {
+     for (const [key,value] of Object.entries({session_id:'old-session',task_version:2,target_subject:'netpilot_host',target_version:2,schema_version:2})) {
+       w.applyNextChatAction({next_chat_action:{...original,[key]:value}});
+       assert.equal(w.eval('state.nextChatAction'),null,key);
+     }
+     w.renderNextChatAction(original);
+     assert.equal(w.eval('state.nextChatAction.action_id'),original.action_id);
+     assert.ok(w.document.querySelector(`[data-action-id="${original.action_id}"] button:not(:disabled)`));
+   }
+ },
+ 'ST-14A-05':async w=>{
+   prepare(w);
+   for (const action of [canonicalQuestion,canonicalCheck]) {
+     w.applyNextChatAction({next_chat_action:action},w.appendMessage('assistant','首次'));
+     const first=w.document.querySelector(`[data-action-id="${action.action_id}"]`);
+     w.applyNextChatAction({next_chat_action:{...action}},w.appendMessage('assistant','重复'));
+     w.applyNextChatAction({next_chat_action:{...action}});
+     assert.deepEqual([...w.document.querySelectorAll(`[data-action-id="${action.action_id}"]`)], [first]);
+   }
+ },
+ 'ST-14A-06':async w=>{
+   prepare(w);w.renderNextChatAction(canonicalQuestion);
+   const prior=w.document.querySelector('.context-choice');
+   w.applyClientCheckPayload({task_version:2,diagnostic_target:target});w.setBusy(false);
+   assert.equal(w.eval('state.nextChatAction'),null);assert.equal(prior.disabled,true);
+   let calls=0;w.fetch=async()=>{calls++;};
+   prior.dispatchEvent(new w.MouseEvent('click'));await tick();assert.equal(calls,0);
+ },
+ 'ST-14A-07':async w=>{
+   prepare(w);w.renderNextChatAction(canonicalQuestion);w.renderNextChatAction({...canonicalQuestion});
+   const sent=[];
+   w.fetch=async(url,options)=>{
+     if (url==='/api/chat/stream') {
+       sent.push(JSON.parse(options.body));
+       return complete({answer:'已记录',next_chat_action:null,ui_action:question,tool_calls:[],sources:[],reasoning_trace:[]});
+     }
+     return reply({items:[]});
+   };
+   const choice=w.document.querySelector('.context-choice');choice.click();choice.click();
+   for(let i=0;i<8;i++)await tick();
+   assert.equal(sent.length,1);
+   assert.deepEqual(sent[0].context_answer,{field:'network_access',value:'campus_wifi',action_id:'question-id',task_version:1,target_version:1});
+   assert.equal(choice.disabled,true);assert.equal(w.eval('state.nextChatAction'),null);
+ },
+ 'ST-14A-08':async w=>{
+   prepare(w);w.renderNextChatAction(canonicalQuestion);
+   const choice=w.document.querySelector('.context-choice');let writes=0, restores=0;
+   w.fetch=async(url,options)=>{
+     if (options?.method==='POST') writes++;
+     if (url==='/api/session/current-session') {
+       restores++;
+       return reply({session_id:'current-session',task_version:1,diagnostic_target:target,next_chat_action:canonicalQuestion});
+     }
+     return reply({...record,next_chat_action:{...canonicalCheck,session_id:'old-session'}});
+   };
+   await w.loadDiagnosisRecord('old');
+   assert.equal(choice.disabled,true);assert.equal(w.document.querySelector('.context-choices,.client-check-actions'),null);
+   choice.dispatchEvent(new w.MouseEvent('click'));await w.declineClientCheck();await w.uploadClientCheck();
+   assert.equal(writes,0);
+   await w.closeHistoryView();assert.equal(restores,1);
+   assert.equal(w.document.querySelector('.context-choice'),choice);assert.equal(choice.disabled,false);
+ },
+ 'ST-14A-09':async w=>{
+   prepare(w);w.renderNextChatAction(canonicalQuestion);const prior=w.document.querySelector('.context-choice');
+   w.fetch=async url=>url==='/api/session'
+     ? reply({session_id:'new-session',task_version:1,diagnostic_target:target,next_chat_action:null})
+     : reply({os_family:'windows'});
+   await w.createSession({announce:false});
+   assert.equal(w.eval('state.sessionId'),'new-session');assert.equal(w.eval('state.nextChatAction'),null);
+   assert.equal(prior.isConnected,false);assert.equal(prior.disabled,true);
+ },
+ 'ST-14A-10':async w=>{
+   prepare(w);w.fetch=async()=>reply({});
+   w.renderNextChatAction(canonicalCheck);button(w,'开始网络检查').click();
+   assert.equal(w.eval('state.clientCheck.mode'),'initial');
+   w.renderNextChatAction({...canonicalCheck,mode:'recheck',action_id:'recheck-id'});button(w,'重新检查').click();
+   assert.equal(w.eval('state.clientCheck.mode'),'recheck');
+   const previous=w.document.querySelector('[data-action-id="recheck-id"] button');
+   w.fetch=async url=>url==='/api/session/client-check/decline'
+     ? {ok:false,status:409,json:async()=>({detail:'这次网络检查已失效。'})}
+     : reply({session_id:'current-session',task_version:2,diagnostic_target:target,next_chat_action:null});
+   await w.declineClientCheck();
+   assert.equal(w.eval('state.taskVersion'),2);assert.equal(previous.disabled,true);
+   w.renderNextChatAction(canonicalCheck);assert.equal(w.document.querySelector('#client-check-dialog').open,false);
+   put(w,'state.isDemo=true');w.renderNextChatAction({...canonicalCheck,task_version:2});
+   assert.equal(w.eval('state.nextChatAction'),null);assert.equal(w.document.querySelector('#client-check-launch').hidden,true);
+ },
  'ST-CONTRACT':async w=>{
    const d=w.document, ids=[...d.querySelectorAll('[id]')].map(el=>el.id);
    assert.equal(new Set(ids).size,ids.length);
@@ -28,7 +148,7 @@ const cases = {
      const source=fs.readFileSync(path.join(__dirname,'../web',file),'utf8');
      for(const match of source.matchAll(/(?:document\.)?querySelector\("#([a-z][a-z0-9-]*)"\)/g)) assert.ok(w.document.getElementById(match[1]),`${file}: ${match[1]}`);
    }
-   assert.equal(typeof w.renderContextQuestion,'function');assert.equal(typeof w.renderUIAction,'function');
+   assert.equal(typeof w.renderContextQuestion,'function');assert.equal(typeof w.renderNextChatAction,'function');
  },
  'ST-DEFAULT':async w=>{
    w.resetConversation();w.setBusy(false);
@@ -56,16 +176,16 @@ const cases = {
  },
  'ST-TARGET':async w=>{prepare(w);w.renderDiagnosticTarget(target);assert.equal(w.document.querySelector('#target-summary').textContent,'正在诊断：这台电脑');assert.match(w.document.querySelector('#target-technical').textContent,/remote/);assert.equal(w.document.querySelector('#target-form').closest('#target-editor').open,false);},
  'ST-SNAPSHOT':async w=>{prepare(w);put(w,`state.clientSnapshotSummary={target_version:1,generated_at:new Date().toISOString(),expires_at:new Date(Date.now()+100000).toISOString()}`);w.renderCaseStatus();assert.match(w.document.querySelector('#client-check-summary').textContent,/已完成/);put(w,'state.clientSnapshotSummary.stale=true');w.renderCaseStatus();assert.equal(w.document.querySelector('#client-check-summary').textContent,'结果已过期');},
- 'ST-CONTEXT':async w=>{prepare(w);w.renderUIAction(w.appendMessage('assistant',question.question),question);w.setBusy(false);assert.ok(w.document.querySelector('.context-choices').closest('#conversation'));assert.ok(button(w,'查看问题'));button(w,'查看问题').click();assert.ok(w.document.activeElement.classList.contains('context-choice'));assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);},
- 'ST-CHECK':async w=>{prepare(w);w.renderUIAction(w.appendMessage('assistant','需要检查'),action);w.setBusy(false);assert.ok(w.document.querySelector('.client-check-actions').closest('#conversation'));button(w,'开始网络检查').click();assert.equal(w.document.querySelector('#client-check-dialog').open,true);assert.equal(w.eval('state.clientCheck.mode'),'initial');},
- 'ST-RECHECK':async w=>{prepare(w);put(w,`state.verificationCycles=[{target_subject:'user_client',target_version:1,status:'awaiting_after_evidence'}]`);w.renderUIAction(null,{...action,mode:'recheck'});w.setBusy(false);button(w,'重新检查').click();assert.equal(w.eval('state.clientCheck.mode'),'recheck');assert.match(w.document.querySelector('#client-check-title').textContent,/重新检查/);},
- 'ST-STALE-ACTION':async w=>{prepare(w);w.renderUIAction(null,{...action,target_version:2});w.setBusy(false);assert.equal(button(w,'开始网络检查'),undefined);assert.equal(button(w,'重新检查'),undefined);},
+ 'ST-CONTEXT':async w=>{prepare(w);render(w,w.appendMessage('assistant',question.question),question);w.setBusy(false);assert.ok(w.document.querySelector('.context-choices').closest('#conversation'));assert.ok(button(w,'查看问题'));button(w,'查看问题').click();assert.ok(w.document.activeElement.classList.contains('context-choice'));assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);},
+ 'ST-CHECK':async w=>{prepare(w);render(w,w.appendMessage('assistant','需要检查'),action);w.setBusy(false);assert.ok(w.document.querySelector('.client-check-actions').closest('#conversation'));button(w,'开始网络检查').click();assert.equal(w.document.querySelector('#client-check-dialog').open,true);assert.equal(w.eval('state.clientCheck.mode'),'initial');},
+ 'ST-RECHECK':async w=>{prepare(w);put(w,`state.verificationCycles=[{target_subject:'user_client',target_version:1,status:'awaiting_after_evidence'}]`);render(w,null,{...action,mode:'recheck'});w.setBusy(false);button(w,'重新检查').click();assert.equal(w.eval('state.clientCheck.mode'),'recheck');assert.match(w.document.querySelector('#client-check-title').textContent,/重新检查/);},
+ 'ST-STALE-ACTION':async w=>{prepare(w);render(w,null,{...action,target_version:2});w.setBusy(false);assert.equal(button(w,'开始网络检查'),undefined);assert.equal(button(w,'重新检查'),undefined);},
  'ST-PLAN':async w=>{prepare(w);put(w,`state.remediationPlan=${JSON.stringify(plan)}`);w.renderRemediationPlan(plan);w.setBusy(false);assert.match(w.document.querySelector('#case-next-action').textContent,/1 步修复建议/);button(w,'查看修复步骤').click();assert.equal(w.document.querySelector('#remediation-section').open,true);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,true);put(w,"state.remediationPlan.status='superseded'");w.setBusy(false);assert.equal(button(w,'查看修复步骤'),undefined);},
  'ST-VERIFICATION':async w=>{prepare(w);put(w,`state.verificationCycles=[{target_subject:'user_client',target_version:1,status:'completed',result:'improved'}]`);w.setBusy(false);assert.match(w.document.querySelector('#case-next-action').textContent,/修复后状态：有改善/);button(w,'查看对比').click();assert.equal(w.document.querySelector('#verification-section').open,true);assert.equal(button(w,'重新检查'),undefined);},
  'ST-RESOLUTION':async w=>{prepare(w);for(const [status,label] of Object.entries({diagnosing:'诊断中',resolved:'已解决',unresolved:'仍未解决',escalated:'建议报修'})){put(w,`state.resolution={state:'${status}'}`);w.renderResolution(w.eval('state.resolution'));w.setBusy(false);assert.equal(w.document.querySelector('#resolution-badge').textContent,label);}assert.ok(button(w,'生成报修材料'));},
  'ST-ESCALATION':async w=>{prepare(w);put(w,"state.resolution={state:'escalated',escalation_recommended:true}");w.setBusy(false);let calls=0;w.fetch=async(u,o)=>{assert.equal(u,'/api/session/escalation-package');assert.deepEqual(JSON.parse(o.body),{session_id:'current-session'});calls++;return reply({packages:[]});};button(w,'生成报修材料').click();await tick();assert.equal(calls,1);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,true);},
  'ST-HISTORY-RETURN':async w=>{
-   prepare(w);const body=w.appendMessage('assistant','当前问题');w.renderUIAction(body,action);w.setBusy(false);
+   prepare(w);const body=w.appendMessage('assistant','当前问题');render(w,body,action);w.setBusy(false);
    const live=w.document.querySelector('.client-check-actions');w.setReportRecord('current-record');w.document.querySelector('#message-input').value='未发送';w.document.querySelector('#interaction-note').textContent='当前诊断已就绪';
    w.fetch=async()=>reply(record);await w.loadDiagnosisRecord('old');
    assert.equal(w.document.querySelector('#history-view-banner').hidden,false);assert.equal(w.document.querySelector('#send-button').disabled,true);

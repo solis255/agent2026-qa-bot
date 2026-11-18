@@ -8,6 +8,7 @@ from netpilot.privacy import safe_value
 from netpilot.agent import AgentResult, AgentToolStep
 from netpilot.agent.diagnosis import assess_diagnosis, step_status
 from netpilot.agent.evidence import json_data
+from netpilot.chat_actions.factory import build_next_chat_action, legacy_chat_action
 from netpilot.environment import EnvironmentProfile
 from netpilot.diagnostic_target import DiagnosticTarget, TargetBinding, binding_for, matches_target
 from netpilot.models import (
@@ -23,17 +24,19 @@ from netpilot.models import (
 
 def present_session(task, created_at, *, include_continuation=False):
     from netpilot.models.schemas import SessionResponse
-    from netpilot.client_snapshot.check_flow import client_check_action, declined
+    from netpilot.client_snapshot.check_flow import declined
+    action = build_next_chat_action(task)
     values = {name:getattr(task, name) for name in SessionResponse.model_fields if hasattr(task, name)}
     values.update(created_at=created_at, diagnostic_readiness=task.last_diagnostic_readiness,
-        ui_action=client_check_action(task), client_check_declined=declined(task),
+        next_chat_action=action, ui_action=legacy_chat_action(action), client_check_declined=declined(task),
         client_check_continuation=task.client_check.pending_continuation if include_continuation else None,
         client_evidence=[r for r in task.evidence if r.evidence_origin == "client_snapshot"],
         verification_evidence=[r for r in task.evidence if r.evidence_origin == "tool"])
     return safe_value(SessionResponse(**values))
 
 
-def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
+def present_chat(session_id: UUID, result: AgentResult, *, task=None) -> ChatResponse:
+    action = build_next_chat_action(task) if task is not None else None
     tool_calls = [_present_tool_call(step, result.diagnostic_target) for step in result.steps]
     current_steps = [_scope_step(step, result.diagnostic_target) for step in result.steps]
     assessment = assess_diagnosis([step for step in current_steps if result.diagnostic_target is None or result.diagnostic_target.subject == "unknown" or matches_target(step, result.diagnostic_target)])
@@ -51,7 +54,8 @@ def present_chat(session_id: UUID, result: AgentResult) -> ChatResponse:
     return safe_value(ChatResponse(
         turn_origin=result.turn_origin,
         diagnostic_readiness=result.diagnostic_readiness,
-        ui_action=result.ui_action,
+        next_chat_action=action,
+        ui_action=legacy_chat_action(action),
         context_acquisition=result.context_acquisition or {},
         remediation_plan=result.remediation_plan,
         remediation_plan_history=result.remediation_plan_history,

@@ -107,6 +107,8 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
         cycle = task.verification_cycles[-1] if task.verification_cycles else None
         body["client_check_upload_status"] = ("before_result" if not duplicate and cycle and cycle.status == "awaiting_after_evidence"
             and task.client_snapshot_summary and task.client_snapshot_summary.generated_at <= cycle.baseline.captured_at else "accepted")
+        if not duplicate and task.client_snapshot_scope_changed_at and task.client_snapshot_summary.generated_at <= task.client_snapshot_scope_changed_at:
+            body["client_check_upload_status"] = "outdated_scope"
         return body
     except MultiPartException as exc:
         raise HTTPException(413 if total > limit + 16384 else 422, "上传超过大小限制或 multipart 结构不符合要求。") from exc
@@ -130,6 +132,8 @@ async def upload_snapshot(request: Request, response: Response, user: CurrentUse
     except ValueError as exc:
         if str(exc) == "client_check_action_not_current":
             raise HTTPException(409, "这次网络检查已失效，请重新打开当前会话中的检查入口。") from exc
+        if str(exc) == "snapshot_predates_current_scope":
+            raise HTTPException(409, "这份快照属于旧的诊断范围，当前检查结果已保留。") from exc
         raise HTTPException(409, "请先选择远程的当前浏览器设备；Mock/服务主机不接受客户端快照。") from exc
     finally:
         if form is not None:

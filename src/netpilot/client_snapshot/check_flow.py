@@ -27,7 +27,7 @@ def client_check_action(task, readiness=None):
         (cycle.target_subject, cycle.target_version, cycle.after_task_version) ==
         (target.subject, target.target_version, task.task_version))
     readiness = readiness or task.last_diagnostic_readiness
-    initial = bool(readiness and (readiness.task_version, readiness.target_version) == (task.task_version, target.target_version)
+    initial = bool(readiness and (readiness.target_subject, readiness.task_version, readiness.target_version) == (target.subject, task.task_version, target.target_version)
         and readiness.state == "need_client_evidence" and readiness.recommended_action == "request_client_evidence"
         and readiness.client_evidence_supported is True)
     if not (recheck or initial):
@@ -72,7 +72,7 @@ def validate_continuation(task, receipt_id):
     if (not receipt or receipt.receipt_id != receipt_id or
         (receipt.task_version, receipt.target_version, str(receipt.snapshot_id)) !=
         (task.task_version, task.diagnostic_target.target_version, task.client_snapshot_id) or
-        not usable_client_snapshot_evidence(task)):
+        not any(item.snapshot_id == task.client_snapshot_id for item in usable_client_snapshot_evidence(task))):
         raise ValueError("client_evidence_continuation_not_current")
 
 

@@ -23,6 +23,7 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
         expires_at = datetime.max.replace(tzinfo=timezone.utc)
     skew = snapshot.generated_at > now + timedelta(minutes=5)
     stale = now > expires_at
+    outside_scope = bool(task.client_snapshot_scope_changed_at and snapshot.generated_at <= task.client_snapshot_scope_changed_at)
     for record in task.evidence:
         if record.evidence_origin == "client_snapshot":
             record.superseded = True
@@ -60,7 +61,7 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
         target_subject="user_client", target_version=task.diagnostic_target.target_version,
         execution_context="user_client_snapshot", execution_scope="client_snapshot",
         observed_at=snapshot.generated_at, ingested_at=now, expires_at=expires_at,
-        stale=stale, clock_skew_suspected=skew, snapshot_id=snapshot_id,
+        stale=stale, clock_skew_suspected=skew, snapshot_id=snapshot_id, superseded=outside_scope,
         snapshot_sequence=task.snapshot_sequence, turn_index=max(1, task.turn_index),
         task_version=task.task_version,
     ) for index, (kind, status, summary, data) in enumerate(facts)]
@@ -77,13 +78,14 @@ def normalize_snapshot(snapshot, digest, task, *, freshness_minutes=15, trace_en
     task.last_diagnostic_readiness = None
     task.client_snapshot_summary = summary
     task.client_snapshot_id = snapshot_id
-    values = {"os_family": "windows"}
-    family_source = task.environment_profile.field_sources.get("os_family")
-    if snapshot.os.version and not (family_source and family_source.source == "user" and task.environment_profile.os_family != "windows"):
-        values["os_version"] = snapshot.os.version
-    task.environment_profile = merge_environment(task.environment_profile, values, source="snapshot")
+    if not outside_scope:
+        values = {"os_family": "windows"}
+        family_source = task.environment_profile.field_sources.get("os_family")
+        if snapshot.os.version and not (family_source and family_source.source == "user" and task.environment_profile.os_family != "windows"):
+            values["os_version"] = snapshot.os.version
+        task.environment_profile = merge_environment(task.environment_profile, values, source="snapshot")
     from netpilot.verification.service import bind_snapshot
-    verification_events = bind_snapshot(task,records)
+    verification_events = [] if outside_scope else bind_snapshot(task, records)
     task.set_target(task.diagnostic_target)
     if not trace_enabled:
         task.reasoning_trace = [e for e in task.reasoning_trace if e not in verification_events]

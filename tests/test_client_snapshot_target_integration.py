@@ -64,7 +64,8 @@ def test_cs17_snapshot_environment_precedence_and_minimal_context():
     store.update_environment(sid,owner,{"os_family":"macos","os_version":"14"},source="user")
     task, _, _ = import_snapshot(store,sid,owner,payload("dns_failure"))
     assert task.environment_profile.os_family == "macos" and task.environment_profile.os_version == "14"
-    message = build_task_context_message(user_message="分析",intent=TurnIntent.ANALYZE_EXISTING,task_version=1,evidence=task.reusable_evidence(),diagnostic_target=task.diagnostic_target)
+    assert task.task_version == 2 and all(item.task_version == 2 for item in task.reusable_evidence())
+    message = build_task_context_message(user_message="分析",intent=TurnIntent.ANALYZE_EXISTING,task_version=task.task_version,evidence=task.reusable_evidence(),diagnostic_target=task.diagnostic_target)
     assert "CLIENT DIAGNOSTIC SNAPSHOT" in message.content and "CURRENT TARGET EVIDENCE" in message.content
     assert "ipv4_addresses" not in message.content and "hostname" not in message.content
     executed = message.content.split("ALREADY EXECUTED TOOLS")[1].split("USER ENVIRONMENT")[0]

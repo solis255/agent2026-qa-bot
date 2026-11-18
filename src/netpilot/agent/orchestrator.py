@@ -135,7 +135,7 @@ class AgentOrchestrator:
         context_answer: ContextAnswer | None = None,
         continuation: str | None = None,
     ) -> AgentResult:
-        from netpilot.client_snapshot.check_flow import client_check_action, declined, reopen_requested, check_answer
+        from netpilot.client_snapshot.check_flow import declined, reopen_requested, check_answer
         if continuation:
             if continuation != "client_evidence_uploaded" or task_state is None:
                 raise ValueError("unsupported continuation")
@@ -319,13 +319,6 @@ class AgentOrchestrator:
                 logger.warning("remediation_integration_failed error_type=%s",type(exc).__name__)
         if acquired.changed_fields and not result.environment_update_only:
             result.answer = environment_confirmation(acquired) + "\n\n" + result.answer
-        if task_state and result.ui_action is None and not result.environment_update_only and (verification_query or (readiness and readiness.state != "knowledge_only")):
-            action_task = task_state.model_copy(deep=True)
-            if result.task_version_advanced:
-                action_task.advance_version()
-            action_task.environment_profile = environment
-            action_task.diagnostic_target = target
-            result.ui_action = client_check_action(action_task, readiness)
         if continuation:
             result.turn_origin = "system_continuation"
             result.answer = result.answer.replace("客户端快照", "网络检查结果").replace("快照", "检查结果").replace("证据限制", "检查范围")
