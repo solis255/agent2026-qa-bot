@@ -13,6 +13,10 @@ def context_topic(intent, message):
     kind = getattr(intent, "value", intent)
     text = message.casefold()
     if kind == "knowledge_request":
+        asks_for_guide = re.search(r"具体(?:怎么|如何)安装|安装(?:步骤|方法|指南)|各平台|通用|知识库", text)
+        asks_for_device = re.search(r"我(?:的|这台|用的)|本机|这台(?:设备|电脑|手机)", text)
+        if asks_for_guide and not asks_for_device:
+            return None
         return "platform_setup" if re.search(r"安装|配置步骤|配置客户端", text) else None
     if kind not in {"diagnose", "clarify", "general_question", "compare"}:
         return None

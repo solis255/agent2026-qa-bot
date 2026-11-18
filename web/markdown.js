@@ -2,12 +2,14 @@
 
 // The only assistant HTML entry point: Markdown -> DOMPurify fragment -> DOM.
 // Raw HTML in model output is untrusted, just like retrieved document contents.
-function renderAssistantMarkdown(container, markdownText, sources = []) {
+function renderAssistantMarkdown(container, markdownText, sources = [], citationMode = null) {
   const text = String(markdownText ?? "");
+  const knowledgeAnswer = citationMode === "inline" || citationMode === "source_panel_only";
   container.classList.remove("is-streaming");
   if (!window.marked?.parse || !window.DOMPurify?.isSupported) {
     // Missing/unsupported dependencies must fail closed, never bypass sanitization.
     container.textContent = text.replace(/\[\[cite:[^\]\n]*(?:\]\]|$)/g, "");
+    if (knowledgeAnswer) renderSourcePanel(container, sources, citationMode === "source_panel_only");
     return;
   }
   const fragment = window.DOMPurify.sanitize(
@@ -25,6 +27,10 @@ function renderAssistantMarkdown(container, markdownText, sources = []) {
     },
   );
   for (const link of fragment.querySelectorAll("a")) {
+    if (knowledgeAnswer) {
+      link.replaceWith(...link.childNodes);
+      continue;
+    }
     const href = (link.getAttribute("href") || "").trim();
     try {
       // No relative, protocol-relative, mailto, data, or javascript destinations.
@@ -40,6 +46,37 @@ function renderAssistantMarkdown(container, markdownText, sources = []) {
   }
   renderInlineCitations(fragment, sources);
   container.replaceChildren(fragment);
+  if (knowledgeAnswer) renderSourcePanel(container, sources, citationMode === "source_panel_only");
+}
+
+function renderSourcePanel(container, sources, expanded) {
+  if (!Array.isArray(sources) || !sources.length) return;
+  const details = document.createElement("details");
+  details.className = "knowledge-source-panel";
+  details.open = expanded;
+  const summary = document.createElement("summary");
+  summary.textContent = "资料来源";
+  const note = document.createElement("p");
+  note.textContent = expanded ? "以下是本次检索到的资料。" : "以下是正文引用的资料。";
+  const list = document.createElement("ul");
+  const types = { official: "官方", community: "社区", maintainer: "维护者" };
+  for (const source of sources) {
+    if (!source?.title) continue;
+    const item = document.createElement("li");
+    const url = safeCitationURL(source.source);
+    const label = document.createElement(url ? "a" : "span");
+    label.textContent = `${types[source.source_type] || "未标明"}：${source.title}`;
+    if (url) {
+      label.href = url.href;
+      label.target = "_blank";
+      label.rel = "noopener noreferrer";
+    }
+    item.append(label);
+    list.append(item);
+  }
+  if (!list.childElementCount) return;
+  details.append(summary, note, list);
+  container.append(details);
 }
 
 function safeCitationURL(value) {

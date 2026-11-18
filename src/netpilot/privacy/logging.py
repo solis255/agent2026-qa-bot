@@ -14,6 +14,8 @@ LOG_FIELDS = frozenset({
     "status_code", "provider_request_id", "provider_error_code", "provider_reason",
     "max_retries", "retry_after_seconds", "retry_delay_seconds", "will_retry",
     "retry_stop_reason", "model",
+    "provider", "provider_error_type", "llm_error_code", "attempts_made", "has_reasoning_content",
+    "citation_count", "invalid_citation_count", "citation_mode",
 })
 
 

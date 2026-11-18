@@ -133,7 +133,8 @@ def test_nonretryable_http_errors_ignore_even_an_explicit_retry_header(scripted,
 def test_only_explicit_quota_codes_stop_without_retry(scripted, code, kind):
     exc, total, waits, logs = scripted([error_response(429, {"retry-after": "1"}, code=code, kind=kind)])
     assert total == 1 and waits == [] and not exc.retryable
-    assert exc.quota_exhausted and exc.status_code == 429 and exc.provider_error_code == (kind or code)
+    assert exc.quota_exhausted and exc.status_code == 429 and exc.provider_error_code == (code or kind)
+    assert exc.provider_error_type == kind
     assert logs[0]["provider_reason"] == "quota_exhausted"
 
 

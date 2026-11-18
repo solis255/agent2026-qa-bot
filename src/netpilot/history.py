@@ -145,6 +145,9 @@ class SQLiteDiagnosisRepository:
                 response_mode=response.metrics.response_mode,
                 fallback_reason=response.metrics.fallback_reason,
                 knowledge_finalization_failure_kind=response.metrics.knowledge_finalization_failure_kind,
+                citation_mode=response.metrics.citation_mode,
+                source_refs=[source.source_ref for source in response.sources[:6] if source.source_ref]
+                if response.metrics.citation_mode else [],
             )],
             conversation_complete=True,
             reasoning_trace=trim_reasoning_trace(response.reasoning_trace, self.reasoning_trace_max_steps),
@@ -731,6 +734,7 @@ def _merge_metrics(
         ),
         history_context_records=current.history_context_records,
         knowledge_finalization_failure_kind=current.knowledge_finalization_failure_kind,
+        citation_mode=current.citation_mode,
         reasoning_summary_llm_used=existing.reasoning_summary_llm_used or current.reasoning_summary_llm_used,
         reasoning_summary_prompt_tokens=existing.reasoning_summary_prompt_tokens + current.reasoning_summary_prompt_tokens,
         reasoning_summary_completion_tokens=existing.reasoning_summary_completion_tokens + current.reasoning_summary_completion_tokens,

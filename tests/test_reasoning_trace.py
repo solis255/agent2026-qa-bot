@@ -153,8 +153,7 @@ def test_knowledge_trace_records_source_types_not_chunk_body():
         def chat(self, messages, **options):
             if options.get("tools"):
                 return ChatResult(model="test", duration_ms=1, tool_calls=[ToolCall(id="rag", function=FunctionCall(name="knowledge_search", arguments='{"query":"VPN 使用"}'))])
-            ref = re.search(r"source_ref=([a-f0-9]{12})", "\n".join(message.content or "" for message in messages))[1]
-            return ChatResult(content=f"资料仅作参考，需核验官方说明。[[cite:{ref}]]", model="test", duration_ms=1)
+            return ChatResult(content="资料仅作参考，需核验官方说明。[S1]", model="test", duration_ms=1)
     agent = AgentOrchestrator(LLM(), ToolRegistry(build_network_tools(Settings(_env_file=None)), Retriever()))
     result = agent.run("根据天津大学知识库解释 VPN。")
     serialized = json.dumps([step.model_dump(mode="json") for step in result.reasoning_trace], ensure_ascii=False)

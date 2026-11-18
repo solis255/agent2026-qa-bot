@@ -243,7 +243,7 @@ def chat(payload: ChatRequest, request: Request, user: CurrentUser) -> ChatRespo
     if not llm_client.configured and runtime_for(request, payload.session_id) is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
+            detail="模型服务未配置，请检查服务端 LLM_* 设置或旧版 TJU_* 设置。",
         )
     session_token = set_session_id(payload.session_id)
     sessions = _sessions(request, payload.session_id)
@@ -325,7 +325,7 @@ def chat_stream(
     if not llm_client.configured and runtime_for(request, payload.session_id) is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="TJU LLM 未配置，请先在服务端设置 TJU_API_KEY。",
+            detail="模型服务未配置，请检查服务端 LLM_* 设置或旧版 TJU_* 设置。",
         )
     sessions = _sessions(request, payload.session_id)
     try:

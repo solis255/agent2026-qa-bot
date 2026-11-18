@@ -131,6 +131,7 @@ class ChatResult(BaseModel):
     request_id: str | None = None
     duration_ms: float = Field(ge=0)
     attempts_made: int = Field(default=1, ge=1)
+    has_reasoning_content: bool = False
 
     @property
     def retry_count(self) -> int:
@@ -143,12 +144,6 @@ class ChatResult(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
-
-    @model_validator(mode="after")
-    def require_content_or_tool_calls(self) -> "ChatResult":
-        if self.content is None and not self.tool_calls:
-            raise ValueError("chat result requires content or tool calls")
-        return self
 
     def to_assistant_message(self) -> ChatMessage:
         return ChatMessage(

@@ -609,7 +609,7 @@ function renderHealth(health) {
   elements.historyStatus.textContent = health.history_ready ? "已就绪" : "未启用";
   elements.toolMode.textContent = `${String(health.tool_mode).toUpperCase()} 模式`;
   if (!health.llm_configured) {
-    elements.interactionNote.textContent = "服务端尚未配置 TJU_API_KEY，聊天暂不可用。";
+    elements.interactionNote.textContent = "服务端尚未配置模型服务，聊天暂不可用。";
   }
 }
 
@@ -625,7 +625,7 @@ function renderHealthError(error) {
   elements.interactionNote.textContent = error.message;
 }
 
-function appendMessage(role, text, sources = []) {
+function appendMessage(role, text, sources = [], citationMode = null) {
   const article = document.createElement("article");
   article.className = `message ${role}-message`;
   const avatar = document.createElement("span");
@@ -636,7 +636,7 @@ function appendMessage(role, text, sources = []) {
   title.textContent = role === "user" ? "你" : role === "error" ? "请求提示" : "诊断助手";
   const body = document.createElement(role === "assistant" ? "div" : "p");
   body.className = role === "assistant" ? "message-body markdown-body" : "message-body";
-  if (role === "assistant") renderAssistantMarkdown(body, text, sources);
+  if (role === "assistant") renderAssistantMarkdown(body, text, sources, citationMode);
   else body.textContent = text;
   content.append(title, body);
   article.append(avatar, content);
@@ -1248,7 +1248,7 @@ async function createSession({ announce = true, restore = false } = {}) {
     if (state.authEpoch !== authEpoch) return;
     elements.interactionNote.textContent = state.health?.llm_configured
       ? "会话已就绪。Enter 发送，Shift + Enter 换行。"
-      : "会话已创建，但 TJU LLM 尚未配置。";
+      : "会话已创建，模型服务尚未配置。";
     if (announce) elements.messageInput.focus();
   } catch (error) {
     if (state.authEpoch !== authEpoch) return;
@@ -1537,7 +1537,10 @@ async function loadDiagnosisRecord(recordId) {
     elements.conversation.replaceChildren();
     for (const turn of record.conversation_turns || []) {
       appendMessage(turn.turn_origin === "system_continuation" ? "assistant" : "user", turn.turn_origin === "system_continuation" ? "系统：网络检查完成，自动继续分析。" : turn.user_message);
-      appendMessage("assistant", turn.assistant_answer, record.sources);
+      const sources = turn.citation_mode && turn.source_refs?.length
+        ? (record.sources || []).filter(source => turn.source_refs?.includes(source.source_ref))
+        : record.sources;
+      appendMessage("assistant", turn.assistant_answer, sources, turn.citation_mode);
     }
     renderDiagnosis(record.diagnosis);
     renderMetrics(record.metrics);
@@ -1614,7 +1617,7 @@ async function submitChat(event, options = {}) {
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     renderDiagnosticTarget(state.diagnosticTarget);
     renderEnvironmentProfile(state.environmentProfile);
-    renderAssistantMarkdown(streamedAnswer, response.answer, response.sources);
+    renderAssistantMarkdown(streamedAnswer, response.answer, response.sources, response.metrics?.citation_mode);
     renderUIAction(streamedAnswer, response.ui_action);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);

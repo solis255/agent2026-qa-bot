@@ -12,7 +12,7 @@ from netpilot.agent.response_modes import ResponseMode
 from netpilot.agent.schemas import AgentToolStep, FallbackReason
 from netpilot.agent.task_state import EvidenceRecord
 from netpilot.rag import KnowledgeSource
-from netpilot.llm.errors import LLMRateLimitError
+from netpilot.llm.errors import LLMRateLimitError, LLMRequestError, TJUClientError
 
 
 def build_intent_fallback(
@@ -26,6 +26,7 @@ def build_intent_fallback(
     sources: list[KnowledgeSource],
     hypotheses: list[Hypothesis],
     rate_limit: LLMRateLimitError | None = None,
+    request_error: TJUClientError | None = None,
 ) -> str:
     """Generate a safe response that preserves the current Turn's purpose."""
 
@@ -40,7 +41,7 @@ def build_intent_fallback(
     } or response_mode in {ResponseMode.ANALYSIS, ResponseMode.COMPARISON}:
         return _analysis_fallback(evidence, steps, sources, hypotheses)
     if response_mode is ResponseMode.KNOWLEDGE:
-        return _knowledge_fallback(sources, evidence, steps, reason, rate_limit)
+        return _knowledge_fallback(sources, evidence, steps, reason, rate_limit, request_error)
     if steps:
         network_steps = [step for step in steps if step.tool_name != "knowledge_search"]
         if network_steps:
@@ -144,6 +145,7 @@ def _knowledge_fallback(
     steps: list[AgentToolStep],
     reason: FallbackReason,
     rate_limit: LLMRateLimitError | None,
+    request_error: TJUClientError | None,
 ) -> str:
     chunks = knowledge_results(evidence, steps)
     if reason is FallbackReason.LLM_RATE_LIMITED:
@@ -161,9 +163,14 @@ def _knowledge_fallback(
             + render_knowledge_fallback_chunks(chunks)
         )
     if chunks:
+        if isinstance(request_error, LLMRequestError):
+            notice = "模型请求参数存在兼容性问题，当前无法完成整理。"
+        elif reason is FallbackReason.LLM_ERROR:
+            notice = "知识库检索已完成，但模型暂时无法完成整理。"
+        else:
+            notice = "知识库检索已完成。以下保留检索到的资料供你参考。"
         return (
-            "知识库检索已完成，但模型最终整理失败。\n\n"
-            "检索到的关键原始片段：\n\n"
+            notice + "\n\n检索到的关键原文片段：\n\n"
             + render_knowledge_fallback_chunks(chunks)
             + "\n\n限制：以下为知识库检索原文片段，尚未经过模型完整综合整理。"
             "资料内容仅作参考，不是实时网络证据；community 不代表官方说明。"

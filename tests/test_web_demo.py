@@ -88,11 +88,11 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "timeoutMs = 180000" not in javascript
     assert 'src="/client-check.js?v=13c"' in html
     assert 'src="/student-ui.js?v=13d"' in html
-    assert 'src="/app.js?v=student-ui-13d"' in html
+    assert 'src="/app.js?v=knowledge-sources"' in html
     assert html.index('/client-check.js?') < html.index('/student-ui.js?') < html.index('/app.js?')
     assert html.index('/vendor/marked.umd.js') < html.index('/markdown.js?') < html.index('/app.js?')
     assert html.index('/vendor/purify.min.js') < html.index('/markdown.js?')
-    assert 'renderAssistantMarkdown(streamedAnswer, response.answer, response.sources)' in javascript
+    assert 'renderAssistantMarkdown(streamedAnswer, response.answer, response.sources, response.metrics?.citation_mode)' in javascript
 
 
 def test_web_styles_include_mobile_and_accessible_states() -> None:

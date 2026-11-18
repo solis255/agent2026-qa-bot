@@ -546,6 +546,7 @@ def test_chat_persists_metrics_and_history_api_survives_restart(tmp_path: Path) 
             "rag_calls": 0,
             "knowledge_finalization_attempts": 0,
             "knowledge_finalization_failure_kind": None,
+        "citation_mode": None,
             "history_context_records": 0,
             "network_tool_calls": 1,
         }

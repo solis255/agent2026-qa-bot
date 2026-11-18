@@ -63,6 +63,8 @@ TJU_MODEL=tju-llm
 TOOL_MODE=mock
 ```
 
+也可用 `LLM_PROVIDER`、`LLM_API_KEY`、`LLM_API_BASE`、`LLM_MODEL` 连接 DeepSeek 或其他 OpenAI-compatible Chat Completions 服务。配置方式、知识回答的引用回退和日志排查见 [模型服务兼容与知识回答验证](docs/llm-provider-compatibility.md)。
+
 ```bash
 python -m uvicorn netpilot.main:app --host 127.0.0.1 --port 8000
 ```

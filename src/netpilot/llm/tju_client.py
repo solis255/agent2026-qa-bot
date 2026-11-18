@@ -1,8 +1,8 @@
-"""Production TJU OpenAI-compatible chat and Function Calling client."""
+"""OpenAI-compatible chat and Function Calling client."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import logging
@@ -53,12 +53,15 @@ ClientFactory = Callable[..., Any]
 logger = logging.getLogger(__name__)
 _RETRY_WAIT_BUDGET = 10.0  # Cumulative delay per completion; HTTP timeout remains per attempt.
 _QUOTA_CODES = {"insufficient_quota", "quota_exceeded", "billing_hard_limit", "daily_quota_exceeded"}
-_CODE_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,47}", re.ASCII)
+_CODE_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,47}", re.ASCII)
 _ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}", re.ASCII)
+_MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", re.ASCII)
+_REQUEST_CODES = {"model_not_found", "invalid_model", "invalid_request", "invalid_request_error",
+                  "context_length_exceeded", "unsupported_model", "invalid_parameter"}
 
 
 class TJUClient:
-    """Thin, testable boundary around the TJU Chat Completions endpoint."""
+    """Chat Completions client, retaining the public name for existing callers."""
 
     def __init__(
         self,
@@ -72,10 +75,11 @@ class TJUClient:
         self._client = sdk_client
 
         if self._client is None and settings.llm_configured:
-            assert settings.tju_api_key is not None
+            api_key = settings.effective_llm_api_key
+            assert api_key is not None
             self._client = client_factory(
-                api_key=settings.tju_api_key.get_secret_value().strip(),
-                base_url=settings.tju_api_base,
+                api_key=api_key.get_secret_value().strip(),
+                base_url=settings.effective_llm_api_base,
                 timeout=settings.tju_timeout_seconds,
                 max_retries=0,
                 http_client=DefaultHttpxClient(),
@@ -91,10 +95,21 @@ class TJUClient:
 
     @property
     def model(self) -> str:
-        return self._settings.tju_model
+        return self._settings.effective_llm_model or ""
+
+    @property
+    def provider(self) -> str:
+        return self._settings.llm_provider
+
+    @property
+    def diagnostic_identity(self) -> dict[str, str | None]:
+        key = self._settings.effective_llm_api_key
+        secret = key.get_secret_value().strip() if key is not None else ""
+        return {"provider": _safe_metadata(self.provider, _CODE_PATTERN, secret),
+                "model": _safe_metadata(self.model, _MODEL_PATTERN, secret)}
 
     def __repr__(self) -> str:
-        return f"TJUClient(configured={self.configured!r}, model={self.model!r})"
+        return f"TJUClient(configured={self.configured!r}, provider={self.diagnostic_identity['provider']!r})"
 
     def close(self) -> None:
         """Close the SDK transport owned by this wrapper."""
@@ -120,7 +135,7 @@ class TJUClient:
 
         if not self.configured:
             raise LLMNotConfiguredError(
-                "TJU LLM 未配置，请在项目根目录 .env 中设置 TJU_API_KEY。"
+                "模型服务未配置，请检查 LLM_* 设置或旧版 TJU_* 设置。"
             )
         if not messages:
             raise LLMRequestError("聊天消息不能为空。")
@@ -157,44 +172,71 @@ class TJUClient:
         if tools is not None:
             request["tools"] = list(tools)
             request["tool_choice"] = tool_choice
+        if self.provider == "deepseek":
+            request.pop("temperature")
+            request["extra_body"] = {"thinking": {"type": "disabled"}}
         return self._complete(request)
 
     def _complete(self, request: dict[str, Any]) -> ChatResult:
         started = perf_counter()
         budget = _RETRY_WAIT_BUDGET
         max_retries = self._settings.tju_max_retries
-        api_key = self._settings.tju_api_key
+        api_key = self._settings.effective_llm_api_key
         assert api_key is not None
         secret = api_key.get_secret_value().strip()
+        identity = self.diagnostic_identity
         for attempt in range(1, max_retries + 2):
             attempt_started = perf_counter()
             headers = Headers()
+            status = 200
+            request_id = None
             try:
-                response = self._client.chat.completions.create(**request)
-                result = _parse_response(response, self.model, (perf_counter() - started) * 1000)
+                completions = self._client.chat.completions
+                if isinstance(self._client, OpenAI):
+                    raw = completions.with_raw_response.create(**request)
+                    headers = raw.headers
+                    status = raw.status_code
+                    request_id = _provider_request_id(headers, secret)
+                    response = raw.http_response.json()
+                else:
+                    response = completions.create(**request)
+                    request_id = _safe_metadata(_field(response, "_request_id"), _ID_PATTERN, secret)
+                envelope = _field(response, "error")
+                if envelope is not None:
+                    error = _map_error(status=status, code=_field(envelope, "code"),
+                                       kind=_field(envelope, "type"), request_id=request_id,
+                                       headers=headers, secret=secret, attempt=attempt)
+                else:
+                    result = _parse_response(response, self.model, (perf_counter() - started) * 1000)
             except APIError as exc:
                 if isinstance(exc, (APIStatusError, APIResponseValidationError)):
                     headers = exc.response.headers
                 error = _map_sdk_error(exc, headers, secret, attempt)
-            except LLMResponseError as exc:
-                error = LLMResponseError(str(exc), status_code=200, attempts_made=attempt,
-                                         request_id=_safe_metadata(getattr(response, "_request_id", None), _ID_PATTERN, secret))
+            except (LLMResponseError, ValueError):
+                error = LLMResponseError("模型 API 返回了无法解析的响应。", status_code=status,
+                                         attempts_made=attempt, request_id=request_id)
             else:
-                request_id = _safe_metadata(result.request_id, _ID_PATTERN, secret)
-                log_event(logger, "tju_llm_request", success=True, status_code=200, attempt=attempt,
-                          max_retries=max_retries, provider_request_id=request_id, model=self.model,
-                          will_retry=False, duration_ms=round((perf_counter() - attempt_started) * 1000))
-                return result.model_copy(update={"attempts_made": attempt, "request_id": request_id})
+                if envelope is None:
+                    safe_model = _safe_metadata(result.model, _MODEL_PATTERN, secret)
+                    finish = _safe_metadata(result.finish_reason, _CODE_PATTERN, secret)
+                    log_event(logger, "tju_llm_request", success=True, status_code=status, attempt=attempt,
+                              max_retries=max_retries, provider_request_id=request_id,
+                              will_retry=False, duration_ms=round((perf_counter() - attempt_started) * 1000),
+                              **{**identity, "model": safe_model or identity["model"]})
+                    return result.model_copy(update={"attempts_made": attempt, "request_id": request_id,
+                                                     "model": safe_model or identity["model"] or "unknown",
+                                                     "finish_reason": finish})
 
             delay, stop_reason = _retry_decision(error, headers, attempt, max_retries, budget)
             rate_limit = isinstance(error, LLMRateLimitError)
             log_event(logger, "tju_llm_request", success=False, status_code=error.status_code,
                       error_type=type(error).__name__, provider_error_code=error.provider_error_code,
-                      provider_request_id=error.request_id, model=self.model, attempt=attempt,
+                      provider_request_id=error.request_id, provider_error_type=error.provider_error_type,
+                      attempt=attempt,
                       max_retries=max_retries, retry_after_seconds=error.retry_after_seconds,
                       will_retry=delay is not None, retry_delay_seconds=delay, retry_stop_reason=stop_reason,
                       provider_reason=("quota_exhausted" if error.quota_exhausted else "unknown_429") if rate_limit else None,
-                      duration_ms=round((perf_counter() - attempt_started) * 1000))
+                      duration_ms=round((perf_counter() - attempt_started) * 1000), **identity)
             if delay is None:
                 # Raised outside the SDK's except block: no underlying body/request in
                 # the exception chain or in the public/logged error.
@@ -234,40 +276,52 @@ def _safe_metadata(value: Any, pattern: re.Pattern[str], secret: str) -> str | N
 
 
 def _map_sdk_error(exc: APIError, headers: Headers, secret: str, attempt: int) -> TJUClientError:
-    status = _status_code(exc)
-    code = _safe_metadata(getattr(exc, "code", None), _CODE_PATTERN, secret)
-    kind = _safe_metadata(getattr(exc, "type", None), _CODE_PATTERN, secret)
-    code = code or kind
-    quota_code = next((value for value in (code, kind) if value and value.lower() in _QUOTA_CODES), None)
+    return _map_error(status=_status_code(exc), code=getattr(exc, "code", None),
+                      kind=getattr(exc, "type", None), request_id=getattr(exc, "request_id", None),
+                      headers=headers, secret=secret, attempt=attempt, sdk_error=exc)
+
+
+def _provider_request_id(headers: Headers, secret: str) -> str | None:
+    return next((request_id for name in ("x-request-id", "request-id", "x-ds-request-id")
+                 if (request_id := _safe_metadata(headers.get(name), _ID_PATTERN, secret))), None)
+
+
+def _map_error(*, status, code, kind, request_id, headers, secret, attempt, sdk_error=None) -> TJUClientError:
+    code = _safe_metadata(code, _CODE_PATTERN, secret)
+    kind = _safe_metadata(kind, _CODE_PATTERN, secret)
+    tags = {value.lower() for value in (code, kind) if value}
     metadata = {
         "status_code": status,
-        "request_id": _safe_metadata(getattr(exc, "request_id", None), _ID_PATTERN, secret),
+        "request_id": _safe_metadata(request_id, _ID_PATTERN, secret) or _provider_request_id(headers, secret),
         "retry_after_seconds": _retry_after(headers),
         "provider_error_code": code,
+        "provider_error_type": kind,
         "attempts_made": attempt,
     }
-    if status == 429 and isinstance(exc, APIStatusError):
-        if quota_code:
-            metadata["provider_error_code"] = quota_code
-            return LLMRateLimitError("TJU 模型 API 的可用配额可能已耗尽。", quota_exhausted=True, **metadata)
-        return LLMRateLimitError("TJU API 暂时限流（429），请稍后重试。", retryable=True, **metadata)
-    if isinstance(exc, BadRequestError) or status == 400:
-        return LLMRequestError("TJU API 拒绝请求（400），请检查请求参数。", **metadata)
-    if isinstance(exc, AuthenticationError) or status == 401:
-        return LLMAuthenticationError("TJU API 认证失败（401），请检查 TJU_API_KEY。", **metadata)
-    if isinstance(exc, PermissionDeniedError) or status == 403:
-        return LLMAuthenticationError("TJU API 拒绝访问（403），请检查项目权限。", **metadata)
-    if isinstance(exc, APITimeoutError):
-        return LLMTimeoutError("TJU API 请求超时。", retryable=True, **metadata)
-    if isinstance(exc, APIConnectionError):
-        return LLMConnectionError("无法连接 TJU API，请检查网络和专属地址。", retryable=True, **metadata)
-    if isinstance(exc, APIResponseValidationError):
-        return LLMResponseError("TJU API 返回了无法解析的响应。", **metadata)
-    if isinstance(exc, APIStatusError):
+    if status == 429 and isinstance(sdk_error, APIStatusError):
+        if tags & _QUOTA_CODES:
+            metadata["provider_error_code"] = code or kind
+            return LLMRateLimitError("模型 API 的可用配额可能已耗尽。", quota_exhausted=True, **metadata)
+        return LLMRateLimitError("模型 API 暂时限流（429），请稍后重试。", retryable=True, **metadata)
+    if status == 401 or isinstance(sdk_error, AuthenticationError):
+        return LLMAuthenticationError("模型 API 认证失败（401），请检查 API Key。", **metadata)
+    if status == 403 or isinstance(sdk_error, PermissionDeniedError):
+        return LLMAuthenticationError("模型 API 拒绝访问（403），请检查项目权限。", **metadata)
+    if status == 400 or isinstance(sdk_error, BadRequestError) or (
+        status in {200, 404, 422} and tags & _REQUEST_CODES
+    ):
+        return LLMRequestError("模型 API 拒绝请求，请检查模型名称和请求参数。", **metadata)
+    if isinstance(sdk_error, APITimeoutError):
+        return LLMTimeoutError("模型 API 请求超时。", retryable=True, **metadata)
+    if isinstance(sdk_error, APIConnectionError):
+        return LLMConnectionError("无法连接模型 API，请检查网络和服务地址。", retryable=True, **metadata)
+    if sdk_error is None:
+        return LLMServiceError("模型 API 返回了服务错误。", **metadata)
+    if isinstance(sdk_error, APIStatusError):
         return LLMServiceError(_safe_status_message(status),
                                retryable=status in {408, 409} or (status is not None and status >= 500),
                                **metadata)
-    return LLMResponseError("TJU API 返回了无法处理的响应。", **metadata)
+    return LLMResponseError("模型 API 返回了无法解析的响应。", **metadata)
 
 
 def _retry_decision(
@@ -287,48 +341,54 @@ def _retry_decision(
     return delay, None
 
 
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
+
+
 def _parse_response(response: Any, configured_model: str, duration_ms: float) -> ChatResult:
     """Validate the small response subset used by ordinary chat."""
 
     try:
-        choices = response.choices
-        if not choices:
+        choices = _field(response, "choices")
+        if not isinstance(choices, (list, tuple)) or not choices:
             raise ValueError("missing choices")
         choice = choices[0]
-        raw_content = getattr(choice.message, "content", None)
+        message = _field(choice, "message")
+        if message is None:
+            raise ValueError("missing message")
+        raw_content = _field(message, "content")
+        if raw_content is not None and not isinstance(raw_content, str):
+            raise ValueError("invalid message content")
         content = raw_content.strip() if isinstance(raw_content, str) else None
         content = content or None
-        tool_calls = _parse_tool_calls(getattr(choice.message, "tool_calls", None))
-        if content is None and not tool_calls:
-            raise ValueError("missing message content and tool calls")
+        tool_calls = _parse_tool_calls(_field(message, "tool_calls"))
+        reasoning = _field(message, "reasoning_content")
 
-        response_model = getattr(response, "model", None) or configured_model
+        response_model = _field(response, "model") or configured_model
         if not isinstance(response_model, str) or not response_model.strip():
             raise ValueError("invalid model")
 
-        usage = getattr(response, "usage", None)
+        usage = _field(response, "usage")
         token_usage = TokenUsage(
             prompt_tokens=_token_count(usage, "prompt_tokens"),
             completion_tokens=_token_count(usage, "completion_tokens"),
             total_tokens=_token_count(usage, "total_tokens"),
         )
-        finish_reason = getattr(choice, "finish_reason", None)
-        if finish_reason is not None and not isinstance(finish_reason, str):
-            finish_reason = str(finish_reason)
+        finish_reason = _field(choice, "finish_reason")
 
         return ChatResult(
             content=content,
             tool_calls=tool_calls,
             model=response_model.strip(),
             finish_reason=finish_reason,
+            has_reasoning_content=isinstance(reasoning, str) and bool(reasoning.strip()),
             usage=token_usage,
-            request_id=getattr(response, "_request_id", None),
             duration_ms=duration_ms,
         )
     except TJUClientError:
         raise
-    except (AttributeError, IndexError, TypeError, ValueError) as exc:
-        raise LLMResponseError("TJU API 返回了不完整或异常的响应。") from exc
+    except (AttributeError, IndexError, TypeError, ValueError):
+        raise LLMResponseError("模型 API 返回了不完整或异常的响应。") from None
 
 
 def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
@@ -339,14 +399,14 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
 
     parsed: list[ToolCall] = []
     for raw_call in raw_tool_calls:
-        function = raw_call.function
+        function = _field(raw_call, "function")
         parsed.append(
             ToolCall(
-                id=raw_call.id,
-                type=raw_call.type,
+                id=_field(raw_call, "id"),
+                type=_field(raw_call, "type"),
                 function=FunctionCall(
-                    name=function.name,
-                    arguments=function.arguments,
+                    name=_field(function, "name"),
+                    arguments=_field(function, "arguments"),
                 ),
             )
         )
@@ -354,7 +414,7 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
 
 
 def _token_count(usage: Any, field: str) -> int:
-    value = getattr(usage, field, 0) if usage is not None else 0
+    value = _field(usage, field, 0)
     if value is None:
         return 0
     if not isinstance(value, int) or value < 0:
@@ -369,5 +429,5 @@ def _status_code(exc: Exception) -> int | None:
 
 def _safe_status_message(status_code: int | None) -> str:
     if status_code is None:
-        return "TJU API 返回了服务错误。"
-    return f"TJU API 返回 HTTP {status_code}。"
+        return "模型 API 返回了服务错误。"
+    return f"模型 API 返回 HTTP {status_code}。"

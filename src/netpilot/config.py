@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+import re
 from typing import Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -42,13 +43,18 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
+    llm_provider: str = "tju"
+    llm_api_key: SecretStr | None = None
+    llm_api_base: str | None = None
+    llm_model: str | None = None
     tju_api_key: SecretStr | None = None
     tju_api_base: str = (
         "https://ai.tju.edu.cn/api/agent2026/agent2026-netpilot"
     )
-    tju_model: Literal["tju-llm"] = "tju-llm"
+    tju_model: str = "tju-llm"
     tju_show_token_usage: bool = True
     tju_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
     tju_max_retries: int = Field(default=2, ge=0, le=5)
@@ -129,19 +135,41 @@ class Settings(BaseSettings):
             raise ValueError("APP_TIMEZONE must be a valid IANA timezone") from exc
         return value
 
-    @field_validator("tju_api_base")
+    @field_validator("llm_provider")
     @classmethod
-    def validate_tju_api_base(cls, value: str) -> str:
+    def validate_llm_provider(cls, value: str) -> str:
+        value = value.strip().lower() or "tju"
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value):
+            raise ValueError("LLM_PROVIDER must be a provider identifier")
+        return value
+
+    @field_validator("tju_model", "llm_model")
+    @classmethod
+    def validate_llm_model(cls, value: str | None, info) -> str | None:
+        if value is None or not value.strip():
+            return "tju-llm" if info.field_name == "tju_model" else None
+        normalized = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", normalized) or "://" in normalized:
+            raise ValueError("LLM model must be a valid model identifier")
+        return normalized
+
+    @field_validator("tju_api_base", "llm_api_base")
+    @classmethod
+    def validate_llm_api_base(cls, value: str | None, info) -> str | None:
         """Require an HTTP(S) SDK base URL, not a completion endpoint."""
 
+        if value is None or not value.strip():
+            if info.field_name == "tju_api_base":
+                raise ValueError("TJU_API_BASE must not be blank")
+            return None
         normalized = value.strip().rstrip("/")
         parsed = urlparse(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("TJU_API_BASE must be an absolute HTTP(S) URL")
-        if parsed.query or parsed.fragment:
-            raise ValueError("TJU_API_BASE must not contain a query or fragment")
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("API base must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment or parsed.username is not None or parsed.password is not None:
+            raise ValueError("API base must not contain credentials, a query or fragment")
         if normalized.endswith("/chat/completions"):
-            raise ValueError("TJU_API_BASE must stop before /chat/completions")
+            raise ValueError("API base must stop before /chat/completions")
         return normalized
 
     @field_validator("embedding_model", "app_host")
@@ -172,9 +200,22 @@ class Settings(BaseSettings):
         return normalized
 
     @property
-    def llm_configured(self) -> bool:
-        """Return whether a non-empty TJU API key is available without exposing it."""
+    def effective_llm_api_key(self) -> SecretStr | None:
+        if self.llm_api_key and self.llm_api_key.get_secret_value().strip():
+            return self.llm_api_key
+        if self.llm_provider == "tju" and self.effective_llm_api_base == self.tju_api_base:
+            return self.tju_api_key
+        return None
 
-        if self.tju_api_key is None:
-            return False
-        return bool(self.tju_api_key.get_secret_value().strip())
+    @property
+    def effective_llm_api_base(self) -> str | None:
+        return self.llm_api_base or (self.tju_api_base if self.llm_provider == "tju" else None)
+
+    @property
+    def effective_llm_model(self) -> str | None:
+        return self.llm_model or (self.tju_model if self.llm_provider == "tju" else None)
+
+    @property
+    def llm_configured(self) -> bool:
+        key = self.effective_llm_api_key
+        return bool(key and key.get_secret_value().strip() and self.effective_llm_api_base and self.effective_llm_model)

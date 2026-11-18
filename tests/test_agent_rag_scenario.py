@@ -131,7 +131,8 @@ def test_agent_searches_locally_then_synthesizes_and_exposes_sources() -> None:
     )
     assert "untrusted reference data" in context
     assert "VPN 用于在校外访问校内资源" in context
-    assert result.sources[0].source_ref in context
+    assert "[SOURCE] [S1]" in context
+    assert result.sources[0].source_ref not in context
 
 
 def test_application_reports_rag_ready_when_retriever_loads(monkeypatch) -> None:

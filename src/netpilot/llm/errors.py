@@ -17,6 +17,7 @@ class TJUClientError(RuntimeError):
         request_id: str | None = None,
         retry_after_seconds: float | None = None,
         provider_error_code: str | None = None,
+        provider_error_type: str | None = None,
         attempts_made: int | None = None,
     ) -> None:
         super().__init__(message)
@@ -25,6 +26,7 @@ class TJUClientError(RuntimeError):
         self.request_id = request_id
         self.retry_after_seconds = retry_after_seconds
         self.provider_error_code = provider_error_code
+        self.provider_error_type = provider_error_type
         self.attempts_made = attempts_made
 
 

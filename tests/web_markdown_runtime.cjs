@@ -287,6 +287,32 @@ Object.assign(cases, {
     assert.ok(!w.document.querySelector("#diagnostic-details-dialog").textContent.includes("参考知识"));
     assert.equal(typeof w.renderSources, "undefined");
   },
+  "CIT-11": async (w) => {
+    const answer = "VPN 用于访问校内资源。";
+    const selected = [sources[1], { source_ref: "unsafe", source_type: "community", title: "<img src=x>", source: "javascript:alert(1)" }];
+    const live = w.appendMessage("assistant", answer, selected, "source_panel_only");
+    const panel = live.querySelector(".knowledge-source-panel");
+    assert.equal(live.querySelector("p").textContent, answer);
+    assert.ok(panel.open);
+    assert.equal(panel.querySelectorAll("a").length, 1);
+    assert.equal(panel.querySelector("a").href, selected[0].source);
+    assert.ok(panel.textContent.includes("社区") && panel.textContent.includes("<img src=x>"));
+    assert.equal(panel.querySelector("img,.inline-citation"), null);
+    const cited = w.appendMessage("assistant", `VPN [链接](https://invented.example.test)。[[cite:${selected[0].source_ref}]]`, selected.slice(0, 1), "inline");
+    assert.equal(cited.querySelector(".knowledge-source-panel").open, false);
+    assert.equal(cited.querySelector(".inline-citation").href, selected[0].source);
+    assert.equal(cited.querySelector('a[href*="invented.example.test"]'), null);
+    const record = {
+      record_id: "panel-record", updated_at: "2026-10-18T00:00:00Z", turn_count: 1,
+      sources: [sources[0], ...selected], tool_calls: [],
+      conversation_turns: [{ turn_index: 1, user_message: "VPN 是什么？", assistant_answer: answer,
+        citation_mode: "source_panel_only", source_refs: selected.map(source => source.source_ref) }],
+    };
+    const expected = live.innerHTML;
+    w.fetch = async () => ({ ok: true, json: async () => record });
+    await w.loadDiagnosisRecord(record.record_id);
+    assert.equal(w.document.querySelector(".assistant-message .message-body").innerHTML, expected);
+  },
 });
 
 module.exports = { setup, step, sources };

@@ -254,6 +254,8 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .markdown-body .inline-citation { display: inline-block; margin: 0 .12em; padding: 0 .2em; border-radius: 4px; vertical-align: super; font-size: .72em; line-height: 1.3; color: #1458b4; text-decoration: none; background: #deebfb; white-space: nowrap; }
 .inline-citation:hover, .inline-citation:focus-visible { outline: 2px solid #7aa9e8; outline-offset: 1px; background: #cddff7; }
 .inline-citation:not(a) { color: #65778a; background: #e8edf3; }
+.knowledge-source-panel { margin-top: 1rem; border-top: 1px solid #cddbeb; padding-top: .7rem; font-size: .9em; }
+.knowledge-source-panel summary { color: #203b60; cursor: pointer; font-weight: 600; }
 .history-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .history-list button { display: grid; width: 100%; gap: 5px; border: 1px solid #dbe5f0; border-radius: 10px; padding: 11px; text-align: left; color: #1d3859; background: #fbfdff; }
 .history-list button:hover { border-color: #9dbbe2; background: #f2f7fd; }

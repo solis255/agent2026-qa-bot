@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 import re
 
@@ -11,6 +12,53 @@ from netpilot.rag.schemas import source_ref_for
 
 
 CITATION_MARKER = re.compile(r"\[\[cite:([^\]\n]*)\]\]")
+_MODEL_MARKER = re.compile(
+    r"\[\[cite:(?P<legacy>[^\]\n]*)\]\]|\[(?P<short>[Ss][0-9]+)\]"
+    r"|【(?P<wide>[Ss][0-9]+)】|(?P<unclosed>\[\[cite:[^\s]*)", re.IGNORECASE,
+)
+_MODEL_LINK = re.compile(
+    r"(?:[a-z][a-z0-9+.-]*://|\b(?:www\.|mailto:)|\]\s*\(|^\s*\[[^\]\n]+\]:\s*\S|<\s*a\s+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class ModelCitations:
+    text: str
+    refs: frozenset[str]
+    invalid_count: int
+
+
+def parse_model_citations(content: str, sources: Iterable[KnowledgeSource]) -> ModelCitations:
+    """Translate local labels to source refs without accepting any model-supplied metadata."""
+
+    by_label = {f"S{index}": source.source_ref for index, source in enumerate(sources, start=1)}
+    allowed_refs = set(by_label.values())
+    valid_refs: set[str] = set()
+    invalid_count = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal invalid_count
+        legacy = match["legacy"]
+        label = match["short"] or match["wide"]
+        candidates = legacy.split(",") if legacy is not None else [by_label.get((label or "").upper(), "")]
+        kept = {}
+        for candidate in candidates:
+            ref = candidate.strip()
+            if ref in allowed_refs:
+                kept[ref] = None
+                valid_refs.add(ref)
+            else:
+                invalid_count += 1
+        return f"[[cite:{','.join(kept)}]]" if kept else ""
+
+    text = _MODEL_MARKER.sub(replace, content)
+    text = re.sub(r"(\[\[cite:[^\]\n]+\]\])(?:[ \t]*\1)+", r"\1", text)
+    return ModelCitations(text.strip(), frozenset(valid_refs), invalid_count)
+
+
+def contains_model_link(content: str) -> bool:
+    return bool(_MODEL_LINK.search(content))
 
 
 def citation_refs(content: str) -> set[str]:
@@ -73,6 +121,14 @@ def render_knowledge_chunks(
     )
 
 
+def render_synthesis_chunks(results: Iterable[KnowledgeSearchResult], *, chunk_chars: int) -> str:
+    return "\n\n".join(
+        f"[SOURCE] [S{index}]\nsource_type={item.source_type.value}\ntitle={item.title[:200]}\n"
+        f"content=\n{excerpt(item.content, chunk_chars)}"
+        for index, item in enumerate(results, start=1)
+    )
+
+
 def render_knowledge_fallback_chunks(results: Iterable[KnowledgeSearchResult]) -> str:
     """Attach provenance to each excerpt, never a fabricated paragraph mapping."""
 
@@ -94,7 +150,7 @@ def source_only_answer(content: str, results: Iterable[KnowledgeSearchResult]) -
     """Reject citation lists that contain no substantive answer body."""
 
     chunks = list(results)
-    content = CITATION_MARKER.sub("", content)
+    content = _MODEL_MARKER.sub("", content)
     for line in content.splitlines():
         if re.fullmatch(
             r"(?:参考来源|资料来源|来源|参考资料|参考文献|检索结果|sources?)(?:如下|列表)?\s*[:：]?",
@@ -103,7 +159,7 @@ def source_only_answer(content: str, results: Iterable[KnowledgeSearchResult]) -
             continue
         if re.match(r"\s*(?:[-*+]|\d+[.)、])?\s*\[(?:official|community|maintainer)\]", line, flags=re.IGNORECASE):
             without_url = re.sub(r"https?://[^\s)<>]+", "", line)
-            if "http" in line and not re.search(r"[。！？；，]", without_url):
+            if not re.search(r"[。！？；，]", without_url):
                 continue
         body = line
         for item in chunks:

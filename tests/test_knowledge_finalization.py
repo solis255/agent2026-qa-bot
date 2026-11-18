@@ -7,7 +7,7 @@ from netpilot.agent.knowledge import source_only_answer
 from netpilot.agent.prompts import KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT, NETPILOT_SYSTEM_PROMPT
 from netpilot.api.presenters import present_chat
 from netpilot.config import Settings
-from netpilot.llm import ChatResult, FunctionCall, LLMAuthenticationError, LLMRateLimitError, LLMRequestError, LLMResponseError, LLMTimeoutError, ToolCall
+from netpilot.llm import ChatResult, FunctionCall, LLMAuthenticationError, LLMRateLimitError, LLMRequestError, LLMTimeoutError, ToolCall
 from netpilot.rag import KnowledgeSearchResult
 from netpilot.rag.schemas import source_ref_for
 from netpilot.tools import build_network_tools
@@ -78,12 +78,12 @@ def test_synthesis_prompts_separate_answer_from_bibliography():
     run(llm)
     prompt = "\n".join(message.content or "" for message in llm.calls[0][0])
     assert "不要在答案末尾输出" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
-    assert "[[cite:<source_ref>]]" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
+    assert "[S1]" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "source_type" in KNOWLEDGE_SYNTHESIS_SYSTEM_PROMPT
     assert "再列来源" not in prompt
     assert "最后列出使用的来源" not in prompt
     assert "列出真实来源" not in prompt
-    assert "不要重复来源列表" in prompt
+    assert "不要生成链接或来源列表" in prompt
 
 
 def test_source_type_question_keeps_substantive_type_comparison_and_metadata():
@@ -238,12 +238,10 @@ def test_citation_mapping_uses_refs_not_mentioned_titles_or_urls():
 
 
 @pytest.mark.parametrize("answer,kind", [
-    ("VPN 使用说明没有引用。", "missing_citations"),
-    ("VPN 使用说明。[[cite:does-not-exist]]", "invalid_citations"),
-    ("VPN 使用说明。[[cite:0]]", "invalid_citations"),
-    ("VPN 使用说明。[[cite:]]", "invalid_citations"),
-    ("VPN 使用说明。[[cite:unclosed", "missing_citations"),
-    ("VPN 使用说明。" + citation(0) + "[[cite:unknown]]", "invalid_citations"),
+    ("VPN 使用说明。[[cite:does-not-exist]]", "citation_invalid"),
+    ("VPN 使用说明。[[cite:0]]", "citation_invalid"),
+    ("VPN 使用说明。[[cite:]]", "citation_invalid"),
+    ("VPN 使用说明。[[cite:unclosed", "citation_invalid"),
 ])
 def test_bad_citations_retry_then_fallback_preserves_provenance(answer, kind):
     result_llm = LLM([completed(answer), completed(answer)])
@@ -253,16 +251,18 @@ def test_bad_citations_retry_then_fallback_preserves_provenance(answer, kind):
     assert result.fallback_reason == FallbackReason.FINALIZATION_FAILED
     assert all(citation(index) in result.answer for index in range(3))
     assert "http" not in result.answer
-    assert "source_ref" in result_llm.calls[1][0][2].content
+    assert "请使用当前片段旁的 [S1] / [S2]" in result_llm.calls[1][0][2].content
 
 
-def test_missing_citations_retry_can_recover_without_new_tools():
-    result_llm = LLM([completed("请先安装客户端。"), completed()])
-    result = run(result_llm)
+def test_missing_citations_keep_body_and_selected_sources_without_retry():
+    result = run(LLM([completed("请先安装客户端。")]))
     assert result.fallback_reason is None
-    assert result.knowledge_finalization_attempts == 2
+    assert result.knowledge_finalization_attempts == 1
     assert len(result.steps) == 1
-    assert result.knowledge_finalization_failure_kind == "missing_citations"
+    assert result.knowledge_finalization_failure_kind == "citation_missing"
+    assert present_chat(uuid4(), result).metrics.citation_mode == "source_panel_only"
+    assert result.answer == "请先安装客户端。"
+    assert len(result.sources) == 3
 
 
 def test_marker_only_is_not_a_substantive_answer():
@@ -292,7 +292,6 @@ def test_sourced_comparison_retrieves_and_finalizes_without_comparison_refusal(q
 
 @pytest.mark.parametrize("failure,reason", [
     (LLMTimeoutError("timeout", retryable=True), FallbackReason.LLM_ERROR),
-    (LLMResponseError("bad response"), FallbackReason.LLM_ERROR),
     (ChatResult(model="test", duration_ms=1, tool_calls=[
         ToolCall(id="forbidden", function=FunctionCall(name="dns_lookup", arguments='{"domain":"example.com"}'))
     ]), FallbackReason.INVALID_TOOL_LOOP),
@@ -398,7 +397,7 @@ def test_length_retry_shortens_context_and_asks_for_concise_body():
     result = run(llm)
     assert result.fallback_reason is None
     assert result.knowledge_finalization_attempts == 2
-    assert result.knowledge_finalization_failure_kind == "length"
+    assert result.knowledge_finalization_failure_kind == "model_length"
     assert "缩短正文" in llm.calls[1][0][2].content
     assert len(llm.calls[1][0][2].content) < len(llm.calls[0][0][2].content)
 
@@ -414,7 +413,7 @@ def test_failure_log_records_each_observation_without_raw_prompt_or_error_secret
     assert len(logs) == 2
     assert [item["attempt"] for item in logs] == [1, 2]
     for item in logs:
-        assert item["failure_kind"] == "source_only_answer"
+        assert item["failure_kind"] == "source_only"
         assert item["finish_reason"] == "stop"
         assert item["has_content"] is True
         assert item["content_length"] > 0
@@ -425,8 +424,8 @@ def test_failure_log_records_each_observation_without_raw_prompt_or_error_secret
         assert item["selected_context_chars"] > 0
         assert item["llm_error_type"] is None
     assert "实质正文" in llm.calls[1][0][2].content
-    assert result.knowledge_finalization_failure_kind == "source_only_answer"
-    assert present_chat(uuid4(), result).metrics.knowledge_finalization_failure_kind == "source_only_answer"
+    assert result.knowledge_finalization_failure_kind == "source_only"
+    assert present_chat(uuid4(), result).metrics.knowledge_finalization_failure_kind == "source_only"
 
 
 def test_llm_error_log_records_type_without_error_payload(caplog):
@@ -436,19 +435,19 @@ def test_llm_error_log_records_type_without_error_payload(caplog):
     with caplog.at_level(logging.INFO, logger="netpilot.agent.orchestrator"):
         result = run(llm)
     log = json.loads(caplog.records[-1].message)
-    assert log["failure_kind"] == "llm_error"
+    assert log["failure_kind"] == "model_request_failed"
     assert log["llm_error_type"] == "LLMTimeoutError"
     assert "secret-value" not in caplog.text
-    assert result.knowledge_finalization_failure_kind == "llm_error"
+    assert result.knowledge_finalization_failure_kind == "model_request_failed"
 
 
 @pytest.mark.parametrize("bad,kind,retry_text", [
-    (completed('<tool_call>knowledge_search</tool_call>'), "textual_tool_call", "无任何工具"),
-    (completed('{"name":"knowledge_search","arguments":{"query":"VPN"}}'), "textual_tool_call", "无任何工具"),
+    (completed('<tool_call>knowledge_search</tool_call>'), "model_textual_tool_call", "无任何工具"),
+    (completed('{"name":"knowledge_search","arguments":{"query":"VPN"}}'), "model_textual_tool_call", "无任何工具"),
     (ChatResult(model="test", duration_ms=1, tool_calls=[ToolCall(id="illegal", function=FunctionCall(
         name="knowledge_search", arguments='{"query":"VPN"}'
-    ))]), "tool_calls", "禁止函数请求"),
-    (completed("知识库检索已完成，但模型最终整理失败。"), "repeated_fallback", "不重复失败提示"),
+    ))]), "model_tool_call", "禁止函数请求"),
+    (completed("知识库检索已完成，但模型最终整理失败。"), "model_repeated_fallback", "不重复失败提示"),
 ])
 def test_retry_guidance_matches_failed_synthesis(bad, kind, retry_text):
     result_llm = LLM([bad, completed()])

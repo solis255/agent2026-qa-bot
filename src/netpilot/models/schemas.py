@@ -192,6 +192,7 @@ class ExecutionMetricsView(BaseModel):
     rag_calls: int = Field(default=0, ge=0)
     knowledge_finalization_attempts: int = Field(default=0, ge=0)
     knowledge_finalization_failure_kind: str | None = None
+    citation_mode: Literal["inline", "source_panel_only"] | None = None
     history_context_records: int = Field(default=0, ge=0)
     network_tool_calls: int = Field(default=0, ge=0)
     reasoning_trace_steps: int = Field(default=0, ge=0)
@@ -233,6 +234,8 @@ class PersistedConversationTurn(BaseModel):
     response_mode: str | None = None
     fallback_reason: str | None = None
     knowledge_finalization_failure_kind: str | None = None
+    citation_mode: Literal["inline", "source_panel_only"] | None = None
+    source_refs: list[str] = Field(default_factory=list, max_length=6)
 
 
 def _fill_legacy_conversation(value: dict, *, question_key: str, answer_key: str) -> dict:

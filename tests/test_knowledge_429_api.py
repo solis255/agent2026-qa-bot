@@ -58,9 +58,8 @@ def campus_app(monkeypatch, tmp_path):
                 return error_response(429, {"retry-after-ms": "250"},
                                       code="insufficient_quota" if outcome == "quota" else "temporary_limit",
                                       attempt=len(attempts))
-            ref = source_ref_for(f"https://example.test/{topic}", f"{topic}-1")
-            assert f"source_ref={ref}" in body["messages"][0]["content"]
-            return httpx.Response(200, json=completion(f"{topic}：可以先核对该服务的适用场景和认证方式。[[cite:{ref}]]"))
+            assert "[SOURCE] [S1]" in body["messages"][0]["content"]
+            return httpx.Response(200, json=completion(f"{topic}：可以先核对该服务的适用场景和认证方式。[S1]"))
 
         waits = use_mock_transport(monkeypatch, respond)
         monkeypatch.setattr("netpilot.main.load_configured_retriever", lambda _: CampusFixture(trace, empty=empty))

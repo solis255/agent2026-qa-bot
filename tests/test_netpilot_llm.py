@@ -393,15 +393,14 @@ def test_generic_sdk_parse_error_is_wrapped_without_leaking_details() -> None:
     "response",
     [
         make_response(choices=[]),
-        make_response(content=None),
-        make_response(content="   "),
+        make_response(content=["invalid"]),
         SimpleNamespace(choices=[SimpleNamespace(message=None)]),
     ],
 )
 def test_malformed_chat_responses_are_rejected(response: Any) -> None:
     client = TJUClient(make_settings(), sdk_client=FakeSDKClient(response))
 
-    with pytest.raises(LLMResponseError, match="不完整或异常"):
+    with pytest.raises(LLMResponseError, match="无法解析"):
         client.chat(messages())
 
 
@@ -416,7 +415,7 @@ def test_malformed_native_tool_call_is_rejected() -> None:
     ]
     client = TJUClient(make_settings(), sdk_client=FakeSDKClient(response))
 
-    with pytest.raises(LLMResponseError, match="不完整或异常"):
+    with pytest.raises(LLMResponseError, match="无法解析"):
         client.chat(messages(), tools=[{"type": "function", "function": {}}])
 
 
