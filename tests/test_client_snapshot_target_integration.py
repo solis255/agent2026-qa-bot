@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import uuid4
 import pytest
 from client_snapshot_helpers import payload, import_snapshot
@@ -62,9 +63,14 @@ def test_cs17_snapshot_environment_precedence_and_minimal_context():
     assert task.environment_profile.network_access == "unknown"
     assert task.environment_profile.proxy_enabled is None
     store.update_environment(sid,owner,{"os_family":"macos","os_version":"14"},source="user")
-    task, _, _ = import_snapshot(store,sid,owner,payload("dns_failure"))
+    scope_changed_at = store.task_state(sid, owner).client_snapshot_scope_changed_at
+    fresh_snapshot = payload("dns_failure")
+    # Model a later collection even on Windows clocks with coarse resolution.
+    fresh_snapshot["generated_at"] = (scope_changed_at + timedelta(milliseconds=1)).isoformat()
+    task, _, _ = import_snapshot(store,sid,owner,fresh_snapshot)
     assert task.environment_profile.os_family == "macos" and task.environment_profile.os_version == "14"
-    assert task.task_version == 2 and all(item.task_version == 2 for item in task.reusable_evidence())
+    current_evidence = task.reusable_evidence()
+    assert task.task_version == 2 and current_evidence and all(item.task_version == 2 for item in current_evidence)
     message = build_task_context_message(user_message="分析",intent=TurnIntent.ANALYZE_EXISTING,task_version=task.task_version,evidence=task.reusable_evidence(),diagnostic_target=task.diagnostic_target)
     assert "CLIENT DIAGNOSTIC SNAPSHOT" in message.content and "CURRENT TARGET EVIDENCE" in message.content
     assert "ipv4_addresses" not in message.content and "hostname" not in message.content

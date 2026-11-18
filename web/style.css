@@ -432,6 +432,24 @@ details pre { max-height: 190px; overflow: auto; margin: 8px 0 0; padding: 9px; 
 .client-check-drop { overflow-wrap: anywhere; }
 .verification-table-scroll { max-width: 100%; }
 .verification-table { min-width: 350px; }
+.chat-workflow-status { display: grid; gap: 10px; min-width: 0; }
+.chat-workflow-card {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: min(760px, 100%);
+  padding: 14px;
+  margin-block: 6px;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #f5f8fc;
+  overflow-wrap: anywhere;
+}
+.chat-workflow-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.chat-workflow-card p { margin: 8px 0; }
+.chat-workflow-card details { margin-block: 8px; }
+.chat-workflow-card ol { padding-inline-start: 1.5em; }
+.chat-workflow-card button { white-space: normal; margin: 4px 6px 4px 0; }
+.chat-workflow-card select, .chat-workflow-card textarea { box-sizing: border-box; min-width: 0; max-width: 100%; }
 .diagnostic-drawer button, .history-dialog button { white-space: normal; overflow-wrap: anywhere; }
 @keyframes drawer-enter { from { transform: translateX(15px); opacity: .7; } to { transform: translateX(0); opacity: 1; } }
 @media (max-width: 768px) {

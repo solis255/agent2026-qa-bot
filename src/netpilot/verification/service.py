@@ -38,7 +38,7 @@ def protects_plan(task, plan):
     if task.task_version not in {cycle.baseline.task_version,cycle.after_task_version}: return False
     from netpilot.remediation.planner import environment_key
     if plan.environment_key != environment_key(task.environment_profile): return False
-    if cycle.status == "awaiting_after_evidence": return True
+    if cycle.status in {"awaiting_after_evidence", "verifying"}: return True
     if cycle.status == "baseline_ready" and cycle.baseline.task_version != plan.task_version:
         return {r.evidence_id for r in eligible(task)} == set(cycle.baseline.evidence_ids)
     if cycle.after:

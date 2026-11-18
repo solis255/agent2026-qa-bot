@@ -89,6 +89,7 @@ async function declineClientCheck() {
     if (!clientCheckOperationCurrent(op)) return;
     state.clientCheck.declined = true;
     const body = appendMessage("assistant", result.feedback);
+    applySessionState(result);
     renderNextChatAction(resolveNextChatAction(result), body);
   } catch (error) {
     if (clientCheckOperationCurrent(op)) {
@@ -98,22 +99,6 @@ async function declineClientCheck() {
   } finally { if (op.epoch === state.authEpoch && op.sid === state.sessionId) setBusy(false); }
 }
 
-function applyClientCheckPayload(data) {
-  if (data.task_version != null) state.taskVersion = data.task_version;
-  if (data.environment_profile) state.environmentProfile = data.environment_profile;
-  if (data.diagnostic_target) state.diagnosticTarget = data.diagnostic_target;
-  if (state.nextChatAction && !isCurrentChatAction(state.nextChatAction)) retireNextChatAction();
-  if ("diagnostic_readiness" in data) renderDiagnosticReadiness(data.diagnostic_readiness);
-  if ("client_snapshot_summary" in data) state.clientSnapshotSummary = data.client_snapshot_summary;
-  if (data.client_evidence) state.clientEvidence = data.client_evidence;
-  if ("remediation_plan" in data) state.remediationPlan = data.remediation_plan;
-  if (data.verification_cycles) state.verificationCycles = data.verification_cycles;
-  if ("remediation_readiness" in data) state.remediationReadiness = data.remediation_readiness;
-  applyResolution(data);
-  renderEnvironmentProfile(state.environmentProfile);renderDiagnosticTarget(state.diagnosticTarget);
-  renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
-  renderRemediationPlan(state.remediationPlan);renderVerification(state.verificationCycles);
-}
 
 function selectClientCheckFile(file) {
   const status = document.querySelector("#client-check-status");
@@ -150,7 +135,7 @@ async function uploadClientCheck() {
     const result = await requestJSON("/api/session/client-snapshot", {method:"POST", body:form, headers:{
       "X-NetPilot-Check-ID":action.action_id, "X-NetPilot-Task-Version":String(action.task_version), "X-NetPilot-Target-Version":String(action.target_version)}});
     if (!clientCheckOperationCurrent(op)) return;
-    applyClientCheckPayload(result);appendTurnReasoningTrace(result.reasoning_trace || []);
+    applySessionState(result);appendTurnReasoningTrace(result.reasoning_trace || []);
     if (result.duplicate) {
       status.textContent = "重复文件：你上传的是刚才已经使用过的诊断结果，请重新运行网络检查工具生成新的结果。";
     } else if (result.client_check_upload_status === "before_result") {

@@ -728,17 +728,18 @@ function resolveNextChatAction(response) {
 }
 
 function isCurrentChatAction(action) {
-  return Boolean(action?.action_id && state.user && state.sessionId && state.diagnosticTarget && !state.viewingHistory &&
+  const inScope = Boolean(action?.action_id && state.user && state.sessionId && state.diagnosticTarget && !state.viewingHistory &&
     (action.schema_version === 1 || action[LEGACY_CHAT_ACTION]) &&
     Number.isInteger(action.task_version) && action.task_version >= 1 &&
     Number.isInteger(action.target_version) && action.target_version >= 1 &&
     action.session_id === state.sessionId && action.task_version === state.taskVersion &&
     action.target_subject === state.diagnosticTarget?.subject && action.target_version === state.diagnosticTarget?.target_version);
+  return inScope && (!WORKFLOW_ACTION_TYPES.includes(action.type) || isCurrentWorkflowAction(action));
 }
 
 function syncChatActionControls() {
   const current = isCurrentChatAction(state.nextChatAction);
-  for (const button of state.chatActionGroup?.querySelectorAll("button") ?? []) button.disabled = state.busy || !current;
+  for (const control of state.chatActionGroup?.querySelectorAll("button,select,textarea") ?? []) control.disabled = state.busy || !current;
   const check = clientCheckActionCurrent(state.nextChatAction);
   for (const id of ["client-check-upload", "client-check-skip", "client-check-launch"]) {
     document.getElementById(id).disabled = state.busy || !check;
@@ -761,22 +762,32 @@ function retireNextChatAction() {
 
 function renderNextChatAction(action, body = null) {
   const valid = isCurrentChatAction(action) &&
-    (action.type === "context_question" ? Array.isArray(action.choices) : clientCheckActionCurrent(action));
+    (WORKFLOW_ACTION_TYPES.includes(action.type) ||
+      (action.type === "context_question" ? Array.isArray(action.choices) : clientCheckActionCurrent(action)));
   const previous = state.nextChatAction;
   if (valid && isCurrentChatAction(previous) && previous.action_id === action.action_id &&
       previous.type === action.type && previous.mode === action.mode && state.chatActionGroup?.isConnected) {
     syncChatActionControls();
+    renderChatWorkflowStatus(body);
     renderCaseStatus();
     return;
   }
   retireNextChatAction();
   if (valid) {
     state.nextChatAction = action;
-    state.chatActionGroup = action.type === "context_question"
-      ? renderContextQuestion(body ?? appendMessage("assistant", action.question), action)
-      : renderClientCheckAction(body, action);
+    switch (action.type) {
+      case "context_question":
+        state.chatActionGroup = renderContextQuestion(body ?? appendMessage("assistant", action.question), action);
+        break;
+      case "client_check":
+        state.chatActionGroup = renderClientCheckAction(body, action);
+        break;
+      default:
+        state.chatActionGroup = renderWorkflowAction(body, action);
+    }
   }
   syncChatActionControls();
+  renderChatWorkflowStatus(body);
   renderCaseStatus();
 }
 
@@ -784,7 +795,7 @@ function applyNextChatAction(response, body = null) {
   const provided = "next_chat_action" in response || "ui_action" in response;
   if (provided) {
     renderNextChatAction(resolveNextChatAction(response), body);
-  }
+  } else renderChatWorkflowStatus(body);
   return provided;
 }
 
@@ -798,9 +809,8 @@ async function refreshCurrentChatAction() {
       retireNextChatAction();
       return;
     }
-    applyClientCheckPayload(session);
+    applySessionState(session);
     renderNextChatAction(resolveNextChatAction(session));
-    renderVerification(state.verificationCycles);
   } catch (_error) {
     if (epoch === state.authEpoch && sid === state.sessionId && !state.viewingHistory) retireNextChatAction();
   }
@@ -983,19 +993,6 @@ function renderRemediationPlan(plan, {historical = false} = {}) {
     for (const text of [`完成后验证：${step.verification}`,`回滚：${(step.rollback_instructions || []).join("；") || "无需恢复配置"}`,`停止条件：${step.continue_condition || "用户自行决定停止"}`,`用户备注：${step.user_note || "无"}`]) {
       const line = document.createElement("p");line.textContent = text;details.append(line);
     }
-    if (!historical && step.status === "pending" && !["superseded","cancelled"].includes(plan.status)) {
-      const controls = document.createElement("div");controls.className = "remediation-feedback-controls";
-      const outcome = document.createElement("select");outcome.setAttribute("aria-label",`步骤 ${step.order} 的反馈`);
-      for (const [value,label] of Object.entries(STEP_OUTCOME)) {const option = document.createElement("option");option.value=value;option.textContent=label;outcome.append(option);}
-      const note = document.createElement("textarea");note.maxLength=500;note.placeholder="可选备注，不填密码、Cookie 或密钥";note.setAttribute("aria-label",`步骤 ${step.order} 的备注`);
-      controls.append(outcome,note);
-      for (const [action,label] of [["complete","已完成"],["skip","跳过"],["fail","执行失败"]]) {
-        const button = document.createElement("button");button.type="button";button.textContent=label;button.dataset.action=action;
-        button.addEventListener("click",()=>sendRemediationFeedback(step.step_id,action,action === "skip" ? "unknown" : outcome.value,note.value));
-        controls.append(button);
-      }
-      details.append(controls);
-    }
     row.append(details);list.append(row);
   }
   elements.remediationPlan.append(list);
@@ -1004,7 +1001,8 @@ function renderRemediationPlan(plan, {historical = false} = {}) {
 const RESOLUTION_LABELS={diagnosing:"诊断中",action_required:"等待操作",verifying:"正在验证",resolved:"已解决",improved:"有改善",unresolved:"仍未解决",escalated:"建议报修"};
 
 function applyResolution(data) {
-  state.resolution=data.resolution || null;state.resolutionTransitions=data.resolution_transitions || [];
+  if (Object.hasOwn(data, "resolution")) state.resolution = data.resolution;
+  if (Object.hasOwn(data, "resolution_transitions")) state.resolutionTransitions = data.resolution_transitions || [];
   if(Object.hasOwn(data,"escalation_packages"))state.escalationPackages=data.escalation_packages || [];
   renderResolution(state.resolution,state.resolutionTransitions);
   if(!state.viewingHistory)renderEscalation(state.escalationPackages);
@@ -1026,14 +1024,7 @@ function renderResolution(record,transitions=[],{historical=false,target=state.d
   if(status === "resolved")button("查看修复过程",()=>openDiagnosticDetails("workflow-details"));
   if(["resolved","escalated"].includes(status)){
     const b=button("导出诊断报告",()=>elements.exportMarkdown.click());b.dataset.export="true";b.disabled=state.busy || !state.activeRecordId;
-  }else{
-    const select=document.createElement("select");select.setAttribute("aria-label","原始症状确认");
-    for(const [value,label] of [["unknown","暂不确定"],["resolved","原始症状已恢复"],["improved","有改善但未完全恢复"],["not_resolved","仍未解决"]]){const o=document.createElement("option");o.value=value;o.textContent=label;select.append(o);}
-    select.value=record?.user_confirmation || "unknown";controls.append(select);
-    button("确认症状",()=>resolutionRequest("confirm",{session_id:state.sessionId,status:select.value}));
-    button("请求人工支持",()=>resolutionRequest("request-support",{session_id:state.sessionId}));
-    if(["improved","unresolved","action_required"].includes(status) && state.remediationPlan?.steps?.some(s=>s.status === "pending" && s.risk === "low" && !s.requires_admin))button("继续下一步",()=>openDiagnosticDetails("remediation-section"));
-  }
+  }else button("请求人工支持",()=>requestResolutionSupport());
   elements.resolutionContent.append(controls);
 }
 
@@ -1041,7 +1032,10 @@ async function refreshResolution() {
   const epoch=state.authEpoch,sid=state.sessionId;
   if(!state.user || !sid || state.viewingHistory)return;
   const data=await requestJSON(`/api/session/resolution?session_id=${encodeURIComponent(sid)}`);
-  if(epoch === state.authEpoch && sid === state.sessionId)applyResolution(data);
+  if (epoch === state.authEpoch && sid === state.sessionId && !state.viewingHistory) {
+    applySessionState(data);
+    applyNextChatAction(data);
+  }
 }
 
 function renderEscalation(packages=[],{historical=false,sessionId=state.sessionId,staleIds=[]}={}) {
@@ -1108,15 +1102,9 @@ async function openEscalation(id,sid,format,preview=false) {
   finally{window.clearTimeout(timer);if(epoch === state.authEpoch)setBusy(false);}
 }
 
-async function resolutionRequest(action,body) {
-  if(!state.user || !state.sessionId || state.busy || state.viewingHistory)return;
-  const epoch=state.authEpoch,sid=state.sessionId;setBusy(true);
-  try{
-    const result=await requestJSON(`/api/session/resolution/${action}`,{method:"POST",body:JSON.stringify(body)});
-    if(epoch !== state.authEpoch || sid !== state.sessionId)return;
-    applyResolution(result);appendTurnReasoningTrace(result.reasoning_trace || []);
-  }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.resolutionNotice.textContent=error.message;}
-  finally{if(epoch === state.authEpoch)setBusy(false);}
+async function requestResolutionSupport() {
+  await workflowRequest("/api/session/resolution/request-support", "POST",
+    {session_id: state.sessionId}, {notice: elements.resolutionNotice});
 }
 
 const VERIFICATION_RESULT = {improved:"有改善",unchanged:"无变化",worsened:"变差",inconclusive:"暂时无法确认",unknown:"尚未验证"};
@@ -1126,101 +1114,89 @@ function renderVerification(cycles = [], {historical = false} = {}) {
   elements.verificationContent.replaceChildren();
   elements.verificationNotice.textContent = "";
   elements.verificationCount.textContent = `${cycles.length} 轮`;
-  if (!cycles.length) {elements.verificationContent.textContent = "尚无修复前后验证记录。";return;}
-  const latest = cycles[cycles.length-1];
+  if (!cycles.length) {
+    elements.verificationContent.textContent = "尚无修复前后验证记录。";
+    return;
+  }
   for (const cycle of cycles) {
-    const card = document.createElement("section");card.className = "verification-cycle";
-    const title = document.createElement("h3");title.textContent = `验证 #${cycle.verification_sequence} · ${TARGET_LABELS[cycle.target_subject] || "未知对象"} v${cycle.target_version} · ${cycle.status}`;
-    const result = document.createElement("p");result.textContent = `结果：${VERIFICATION_RESULT[cycle.result] || "未知"}。${cycle.result_summary || "尚待验证"}（有改善不等于故障解决）`;
-    card.append(title,result);
-    const scroll = document.createElement("div");scroll.className="verification-table-scroll";
-    const table = document.createElement("table");table.className = "verification-table";
-    const head = document.createElement("thead"),header=document.createElement("tr");
-    for(const label of ["指标 / 目标","修复前","修复后","变化"]){const th=document.createElement("th");th.scope="col";th.textContent=label;header.append(th);}head.append(header);table.append(head);
-    const body=document.createElement("tbody");
-    for(const check of cycle.checks || []){
-      const row=document.createElement("tr");
-      for(const value of [`${METRIC_LABEL[check.metric] || check.metric} ${check.target || ""}`,check.baseline_value || "未知",check.after_value || "未采集",VERIFICATION_RESULT[check.change] || (check.change === "not_comparable" ? "不可比较" : "未知")]){const cell=document.createElement("td");cell.textContent=value;row.append(cell);}
-      body.append(row);
-    }
-    table.append(body);scroll.append(table);card.append(scroll);
-    const refs=document.createElement("p");refs.className="environment-note";refs.textContent=`Baseline task v${cycle.baseline?.task_version || "?"} / After task v${cycle.after_task_version || "?"}；Before ${cycle.baseline?.evidence_ids?.length || 0} 条 / After ${cycle.after?.evidence_ids?.length || 0} 条客观证据。`;card.append(refs);
-    if(cycle.user_observation){const note=document.createElement("p");note.textContent=`用户主观反馈（非客观证据）：${cycle.user_observation.symptom_status}；${cycle.user_observation.note || "无备注"}`;card.append(note);}
-    const inScope = !state.diagnosticTarget || (cycle.target_subject === state.diagnosticTarget.subject && cycle.target_version === state.diagnosticTarget.target_version);
-    const current = cycle === latest && !historical && !state.viewingHistory && inScope && cycle.status !== "superseded";
-    if(current && ["baseline_ready","awaiting_after_evidence"].includes(cycle.status)){
-      if(cycle.target_subject === "user_client"){
-        const prompt=document.createElement("p");prompt.textContent=state.isDemo ? "演示模式：使用场景提供的 After 数据继续验证。" : "需要修复后验证：完成手动步骤后，用发生问题的这台设备重新检查网络。";
-        card.append(prompt);
-        if (clientCheckActionCurrent(state.nextChatAction) && state.nextChatAction.mode === "recheck") {
-          const check=document.createElement("button");check.type="button";check.textContent="重新检查";check.addEventListener("click",openClientCheck);card.append(check);
-        }
-        if(cycle.status === "baseline_ready" && state.remediationPlan?.steps?.some(s=>s.status === "completed")){
-          const begin=document.createElement("button");begin.type="button";begin.textContent="开始等待新快照";
-          begin.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(begin);
-        }
-      } else if(["netpilot_host","mock_client"].includes(cycle.target_subject)){
-        const start=document.createElement("button");start.type="button";start.textContent=cycle.target_subject === "mock_client" ? "开始模拟验证" : "开始验证";start.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/start`,{session_id:state.sessionId}));card.append(start);
-      }
-    }
-    if(current){
-      const controls=document.createElement("div");controls.className="verification-controls";
-      const select=document.createElement("select");select.setAttribute("aria-label","用户主观症状反馈");
-      for(const [value,label] of [["unknown","暂不确定"],["resolved_by_user_report","我感觉已恢复"],["improved_by_user_report","好多了"],["unchanged_by_user_report","还是一样"],["worsened_by_user_report","更差了"]]){const option=document.createElement("option");option.value=value;option.textContent=label;select.append(option);}
-      const note=document.createElement("textarea");note.maxLength=500;note.placeholder="可选症状备注，不填密码或密钥";note.setAttribute("aria-label","验证反馈备注");
-      const save=document.createElement("button");save.type="button";save.textContent="记录主观反馈";save.addEventListener("click",()=>verificationRequest(`/${encodeURIComponent(cycle.verification_id)}/user-observation`,{session_id:state.sessionId,symptom_status:select.value,note:note.value.trim() || null}));
-      controls.append(select,note,save);card.append(controls);
-      if(["completed","inconclusive"].includes(cycle.status)){
-        const again=document.createElement("button");again.type="button";again.textContent="重新验证（新一轮）";again.addEventListener("click",()=>verificationRequest("",{session_id:state.sessionId,reverify:true}));card.append(again);
-      }
+    const card = document.createElement("section");
+    card.className = "verification-cycle";
+    const title = `${historical ? "历史验证" : "验证"} #${cycle.verification_sequence} · ${TARGET_LABELS[cycle.target_subject] || "未知对象"} v${cycle.target_version} · ${cycle.status}`;
+    card.append(workflowText("h3", title),
+      workflowText("p", `结果：${VERIFICATION_RESULT[cycle.result] || "未知"}。${cycle.result_summary || "尚待验证"}（有改善不等于故障解决）`),
+      renderVerificationTable(cycle.checks || [], {detailed: true}));
+    const refs = document.createElement("details");
+    const before = cycle.baseline?.evidence_ids || [];
+    const after = cycle.after?.evidence_ids || [];
+    refs.append(workflowText("summary", `Baseline task v${cycle.baseline?.task_version || "?"} / After task v${cycle.after_task_version || "?"}；Before ${before.length} 条 / After ${after.length} 条客观证据。`));
+    if (cycle.baseline?.captured_at) refs.append(workflowText("p", `修复前采集：${formatHistoryTime(cycle.baseline.captured_at)}`));
+    if (cycle.after?.captured_at) refs.append(workflowText("p", `修复后采集：${formatHistoryTime(cycle.after.captured_at)}`));
+    if (before.length) refs.append(workflowText("p", `Before Evidence ID：${before.join("、")}`));
+    if (after.length) refs.append(workflowText("p", `After Evidence ID：${after.join("、")}`));
+    card.append(refs);
+    if (cycle.user_observation) {
+      const note = cycle.user_observation;
+      card.append(workflowText("p", `用户主观反馈（非客观证据）：${note.symptom_status}；${note.note || "无备注"}`));
     }
     elements.verificationContent.append(card);
   }
 }
 
-async function verificationRequest(suffix, body) {
-  if(!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
-  const epoch=state.authEpoch,sid=state.sessionId;setBusy(true);
-  elements.verificationNotice.textContent="正在验证 / 保存反馈…";
-  try{
-    const result=await requestJSON(`/api/session/verification${suffix}`,{method:"POST",body:JSON.stringify(body)});
-    if(epoch !== state.authEpoch || sid !== state.sessionId)return;
-    applyClientCheckPayload(result);
-    applyNextChatAction(result);
-    state.verificationCycles=result.verification_cycles || [];renderVerification(state.verificationCycles);appendTurnReasoningTrace(result.reasoning_trace || []);
-    applyResolution(result);
-    if(result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
-  }catch(error){if(epoch === state.authEpoch && sid === state.sessionId)elements.verificationNotice.textContent=error.message;}
-  finally{if(epoch === state.authEpoch)setBusy(false);}
+function applySessionState(data) {
+  if (data.task_version != null) state.taskVersion = data.task_version;
+  if (data.environment_profile) state.environmentProfile = data.environment_profile;
+  if (data.diagnostic_target) state.diagnosticTarget = data.diagnostic_target;
+  if ("client_snapshot_summary" in data) state.clientSnapshotSummary = data.client_snapshot_summary;
+  if (data.client_evidence) state.clientEvidence = data.client_evidence;
+  if ("remediation_plan" in data) state.remediationPlan = data.remediation_plan;
+  if (data.verification_cycles) state.verificationCycles = data.verification_cycles;
+  if ("remediation_readiness" in data) state.remediationReadiness = data.remediation_readiness;
+  if ("diagnostic_readiness" in data) renderDiagnosticReadiness(data.diagnostic_readiness);
+  applyResolution(data);
+  if (state.nextChatAction && !isCurrentChatAction(state.nextChatAction)) retireNextChatAction();
+  renderEnvironmentProfile(state.environmentProfile);
+  renderDiagnosticTarget(state.diagnosticTarget);
+  renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
+  renderRemediationPlan(state.remediationPlan);
+  renderVerification(state.verificationCycles);
 }
 
-async function remediationRequest(url, options) {
+async function workflowRequest(url, method, payload, {action, feedback, notice} = {}) {
   if (!state.user || !state.sessionId || state.busy || state.viewingHistory) return;
-  const epoch=state.authEpoch, sessionId=state.sessionId;
-  setBusy(true);
+  if (action && (state.nextChatAction !== action || !isCurrentChatAction(action))) return;
+  const epoch = state.authEpoch;
+  const sessionId = state.sessionId;
+  const current = () => epoch === state.authEpoch && sessionId === state.sessionId && !state.viewingHistory;
+  setBusy(true, action?.type === "verification" ? "正在验证修复效果…" : "正在保存…");
   try {
-    const result=await requestJSON(url, options);
-    if (epoch !== state.authEpoch || sessionId !== state.sessionId) return;
-    applyClientCheckPayload(result);
-    applyNextChatAction(result);
-    state.remediationPlan=result.remediation_plan || null;
-    applyResolution(result);
-    state.verificationCycles=result.verification_cycles || [];
-    renderVerification(state.verificationCycles);
-    state.remediationReadiness=result.remediation_readiness || null;
-    renderRemediationPlan(state.remediationPlan);
+    const result = await requestJSON(url, {method, body: JSON.stringify(payload)});
+    if (!current()) return;
+    applySessionState(result);
+    const body = feedback ? appendMessage("assistant", feedback) : null;
+    applyNextChatAction(result, body);
     appendTurnReasoningTrace(result.reasoning_trace || []);
+    if (result.verification_tool_calls?.length) renderTools(result.verification_tool_calls);
+    elements.interactionNote.textContent = "当前处理进度已更新。";
   } catch (error) {
-    if (epoch === state.authEpoch && sessionId === state.sessionId) elements.remediationStatus.textContent=error.message;
-  } finally {if (epoch === state.authEpoch) setBusy(false);}
+    if (!current()) return;
+    if (action) {
+      if (error.status === 409) {
+        retireNextChatAction();
+        appendMessage("error", "这一步已经更新，请根据当前对话中的最新提示继续。");
+        await refreshCurrentChatAction();
+      } else {
+        appendMessage("error", "暂时无法完成这项操作，请稍后重试。");
+      }
+    } else if (notice) notice.textContent = error.message;
+    if (current()) elements.interactionNote.textContent = "操作未完成。";
+  } finally {
+    if (current()) setBusy(false);
+  }
 }
 
 async function generateRemediationPlan() {
-  await remediationRequest("/api/session/remediation-plan",{method:"POST",body:JSON.stringify({session_id:state.sessionId})});
-}
-
-async function sendRemediationFeedback(stepId, action, outcome="unknown", userNote="") {
-  await remediationRequest(`/api/session/remediation-plan/steps/${encodeURIComponent(stepId)}`,{method:"PATCH",body:JSON.stringify({session_id:state.sessionId,action,outcome,user_note:userNote.trim() || null})});
+  await workflowRequest("/api/session/remediation-plan", "POST",
+    {session_id: state.sessionId}, {notice: elements.remediationStatus});
 }
 
 async function uploadClientSnapshot(event) {
@@ -1240,22 +1216,9 @@ async function uploadClientSnapshot(event) {
   try {
     const result = await requestJSON("/api/session/client-snapshot", {method:"POST", body:form});
     if (state.authEpoch !== epoch || state.sessionId !== sessionId) return;
-    applyClientCheckPayload(result);
+    applySessionState(result);
     applyNextChatAction(result);
     receipt = result.client_check_continuation;
-    state.clientSnapshotSummary = result.client_snapshot_summary;
-    state.clientEvidence = result.client_evidence || [];
-    state.remediationPlan = result.remediation_plan || null;
-    applyResolution(result);
-    state.verificationCycles = result.verification_cycles || [];
-    elements.verificationNotice.textContent = "正在对比修复前后状态…";
-    renderVerification(state.verificationCycles);
-    renderRemediationPlan(state.remediationPlan);
-    state.environmentProfile = result.environment_profile;
-    state.diagnosticTarget = result.diagnostic_target;
-    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
-    renderEnvironmentProfile(state.environmentProfile);
-    renderDiagnosticTarget(state.diagnosticTarget);
     appendTurnReasoningTrace(result.reasoning_trace || []);
     if (!result.duplicate) renderDiagnosis(null);
     elements.snapshotFile.value = "";
@@ -1282,6 +1245,7 @@ async function saveDiagnosticTarget(event) {
     const changed = state.diagnosticTarget?.target_version !== target.target_version || state.diagnosticTarget?.subject !== target.subject;
     if (changed) retireNextChatAction();
     state.diagnosticTarget = target;
+    if (changed) renderChatWorkflowStatus();
     renderDiagnosticTarget(target);
     renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
     if (state.isDemo) await refreshDemoStatus();
@@ -1695,23 +1659,9 @@ async function submitChat(event, options = {}) {
     if (state.authEpoch !== authEpoch || state.sessionId !== chatSessionId) return;
     if (!response) throw new Error("流式响应缺少完整诊断结果。");
     userMessage.textContent = response.turn_origin === "system_continuation" ? "系统：网络检查完成，自动继续分析。" : response.redacted_user_message || "消息已处理（原文不在此展示）";
-    if (response.task_version != null) state.taskVersion = response.task_version;
-    if (response.environment_profile) state.environmentProfile = response.environment_profile;
-    renderDiagnosticReadiness(response.diagnostic_readiness);
-    if (response.diagnostic_target) state.diagnosticTarget = response.diagnostic_target;
-    state.clientSnapshotSummary = response.client_snapshot_summary || null;
-    state.clientEvidence = response.client_evidence || [];
-    state.remediationPlan = response.remediation_plan || null;
-    state.verificationCycles = response.verification_cycles || [];
-    applyResolution(response);
-    state.remediationReadiness = response.remediation_readiness || null;
-    renderRemediationPlan(state.remediationPlan);
-    renderClientSnapshot(state.clientSnapshotSummary, state.clientEvidence);
-    renderDiagnosticTarget(state.diagnosticTarget);
-    renderEnvironmentProfile(state.environmentProfile);
+    applySessionState(response);
     renderAssistantMarkdown(streamedAnswer, response.answer, response.sources, response.metrics?.citation_mode);
     renderNextChatAction(resolveNextChatAction(response), streamedAnswer);
-    renderVerification(state.verificationCycles);
     renderDiagnosis(response.diagnosis);
     renderMetrics(response.metrics);
     if (state.isDemo) await refreshDemoStatus();

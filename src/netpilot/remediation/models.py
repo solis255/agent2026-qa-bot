@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from netpilot.chat_actions.submissions import PlanActionSubmission
 from netpilot.diagnostic_target import TargetSubject
 from netpilot.privacy import redact_text
 
@@ -98,7 +99,7 @@ class RemediationRequest(StrictModel):
     session_id: UUID
 
 
-class StepFeedback(RemediationRequest):
+class StepFeedback(RemediationRequest, PlanActionSubmission):
     action: Literal["complete", "skip", "fail"]
     outcome: Literal["unknown", "improved", "no_change", "worse"] = "unknown"
     user_note: str | None = Field(default=None, max_length=500)

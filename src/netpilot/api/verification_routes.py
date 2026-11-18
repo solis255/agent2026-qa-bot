@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, Response
 from netpilot.api.remediation_routes import CurrentUser
 from netpilot.agent.session import SessionBusyError, SessionNotFoundError
+from netpilot.chat_actions.validation import StaleChatActionError
 from netpilot.history import DiagnosisStorageError
 from netpilot.verification.models import VerificationRequest, ObservationRequest, UserVerificationObservation
 
@@ -29,6 +30,7 @@ def operate(request,user,sid,**kwargs):
     except SessionNotFoundError as exc: raise HTTPException(404,"会话不存在或已失效。") from exc
     except SessionBusyError as exc: raise HTTPException(409,"会话正在处理，请稍后验证。") from exc
     except KeyError as exc: raise HTTPException(404,"没有当前验证记录。") from exc
+    except StaleChatActionError as exc: raise HTTPException(409, exc.message) from exc
     except ValueError as exc: raise HTTPException(409,"验证已失效或尚未完成手动步骤，请刷新并核对诊断对象和计划。") from exc
     except DiagnosisStorageError as exc: raise HTTPException(503,"验证保存失败，请稍后重试。") from exc
 
@@ -42,6 +44,8 @@ def get_verification(session_id:UUID,request:Request,response:Response,user:Curr
 @router.post("/session/verification",tags=["verification"])
 def create_verification(payload:VerificationRequest,request:Request,response:Response,user:CurrentUser):
     response.headers["Cache-Control"] = "no-store"
+    if payload.action_id is not None:
+        raise HTTPException(422, "验证操作仅用于开始当前验证。")
     return operate(request,user,payload.session_id,action="create",reverify=payload.reverify)
 
 
@@ -49,7 +53,7 @@ def create_verification(payload:VerificationRequest,request:Request,response:Res
 def start_verification(verification_id:UUID,payload:VerificationRequest,request:Request,response:Response,user:CurrentUser):
     response.headers["Cache-Control"] = "no-store"
     if payload.reverify: raise HTTPException(422,"请使用创建接口显式重新验证。")
-    return operate(request,user,payload.session_id,action="start",cycle_id=verification_id)
+    return operate(request,user,payload.session_id,action="start",cycle_id=verification_id,submission=payload)
 
 
 @router.post("/session/verification/{verification_id}/user-observation",tags=["verification"])

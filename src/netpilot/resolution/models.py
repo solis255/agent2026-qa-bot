@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import Field
+from netpilot.chat_actions.submissions import ResolutionActionSubmission
 from netpilot.diagnostic_target import TargetSubject
 from netpilot.remediation.models import StrictModel, utcnow
 
@@ -62,5 +63,5 @@ class ResolutionRequest(StrictModel):
     session_id: UUID
 
 
-class ConfirmationRequest(ResolutionRequest):
+class ConfirmationRequest(ResolutionRequest, ResolutionActionSubmission):
     status: UserConfirmation

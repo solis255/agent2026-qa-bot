@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from netpilot.agent.session import SessionBusyError, SessionNotFoundError
 from netpilot.auth.dependencies import require_current_user
 from netpilot.auth.models import UserRecord
+from netpilot.chat_actions.validation import StaleChatActionError
 from netpilot.history import DiagnosisStorageError
 from netpilot.remediation.models import RemediationRequest, StepFeedback
 
@@ -37,6 +38,8 @@ def operate(request,user,session_id,**kwargs):
         raise HTTPException(409,"会话正在诊断，请稍后操作修复计划。") from exc
     except KeyError as exc:
         raise HTTPException(404,"当前计划中没有此步骤。") from exc
+    except StaleChatActionError as exc:
+        raise HTTPException(409, exc.message) from exc
     except ValueError as exc:
         raise HTTPException(409,"计划已失效或步骤已结束，请刷新；P0 不支持重新打开已结束步骤。") from exc
     except DiagnosisStorageError as exc:

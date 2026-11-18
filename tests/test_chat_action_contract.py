@@ -45,7 +45,7 @@ def assert_projection(response):
             {"schema_version", "target_subject"} | (
                 {"session_id", "action_id", "task_version", "target_version"} if action["type"] == "context_question" else set()
             )
-        )} if action else None
+        )} if action and action["type"] in {"context_question", "client_check"} else None
     )
     return action
 
@@ -119,7 +119,9 @@ def test_act_07_demo_exclusion(context_app):
     sid = str(app.state.sessions.create(owner, is_demo=True).session_id)
     response = send(client, sid, WINDOWS_WEB)
     assert response["diagnostic_readiness"]["state"] == "need_client_evidence"
-    assert assert_projection(response) is None and current(client, sid) is None
+    action = assert_projection(response)
+    assert action is None or action["type"] != "client_check"
+    assert current(client, sid) == action
     ordinary = str(app.state.sessions.create(owner).session_id)
     action = send(client, ordinary, WINDOWS_WEB)["next_chat_action"]
     assert upload(client, sid, payload(), headers=check_headers(action)).status_code == 409
@@ -138,8 +140,10 @@ def test_act_08_session_restore_and_consumption(context_app):
     other = client.post("/api/session").json()["session_id"]
     pending = send(client, other, "网页打不开")["next_chat_action"]
     response = submit(client, other, answer_payload(pending, "unknown"))
-    assert response.status_code == 200 and response.json()["next_chat_action"] is None
-    assert current(client, other) is None
+    assert response.status_code == 200
+    action = assert_projection(response.json())
+    assert action is None or action["type"] != "context_question"
+    assert current(client, other) == action
     assert submit(client, other, answer_payload(pending, "all_network")).status_code == 409
 
 

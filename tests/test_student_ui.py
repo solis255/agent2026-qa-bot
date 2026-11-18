@@ -12,6 +12,8 @@ CASES = [
     "ST-ESCALATION", "ST-HISTORY-RETURN", "ST-HISTORY-GUARDS", "ST-HISTORY-PAGING",
     "ST-HISTORY-SWITCH", "ST-HISTORY-RACE", "ST-DEMO", "ST-RESET", "ST-STYLE",
     *(f"ST-14A-{number:02}" for number in range(1, 11)),
+    *(f"ST-14B-{number:02}" for number in range(1, 16)),
+    "ST-14B-E2E",
 ]
 
 

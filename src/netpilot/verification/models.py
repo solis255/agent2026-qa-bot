@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import ConfigDict, Field, field_validator
+from netpilot.chat_actions.submissions import PlanActionSubmission
 from netpilot.remediation.models import StrictModel, StepFeedback, utcnow
 from netpilot.diagnostic_target import TargetSubject
 
@@ -76,7 +77,7 @@ class VerificationCycle(StrictModel):
     completed_at: datetime | None = None
 
 
-class VerificationRequest(StrictModel):
+class VerificationRequest(StrictModel, PlanActionSubmission):
     session_id: UUID
     reverify: bool = Field(default=False, strict=True)
 

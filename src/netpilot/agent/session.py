@@ -341,6 +341,9 @@ class SessionStore:
             original = _task_state(state)
             draft = self.task_state(session_id,owner_user_id)
             events = []
+            if feedback is not None:
+                from netpilot.chat_actions.validation import validate_chat_action_submission
+                validate_chat_action_submission(draft, feedback, "remediation_step", step_id=step_id)
             if generate:
                 _,events = ensure_plan(draft,max_steps=max_steps,trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps)
             if feedback is not None:
@@ -355,7 +358,8 @@ class SessionStore:
                 state.updated_at = datetime.now(timezone.utc)
             return safe_value(draft).model_copy(deep=True),safe_value(events)
 
-    def verification(self, session_id, owner_user_id, *, action="get", cycle_id=None, observation=None, reverify=False, registry=None, persist=None):
+    def verification(self, session_id, owner_user_id, *, action="get", cycle_id=None, observation=None,
+                     reverify=False, registry=None, persist=None, submission=None):
         """Owner-scoped draft -> persistence -> memory commit; no fake chat Turn."""
         from netpilot.verification.service import ensure_baseline, activate, host_refresh, mock_refresh, invalidate_cycles, emit
         from netpilot.verification.evaluator import VerificationEvaluator
@@ -367,6 +371,9 @@ class SessionStore:
             invalidate_cycles(draft)
             events = []
             cycle = draft.verification_cycles[-1] if draft.verification_cycles else None
+            if action == "start":
+                from netpilot.chat_actions.validation import validate_chat_action_submission
+                validate_chat_action_submission(draft, submission, "verification", verification_id=cycle_id)
             if action == "create":
                 cycle,events = ensure_baseline(draft,reverify=reverify,max_cycles=self.verification_max_cycles)
             if cycle_id is not None and (cycle is None or cycle.verification_id != cycle_id): raise KeyError("cycle_not_current")
@@ -532,7 +539,7 @@ class SessionStore:
         return sync(task,threshold=self.resolution_escalate_after_no_improvement,transition_limit=self.resolution_max_transitions,
             trace_enabled=self.reasoning_trace_enabled,trace_limit=self.reasoning_trace_max_steps,**kwargs)
 
-    def resolution_action(self, session_id, owner_user_id, *, action="get", confirmation=None, persist=None):
+    def resolution_action(self, session_id, owner_user_id, *, action="get", confirmation=None, persist=None, submission=None):
         """Owner-scoped explicit user input; state is always computed server-side."""
         with self._lock:
             state=self._require(session_id,owner_user_id)
@@ -540,6 +547,9 @@ class SessionStore:
             original=_task_state(state)
             draft=self.task_state(session_id,owner_user_id)
             events=[]
+            if action == "confirm":
+                from netpilot.chat_actions.validation import validate_chat_action_submission
+                validate_chat_action_submission(draft, submission, "resolution_confirmation")
             if action != "get":
                 events=self._resolution_update(draft,source="confirm" if action == "confirm" else "support",
                     confirmation=confirmation,request_support=action == "support")

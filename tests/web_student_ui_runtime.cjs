@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {setup} = require('./web_markdown_runtime.cjs');
+const {workflow, install, chatButton, idle} = require('./web_workflow_helpers.cjs');
 const tick = () => new Promise(setImmediate);
 const reply = body => ({ok:true,status:200,json:async()=>body});
 const event = {preventDefault(){}};
@@ -25,6 +26,183 @@ function complete(response) {
   })}};
 }
 const cases = {
+ 'ST-14B-01':async w=>{
+   install(w,workflow().base);
+   const card=w.document.querySelector('#conversation .chat-remediation-card');
+   assert.match(card.textContent,/修复进度 0 \/ 2/);
+   assert.match(card.textContent,/保存当前工作.*低风险|低风险.*保存当前工作/s);
+   assert.match(card.textContent,/回滚.*停止条件/s);
+   const details=card.querySelectorAll('details');
+   assert.equal(details[0].open,true);assert.equal(details[1].open,false);
+   assert.equal(details[0].querySelectorAll('button').length,3);assert.equal(details[1].querySelector('button'),null);
+ },
+ 'ST-14B-02':async w=>{
+   const f=workflow();install(w,f.base);let request;
+   w.fetch=async(url,options)=>{request=[url,options.method,JSON.parse(options.body)];return reply(f.started);};
+   chatButton(w,'我已完成').click();await idle(w);
+   assert.deepEqual(request,['/api/session/remediation-plan/steps/step-1','PATCH',{
+     session_id:f.sid,action_id:f.stepAction.action_id,task_version:1,target_subject:'netpilot_host',target_version:1,
+     plan_id:'plan-1',plan_version:1,action:'complete',outcome:'unknown',user_note:null,
+   }]);
+   assert.equal(w.eval('state.remediationPlan.steps[0].status'),'completed');
+   assert.equal(w.eval('state.nextChatAction.type'),'verification');
+   assert.match(w.document.querySelector('#conversation').textContent,/已记录你完成.*验证修复效果/s);
+ },
+ 'ST-14B-03':async w=>{
+   for(const [label,choice] of [['暂时跳过','skip'],['遇到问题','fail']]){
+     const f=workflow();install(w,f.base);let body;
+     w.document.querySelector('#conversation select').value='improved';
+     w.document.querySelector('#conversation textarea').value='说明';
+     w.fetch=async(url,options)=>{body=JSON.parse(options.body);return reply({...f.base,next_chat_action:null});};
+     chatButton(w,label).click();await idle(w);
+     assert.equal(body.action,choice);assert.equal(body.outcome,'unknown');assert.equal(body.user_note,'说明');
+     assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);
+   }
+ },
+ 'ST-14B-04':async w=>{
+   const f=workflow();
+   for(const [status,label] of Object.entries({
+     awaiting_after_evidence:'等待修复后检查结果',verifying:'正在对比修复前后的网络状态',completed:'验证已完成',
+     inconclusive:'暂时无法确认修复效果',failed:'本次验证未能完成',
+   })){
+     const source=['completed','inconclusive'].includes(status)?f.compared:f.started;
+     install(w,{...source,verification_cycles:[{...source.verification_cycles[0],status}],next_chat_action:null});
+     const card=w.document.querySelector('#conversation .chat-verification-card');
+     assert.ok(card.textContent.includes(label));assert.doesNotMatch(card.textContent,new RegExp(status));
+     if(status==='completed')assert.match(card.querySelector('table').textContent,/DNS 解析.*异常.*正常.*有改善/s);
+   }
+ },
+ 'ST-14B-05':async w=>{
+   const f=workflow();install(w,f.started);let release;const sent=[];
+   w.fetch=(url,options)=>{sent.push([url,JSON.parse(options.body)]);return new Promise(resolve=>{release=()=>resolve(reply(f.compared));});};
+   const start=chatButton(w,'开始验证');start.click();start.click();await tick();
+   assert.deepEqual(sent,[['/api/session/verification/verification-1/start',{
+     session_id:f.sid,action_id:f.verificationAction.action_id,task_version:2,target_subject:'netpilot_host',target_version:1,
+     plan_id:'plan-1',plan_version:1,
+   }]]);
+   release();await idle(w);assert.equal(start.disabled,true);assert.equal(w.eval('state.detailsOpen'),false);
+ },
+ 'ST-14B-06':async w=>{
+   const f=workflow();
+   for(const {value,label} of f.confirmAction.choices){
+     install(w,f.compared);const sent=[];
+     w.fetch=async(url,options)=>{sent.push([url,JSON.parse(options.body)]);return reply(f.resolved);};
+     chatButton(w,label).click();await idle(w);
+     assert.deepEqual(sent,[['/api/session/resolution/confirm',{
+       session_id:f.sid,action_id:f.confirmAction.action_id,task_version:2,target_subject:'netpilot_host',target_version:1,
+       status:value,verification_id:'verification-1',resolution_state_version:3,
+     }]]);
+     assert.equal(w.eval('state.nextChatAction'),null);
+   }
+ },
+ 'ST-14B-07':async w=>{
+   const f=workflow();install(w,f.base);
+   for(const [label,result] of [['我已完成',f.started],['开始验证',f.compared],['已经恢复正常',f.resolved]]){
+     w.fetch=async()=>reply(result);
+     chatButton(w,label).click();await idle(w);
+     assert.equal(w.eval('state.detailsOpen'),false);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);
+   }
+ },
+ 'ST-14B-08':async w=>{
+   const f=workflow();install(w,f.started);
+   assert.equal(w.document.querySelector('#remediation-plan button,#remediation-plan textarea,#verification-content button,#verification-content select,#resolution-content select'),null);
+   assert.match(w.document.querySelector('#verification-content').textContent,/before-dns/);
+   assert.ok([...w.document.querySelectorAll('#resolution-content button')].some(item=>item.textContent==='请求人工支持'));
+ },
+ 'ST-14B-09':async w=>{
+   const sid='11111111-1111-4111-8111-111111111111';
+   const f=workflow({sid});w.history.replaceState(null,'',`#session=${sid}`);
+   const fetches=[];
+   w.fetch=async (url,options)=>{fetches.push([url,options?.method]);return reply(url.includes('/environment/browser')?f.started.environment_profile:f.started);};
+   await w.createSession({restore:true,announce:false});
+   const restored=chatButton(w,'开始验证');
+   w.applyNextChatAction(f.started);
+   assert.equal(restored,chatButton(w,'开始验证'));
+   assert.equal(fetches.filter(([url])=>url===`/api/session/${sid}`).length,1);
+   assert.ok(fetches.every(([,method])=>method !== 'POST'));
+ },
+ 'ST-14B-10':async w=>{
+   const f=workflow();install(w,f.started);const stale=chatButton(w,'开始验证');let writes=0;
+   w.fetch=async (_url,options)=>{if(options?.method)writes++;return reply({...record,...f.compared,session_id:'old-session'});};
+   await w.loadDiagnosisRecord('old');
+   stale.dispatchEvent(new w.MouseEvent('click'));
+   await w.submitWorkflowAction(f.verificationAction);
+   assert.equal(stale.disabled,true);assert.equal(writes,0);
+   assert.equal(w.document.querySelector('#conversation button,#verification-content button,#resolution-content select'),null);
+ },
+ 'ST-14B-11':async w=>{
+   const f=workflow();install(w,f.base);const first=chatButton(w,'我已完成');
+   for(let i=0;i<3;i++)w.applyNextChatAction({...f.base,next_chat_action:{...f.stepAction}});
+   assert.equal(first,chatButton(w,'我已完成'));
+   assert.equal(w.document.querySelectorAll('#conversation [data-action-id="action-step-1"]').length,1);
+ },
+ 'ST-14B-12':async w=>{
+   const f=workflow();install(w,f.base);const old=chatButton(w,'我已完成');const calls=[];
+   w.fetch=async(url,options)=>{
+     calls.push([url,options?.method]);
+     return options.method==='PATCH'?{ok:false,status:409,json:async()=>({detail:'internal'})}:reply(f.started);
+   };
+   old.click();await idle(w);old.dispatchEvent(new w.MouseEvent('click'));
+   assert.deepEqual(calls,[['/api/session/remediation-plan/steps/step-1','PATCH'],['/api/session/current-session',undefined]]);
+   assert.equal(old.disabled,true);assert.equal(old.isConnected,false);
+   assert.ok(chatButton(w,'开始验证'));assert.match(w.document.querySelector('#conversation').textContent,/这一步已经更新/);
+   w.applySessionState({...f.started,task_version:3});
+   assert.equal(w.document.querySelector('#conversation [data-action-id]'),null);
+ },
+ 'ST-14B-13':async w=>{
+   const f=workflow(),bad='<img src=x onerror=evil()>';
+   const plan={...f.base.remediation_plan,steps:[
+     {...f.base.remediation_plan.steps[0],title:bad,rationale:bad,instructions:[bad]},
+     {...f.base.remediation_plan.steps[1],status:'completed',user_note:bad},
+   ]};
+   install(w,{...f.base,remediation_plan:plan});
+   assert.match(w.document.querySelector('#conversation').textContent,/<img src=x/);
+   assert.equal(w.document.querySelector('#conversation img'),null);
+   install(w,{...f.compared,verification_cycles:[{...f.compared.verification_cycles[0],result_summary:bad}]});
+   assert.match(w.document.querySelector('#conversation .chat-verification-card').textContent,/<img src=x/);
+   assert.equal(w.document.querySelector('#conversation img'),null);
+ },
+ 'ST-14B-14':async w=>{
+   prepare(w);w.fetch=async()=>reply({});
+   w.renderNextChatAction(canonicalCheck);chatButton(w,'开始网络检查').click();
+   assert.equal(w.eval('state.clientCheck.mode'),'initial');
+   const f=workflow({subject:'user_client'});
+   install(w,{...f.started,next_chat_action:{...canonicalCheck,task_version:2,action_id:'recheck',mode:'recheck'}});
+   assert.match(w.document.querySelector('#conversation .chat-verification-card').textContent,/这台电脑上重新检查/);
+   assert.equal(w.document.querySelectorAll('#conversation .client-check-actions').length,1);
+   chatButton(w,'重新检查').click();assert.equal(w.eval('state.clientCheck.mode'),'recheck');
+ },
+ 'ST-14B-15':async w=>{
+   const css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
+   const rules=w.document.createElement('style');rules.textContent=css;w.document.head.append(rules);
+   install(w,workflow().compared);
+   const card=w.document.querySelector('#conversation .chat-verification-card');
+   assert.equal(w.getComputedStyle(card).minWidth,'0px');
+   assert.match(css,/max-width: min\(760px, 100%\)/);
+   assert.equal(w.getComputedStyle(card.querySelector('.verification-table-scroll')).overflowX,'auto');
+   assert.equal(chatButton(w,'已经恢复正常').disabled,false);
+ },
+ 'ST-14B-E2E':async w=>{
+   const f=workflow();install(w,{...f.base,remediation_plan:null,verification_cycles:[],next_chat_action:null});
+   const calls=[];
+   w.fetch=async(url,options)=>{
+     if (options?.body) calls.push([url,JSON.parse(options.body)]);
+     if(url==='/api/chat/stream')return complete({...f.base,answer:'当前发现 DNS 解析异常。',tool_calls:[],sources:[]});
+     if(url.endsWith('/steps/step-1'))return reply(f.started);
+     if(url.endsWith('/verification-1/start'))return reply(f.compared);
+     if(url==='/api/session/resolution/confirm')return reply(f.resolved);
+     return reply({items:[]});
+   };
+   await w.submitChat(event,{message:'我的微信能用，但是网页打不开，帮我检查一下。'});
+   assert.match(w.document.querySelector('#conversation .chat-remediation-card').textContent,/重新连接当前网络/);
+   chatButton(w,'我已完成').click();await idle(w);
+   chatButton(w,'开始验证').click();await idle(w);
+   assert.match(w.document.querySelector('#conversation .verification-table').textContent,/异常.*正常.*有改善/s);
+   chatButton(w,'已经恢复正常').click();await idle(w);
+   assert.match(w.document.querySelector('#conversation .chat-workflow-status').textContent,/已解决.*关键指标恢复/s);
+   assert.equal(calls.length,4);assert.equal(calls[3][1].status,'resolved');
+   assert.equal(w.eval('state.detailsOpen'),false);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);
+ },
  'ST-14A-01':async w=>{
    prepare(w);w.applyNextChatAction({next_chat_action:canonicalQuestion,ui_action:action});
    assert.equal(w.eval('state.nextChatAction.action_id'),'question-id');
@@ -71,7 +249,7 @@ const cases = {
  'ST-14A-06':async w=>{
    prepare(w);w.renderNextChatAction(canonicalQuestion);
    const prior=w.document.querySelector('.context-choice');
-   w.applyClientCheckPayload({task_version:2,diagnostic_target:target});w.setBusy(false);
+   w.applySessionState({task_version:2,diagnostic_target:target});w.setBusy(false);
    assert.equal(w.eval('state.nextChatAction'),null);assert.equal(prior.disabled,true);
    let calls=0;w.fetch=async()=>{calls++;};
    prior.dispatchEvent(new w.MouseEvent('click'));await tick();assert.equal(calls,0);
@@ -180,8 +358,8 @@ const cases = {
  'ST-CHECK':async w=>{prepare(w);render(w,w.appendMessage('assistant','需要检查'),action);w.setBusy(false);assert.ok(w.document.querySelector('.client-check-actions').closest('#conversation'));button(w,'开始网络检查').click();assert.equal(w.document.querySelector('#client-check-dialog').open,true);assert.equal(w.eval('state.clientCheck.mode'),'initial');},
  'ST-RECHECK':async w=>{prepare(w);put(w,`state.verificationCycles=[{target_subject:'user_client',target_version:1,status:'awaiting_after_evidence'}]`);render(w,null,{...action,mode:'recheck'});w.setBusy(false);button(w,'重新检查').click();assert.equal(w.eval('state.clientCheck.mode'),'recheck');assert.match(w.document.querySelector('#client-check-title').textContent,/重新检查/);},
  'ST-STALE-ACTION':async w=>{prepare(w);render(w,null,{...action,target_version:2});w.setBusy(false);assert.equal(button(w,'开始网络检查'),undefined);assert.equal(button(w,'重新检查'),undefined);},
- 'ST-PLAN':async w=>{prepare(w);put(w,`state.remediationPlan=${JSON.stringify(plan)}`);w.renderRemediationPlan(plan);w.setBusy(false);assert.match(w.document.querySelector('#case-next-action').textContent,/1 步修复建议/);button(w,'查看修复步骤').click();assert.equal(w.document.querySelector('#remediation-section').open,true);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,true);put(w,"state.remediationPlan.status='superseded'");w.setBusy(false);assert.equal(button(w,'查看修复步骤'),undefined);},
- 'ST-VERIFICATION':async w=>{prepare(w);put(w,`state.verificationCycles=[{target_subject:'user_client',target_version:1,status:'completed',result:'improved'}]`);w.setBusy(false);assert.match(w.document.querySelector('#case-next-action').textContent,/修复后状态：有改善/);button(w,'查看对比').click();assert.equal(w.document.querySelector('#verification-section').open,true);assert.equal(button(w,'重新检查'),undefined);},
+ 'ST-PLAN':async w=>{const f=workflow();install(w,f.base);button(w,'定位当前步骤').click();assert.equal(w.document.activeElement.textContent,'我已完成');assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);w.applySessionState({remediation_plan:{...f.base.remediation_plan,status:'superseded'}});w.setBusy(false);assert.equal(button(w,'定位当前步骤'),undefined);},
+ 'ST-VERIFICATION':async w=>{const f=workflow();install(w,{...f.compared,next_chat_action:null});assert.match(w.document.querySelector('#case-next-action').textContent,/验证已完成/);assert.match(w.document.querySelector('#conversation .verification-table').textContent,/异常.*正常/s);assert.equal(button(w,'查看对比'),undefined);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,false);},
  'ST-RESOLUTION':async w=>{prepare(w);for(const [status,label] of Object.entries({diagnosing:'诊断中',resolved:'已解决',unresolved:'仍未解决',escalated:'建议报修'})){put(w,`state.resolution={state:'${status}'}`);w.renderResolution(w.eval('state.resolution'));w.setBusy(false);assert.equal(w.document.querySelector('#resolution-badge').textContent,label);}assert.ok(button(w,'生成报修材料'));},
  'ST-ESCALATION':async w=>{prepare(w);put(w,"state.resolution={state:'escalated',escalation_recommended:true}");w.setBusy(false);let calls=0;w.fetch=async(u,o)=>{assert.equal(u,'/api/session/escalation-package');assert.deepEqual(JSON.parse(o.body),{session_id:'current-session'});calls++;return reply({packages:[]});};button(w,'生成报修材料').click();await tick();assert.equal(calls,1);assert.equal(w.document.querySelector('#diagnostic-details-dialog').open,true);},
  'ST-HISTORY-RETURN':async w=>{
@@ -199,7 +377,7 @@ const cases = {
  },
  'ST-HISTORY-GUARDS':async w=>{
    prepare(w);w.fetch=async()=>reply(record);await w.loadDiagnosisRecord('old');let calls=0;w.fetch=async()=>{calls++;throw Error('must not mutate');};
-   w.document.querySelector('#message-input').value='不能发送';await w.submitChat(event);await w.saveEnvironment(event);await w.saveDiagnosticTarget(event);await w.uploadClientSnapshot(event);await w.generateRemediationPlan();await w.verificationRequest('',{});await w.generateEscalation();await w.demoOperation('/api/demo/session',{});await w.createCustomScenario(event);await w.switchScenario();
+   w.document.querySelector('#message-input').value='不能发送';await w.submitChat(event);await w.saveEnvironment(event);await w.saveDiagnosticTarget(event);await w.uploadClientSnapshot(event);await w.generateRemediationPlan();await w.workflowRequest('/api/session/verification','POST',{});await w.generateEscalation();await w.demoOperation('/api/demo/session',{});await w.createCustomScenario(event);await w.switchScenario();
    assert.equal(calls,0);for(const id of ['environment-save','target-save','snapshot-upload','remediation-generate','escalation-generate','send-button','demo-create'])assert.equal(w.document.getElementById(id).disabled,true,id);
  },
  'ST-HISTORY-PAGING':async w=>{put(w,'state.health.history_ready=true');let calls=[];w.fetch=async u=>{calls.push(u);return reply({items:[],next_cursor:u.includes('cursor=')?null:'page2'});};await w.openHistoryView();assert.equal(w.document.querySelector('#history-dialog').open,true);w.document.querySelector('#history-next').click();await tick();assert.equal(w.document.querySelector('#history-page-label').textContent,'第 2 页');w.document.querySelector('#history-previous').click();await tick();assert.equal(calls.length,2);assert.equal(w.document.querySelector('#history-page-label').textContent,'第 1 页');w.closeHistoryDialog();assert.equal(w.document.querySelector('#history-dialog').open,false);},

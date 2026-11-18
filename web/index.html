@@ -6,7 +6,7 @@
     <meta name="description" content="TJU NetPilot 校园网络智能诊断与服务 Agent">
     <title>TJU NetPilot</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=knowledge-sources">
+    <link rel="stylesheet" href="/style.css?v=14b">
   </head>
   <body>
     <header class="topbar">
@@ -238,7 +238,10 @@
               <span id="remediation-count" class="timeline-count">0 步</span>
             </summary>
             <p class="environment-note">仅为用户手动计划，不会自动修复。完成后可另行验证，计划完成不等于网络故障已解决。</p>
-            <button id="remediation-generate" type="button" disabled="">生成 / 更新低风险计划</button>
+            <details class="advanced-editor">
+              <summary>高级计划操作</summary>
+              <button id="remediation-generate" type="button" disabled="">生成 / 更新低风险计划</button>
+            </details>
             <p id="remediation-status" class="environment-note" role="status" aria-live="polite">尚未生成修复计划</p>
             <div id="remediation-plan"></div>
           </details>
@@ -568,8 +571,9 @@
       </div>
       <button id="client-check-skip" type="button">暂时不用</button>
     </dialog>
-    <script src="/client-check.js?v=14a" defer=""></script>
-    <script src="/student-ui.js?v=14a" defer=""></script>
-    <script src="/app.js?v=14a" defer=""></script>
+    <script src="/client-check.js?v=14b" defer=""></script>
+    <script src="/student-ui.js?v=14b" defer=""></script>
+    <script src="/chat-workflow.js?v=14b" defer=""></script>
+    <script src="/app.js?v=14b" defer=""></script>
   </body>
 </html>

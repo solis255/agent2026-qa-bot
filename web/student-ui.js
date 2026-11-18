@@ -59,23 +59,28 @@ function renderCaseStatus() {
     }
     container.append(row);
   };
-  const check = state.nextChatAction;
-  if (check?.type === "context_question" && isCurrentChatAction(check) && state.chatActionGroup?.isConnected) add("需要补充一个信息", "查看问题", () => {
-    state.chatActionGroup?.scrollIntoView?.({block:"nearest"});state.chatActionGroup?.querySelector("button:not(:disabled)")?.focus();
-  });
-  if (clientCheckActionCurrent(check)) add(check.mode === "recheck" ? "等待重新检查" : "需要进行网络检查", check.mode === "recheck" ? "重新检查" : "开始网络检查", openClientCheck);
-  const plan = state.remediationPlan;
-  const inScope = item => item && item.target_subject === state.diagnosticTarget?.subject && item.target_version === state.diagnosticTarget?.target_version;
-  if (inScope(plan) && !["superseded","cancelled"].includes(plan.status) && plan.steps?.length)
-    add(`已生成 ${plan.steps.length} 步修复建议`, "查看修复步骤", () => openDiagnosticDetails("remediation-section"));
-  const cycle = state.verificationCycles.at(-1);
-  if (inScope(cycle)) {
-    if (cycle.status === "awaiting_after_evidence" && !clientCheckActionCurrent(check))
-      add(state.isDemo ? "等待演示的修复后检查结果" : "等待修复后检查结果", "查看验证进度", () => openDiagnosticDetails("verification-section"));
-    else if (cycle.status === "baseline_ready") add("完成修复步骤后可以验证", "查看验证", () => openDiagnosticDetails("verification-section"));
-    else if (["completed","inconclusive","failed"].includes(cycle.status)) add(`修复后状态：${VERIFICATION_RESULT[cycle.result] || "暂时无法确认"}`, "查看对比", () => openDiagnosticDetails("verification-section"));
+  const action = state.nextChatAction;
+  const focusAction = () => {
+    if (state.nextChatAction !== action || !isCurrentChatAction(action)) return;
+    state.chatActionGroup?.scrollIntoView?.({block:"nearest"});
+    state.chatActionGroup?.querySelector("button:not(:disabled)")?.focus();
+  };
+  if (clientCheckActionCurrent(action)) {
+    add(action.mode === "recheck" ? "等待重新检查" : "需要进行网络检查",
+      action.mode === "recheck" ? "重新检查" : "开始网络检查", openClientCheck);
+  } else if (isCurrentChatAction(action) && state.chatActionGroup?.isConnected) {
+    const prompts = {
+      context_question:["需要补充一个信息", "查看问题"],
+      remediation_step:["有一条修复建议待处理", "定位当前步骤"],
+      verification:["可以验证修复效果", "定位验证操作"],
+      resolution_confirmation:["请确认原始症状", "定位确认问题"],
+    };
+    if (prompts[action.type]) add(...prompts[action.type], focusAction);
+  } else {
+    const cycle = currentWorkflowCycle();
+    if (cycle) add(VERIFICATION_STATUS[cycle.status]);
   }
-  if (state.resolution?.state === "resolved") add("问题已解决", "查看处理过程", () => openDiagnosticDetails("workflow-details"));
+  if (state.resolution?.state === "resolved") add("问题已解决");
   if (state.resolution?.state === "escalated" || state.resolution?.escalation_recommended)
     add("这个问题建议交给网络运维人员进一步处理。", "生成报修材料", async () => {openDiagnosticDetails("escalation-section");await generateEscalation();});
   container.hidden = container.childElementCount === 0;

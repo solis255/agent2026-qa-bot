@@ -32,7 +32,11 @@ class Element {
     }
     return found;
   }
-  querySelector(selector) { return this.querySelectorAll(selector)[0] || { textContent: "" }; }
+  querySelector(selector) {
+    // Environment controls are virtual in this auth-only DOM.
+    if (this.id === "environment-form" && selector.startsWith("[name=")) return get(selector);
+    return this.querySelectorAll(selector)[0] || null;
+  }
   reportValidity() { return true; }
   reset() {
     const ids = this.id === "auth-form"
@@ -136,6 +140,7 @@ const context = vm.createContext({
 const source = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
 vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","client-check.js"),"utf8"),context,{filename:"web/client-check.js"});
 vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","student-ui.js"),"utf8"),context,{filename:"web/student-ui.js"});
+vm.runInContext(fs.readFileSync(path.join(__dirname,"..","web","chat-workflow.js"),"utf8"),context,{filename:"web/chat-workflow.js"});
 vm.runInContext(source, context, { filename: "web/app.js" });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const submit = (id) => get(id).handlers.submit({ preventDefault() {} });

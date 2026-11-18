@@ -21,7 +21,7 @@ async function setup() {
   w.fetch = async () => ({ ok: false, status: 401, json: async () => ({ detail: "请登录" }) });
   w.HTMLDialogElement.prototype.showModal = function() {this.open=true;};
   w.HTMLDialogElement.prototype.close = function() {this.open=false;this.dispatchEvent(new w.Event("close"));};
-  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "client-check.js", "student-ui.js", "app.js"]) {
+  for (const file of ["vendor/marked.umd.js", "vendor/purify.min.js", "markdown.js", "client-check.js", "student-ui.js", "chat-workflow.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(web, file), "utf8"), dom.getInternalVMContext(), { filename: file });
   }
   await tick();

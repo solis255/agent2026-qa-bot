@@ -175,12 +175,24 @@ flowchart LR
 
 **SSE 时序。** `POST /api/chat/stream` 先完成认证与会话预检，返回 `text/event-stream` 后发送 `start`，后台任务运行一次与同步接口等价的对话。等待期间可发送 `: keep-alive`，得到完整回答后按字符分片发送 `delta`，最后发送 `complete` 内的完整 `response`。已开始传输的执行异常使用 `error`。事件数据为带 `schema_version=1` 的 JSON。模型请求使用 `stream=false`，分片发生在 NetPilot 的传输层。浏览器断开时后台仍负责结束轮次并释放会话占用。
 
-**统一聊天动作（14A）。** `ChatResponse`（包括 SSE 的 `complete.response`）和 `SessionResponse` 使用同一个工厂，由当前服务端任务状态生成 `next_chat_action`。它是单个对象或 `null`。公共字段为 `schema_version: 1`、`action_id`、`session_id`、`task_version`、`target_subject` 和 `target_version`。Pydantic 按 `type` 校验，只支持 `context_question` 与 `client_check`。动作不携带命令、URL、凭据或快照原文。
+**统一聊天动作。** `ChatResponse`（包括 SSE 的 `complete.response`）和 `SessionResponse` 使用同一个工厂，由当前服务端任务状态生成 `next_chat_action`。它是单个对象或 `null`。公共字段为 `schema_version: 1`、`action_id`、`session_id`、`task_version`、`target_subject` 和 `target_version`。Pydantic 按 `type` 校验。生成优先级依次为 `context_question`、`client_check`、`verification`、`resolution_confirmation` 和 `remediation_step`。动作不携带命令、URL、凭据或快照原文。
 
 - 有实际发出且仍需回答的环境问题时优先返回 `context_question`。会话刷新只有在问题、准备度、缺失字段和版本仍匹配时才恢复原卡片。问题和选项使用固定模板。动作 ID 使用会话 UUID 作为 UUID5 命名空间，名称为 `context_question:{task_version}:{target_subject}:{target_version}:{field}`。
 - `client_check` 复用原有 Windows 流程，初次检查依据诊断准备度，复核依据当前验证周期。其 UUID5 名称继续使用 `client_check:{task_version}:{target_version}:{mode}`。任务版本隔离不同诊断阶段和环境，对象版本隔离诊断对象。上传、拒绝和续接继续分别校验会话归属、当前动作与版本或快照和回执。
 - 选项回答提交 `field`、`value`、`action_id`、`task_version` 和 `target_version`。服务端在标记会话繁忙前持锁核对归属、当前待答问题和选项。过期返回 HTTP 409，并保持会话状态。旧客户端可以同时省略三个动作元数据字段，但仍只能回答当前待答字段。只提交部分元数据会被拒绝。
-- `ui_action` 已弃用，仍从同一个动作投影成旧结构。前端仅在响应没有 `next_chat_action` 键时回退；显式 `null` 会撤下操作。浏览器按 ID 去重，并在展示和点击时核对会话与版本。历史诊断仅加载只读内容，返回当前会话时可重新确认其动作。
+- `ui_action` 已弃用，仍为上下文问题和客户端检查投影旧结构。三个 14B 动作的 `ui_action` 为 `null`。前端仅在响应没有 `next_chat_action` 键时回退，显式 `null` 会撤下操作。浏览器按 ID 去重，并在展示和点击时核对会话与版本。历史诊断仅加载只读内容，返回当前会话时可重新确认其动作。
+
+14B 将修复建议、复核和原始症状确认放在聊天中，验证结果使用当前轮次的 Before / After 指标。诊断详情保留完整计划、风险及回滚说明、证据引用、验证历史和处理状态。原有人工支持和报修材料仍可从诊断详情使用。
+
+| 新动作 | 专属字段 | 生成条件 |
+| --- | --- | --- |
+| `remediation_step` | `plan_id`、`plan_version`、`step_id`、`step_order`、`allowed_actions` | 从当前计划的 `safe_pending()` 取第一步。活动验证阻止下一步，即使当前无可执行验证入口。已解决、已升级或客观结果变差时停止发出修复步骤。 |
+| `verification` | `mode: start`、`verification_id`、`verification_sequence`、`plan_id`、`plan_version` | 当前有效轮次等待 After 证据，且目标能力允许服务主机或 Mock 执行原有只读验证。远程 Windows 沿用 `client_check` 的复核向导；Demo 的 After 数据仍从演示控制区加载。 |
+| `resolution_confirmation` | `verification_id`、`resolution_state_version`、固定问题和四个固定选项 | 当前轮已有 After 对比，尚未收到本轮主观反馈，且案例未解决或升级。选择“不确定”也写入 `user_observation`，本轮不会重复询问。最后状态仍由 ResolutionEvaluator 结合证据和反馈计算。 |
+
+三个动作均用会话 UUID 作为 UUID5 的命名空间。名称包含动作类型、任务版本、对象及对象版本，再按类型加上计划 ID、计划版本与步骤 ID，或验证 ID、计划 ID与计划版本，或验证 ID 与处理状态版本。
+
+聊天卡片通过原有步骤反馈、验证启动和症状确认 API 提交动作范围。服务端在会话锁内重新生成当前动作，核对类型、ID、范围和相关资源版本，再执行业务更新。部分元数据返回 422，过期或重复提交返回 409。旧客户端仍可省略整组动作元数据。浏览器收到 409 后撤下旧卡片并重新获取会话。Resolution 的读写接口均返回完整会话状态和 `next_chat_action`，卡片点击不会创建 Agent 对话轮次。
 
 ## 7. 状态、持久化和安全
 

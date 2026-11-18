@@ -31,6 +31,7 @@ TJU API 基础与结构化解析
 | NetPilot 自定义 Mock 测试场景 | `src/netpilot/tools/custom_scenarios.py`、`src/netpilot/tools/mock_network.py` | `src/netpilot/api/routes.py`、`web/app.js`、`tests/test_custom_scenarios.py` |
 | NetPilot SSE 流式聊天协议 | `src/netpilot/api/sse.py`、`src/netpilot/api/routes.py` | `web/app.js`、`tests/test_chat_stream.py`、`tests/test_sessions.py` |
 | NetPilot 统一聊天动作、刷新恢复和过期提交 | `src/netpilot/chat_actions/`、`src/netpilot/api/presenters.py` | `src/netpilot/agent/session.py`、`web/app.js`、`web/client-check.js`、`tests/test_chat_action_contract.py`、`tests/web_student_ui_runtime.cjs` |
+| 聊天内修复、复核与症状确认 | `web/chat-workflow.js`、`src/netpilot/chat_actions/factory.py` | `src/netpilot/chat_actions/submissions.py`、`validation.py`、`src/netpilot/api/resolution_routes.py`、`tests/test_chat_workflow_actions.py` |
 | NetPilot 中文 Web 页面 | `web/index.html`、`web/app.js`、`web/style.css` | `src/netpilot/main.py` 的静态目录挂载、API schema |
 | NetPilot Tool contract、参数或结果 | `src/netpilot/tools/schemas.py`、`validation.py` | Provider、Service、三组 Tool 测试、README |
 | NetPilot Mock 故障场景 | `src/netpilot/tools/mock_network.py` | `src/netpilot/config.py` 的 `MockScenario`、`tests/test_mock_scenarios.py` |
@@ -70,6 +71,8 @@ TJU API 基础与结构化解析
 `create_app()` 不发起外部请求，允许未配置 API Key 时启动。TJU SDK transport 只在存在 Key 时创建，并在应用 lifespan 结束时关闭；真正的网络请求只由 `TJUClient.chat()` 发起。Web 通过同源 `/api/session`、`/api/chat`、`/api/health` 和 Mock 场景接口完成演示；SessionStore 隔离并裁剪每个会话的纯文本历史。健康状态和所有响应均不公开凭据。
 
 14A 的动作路径：`AgentOrchestrator` 提供固定上下文问题和诊断准备度，`SessionStore.finish_turn` 提交状态，`chat_actions/factory.py` 选择唯一有效动作。Presenter 同时派生规范 `next_chat_action` 与旧 `ui_action`；同步聊天、SSE `complete.response` 和会话读取共享工厂。问题使用会话 UUID 加任务、对象和字段生成 UUID5；检查沿用 13C 的初查与复核 ID。选项提交由 `chat_actions/validation.py` 在 `begin_turn` 的会话锁内验证，客户端检查沿用快照与续接回执边界。历史查询不返回可执行动作。
+
+14B 扩展同一工厂处理修复步骤、服务主机或 Mock 复核、症状确认。`web/chat-workflow.js` 使用计划、验证轮次和处理状态绘制聊天卡片，`web/app.js` 统一同步会话状态并在冲突时重新读取。步骤、验证和确认路由继续调用各自的服务，版本校验位于 `SessionStore` 锁内。Drawer 渲染函数保留完整技术记录。
 
 ### 3.2 NetPilot Tool 调用链
 

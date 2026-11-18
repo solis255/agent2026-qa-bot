@@ -86,9 +86,9 @@ def test_web_javascript_uses_same_origin_api_and_safe_dom_rendering() -> None:
     assert "armInactivityTimeout" in javascript
     assert "流式连接长时间未收到数据" in javascript
     assert "timeoutMs = 180000" not in javascript
-    for script in ("client-check", "student-ui", "app"):
-        assert f'src="/{script}.js?v=14a"' in html
-    assert html.index('/client-check.js?') < html.index('/student-ui.js?') < html.index('/app.js?')
+    for script in ("client-check", "student-ui", "chat-workflow", "app"):
+        assert f'src="/{script}.js?v=14b"' in html
+    assert html.index('/client-check.js?') < html.index('/student-ui.js?') < html.index('/chat-workflow.js?') < html.index('/app.js?')
     assert html.index('/vendor/marked.umd.js') < html.index('/markdown.js?') < html.index('/app.js?')
     assert html.index('/vendor/purify.min.js') < html.index('/markdown.js?')
     assert 'renderAssistantMarkdown(streamedAnswer, response.answer, response.sources, response.metrics?.citation_mode)' in javascript
